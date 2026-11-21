@@ -1,0 +1,23 @@
+name: Test Kechuang 50 market data
+on:
+  workflow_dispatch:
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch and validate historical daily data
+        run: python scripts/test_kechuang50.py
+      - name: Upload test outputs even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kechuang50-test-output
+          path: |
+            test_result.json
+            kechuang50_daily.csv
+          if-no-files-found: warn

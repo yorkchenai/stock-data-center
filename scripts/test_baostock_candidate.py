@@ -19,7 +19,10 @@ try:
     while result.next():
         rows.append(dict(zip(result.fields, result.get_row_data())))
     if not rows:
-        raise ValueError("No index history returned")
+        report["query_error_code"] = result.error_code
+        report["query_error_msg"] = result.error_msg
+        report["returned_fields"] = result.fields
+        raise ValueError("No index history returned for sh.000688; candidate unsupported or symbol mismatch")
     dates = [r["date"] for r in rows]
     if dates != sorted(set(dates)):
         raise ValueError("Duplicate or unordered dates")

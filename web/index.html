@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>行情研究室 · 股票技术分析</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./style.css" />
+    <script src="./vendor/lightweight-charts-5.2.0.js" defer></script>
+    <script src="./app.mjs" type="module"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="brand" href="./">行情研究室<span>STOCK DATA CENTER</span></a>
+      <span class="header-note">日线技术分析</span>
+    </header>
+    <main>
+      <form id="query-form" class="query-bar" aria-label="加载历史行情">
+        <label class="symbol-field"
+          >股票 / 指数代码<input
+            id="symbol"
+            name="symbol"
+            value="000688"
+            placeholder="如 600519、sh000001"
+            required
+            maxlength="8"
+            autocomplete="off"
+            spellcheck="false"
+        /></label>
+        <label
+          >类型<select id="kind" name="kind">
+            <option value="auto">自动识别</option>
+            <option value="stock">A 股股票</option>
+            <option value="index">股票指数</option>
+          </select></label
+        >
+        <label
+          >行情开始日期<input type="date" id="start" name="start" required
+        /></label>
+        <label
+          >行情结束日期<input type="date" id="end" name="end" required
+        /></label>
+        <button id="load" class="primary" type="submit">加载历史行情</button>
+        <button id="demo" class="secondary" type="button">重载样本</button>
+      </form>
+      <p id="status" class="status" role="status" aria-live="polite">
+        正在读取真实历史数据…
+      </p>
+      <section class="instrument-summary" aria-label="当前标的">
+        <div class="instrument">
+          <h1 id="instrument-name">科创50</h1>
+          <span id="instrument-code">sh000688 · 指数</span>
+        </div>
+        <div class="quote">
+          <span class="caption">所选交易日收盘</span
+          ><strong id="quote-close">—</strong><span id="quote-change">—</span>
+        </div>
+        <div class="dataset-info">
+          <span id="source-label">来源 —</span
+          ><span id="history-label">历史记录 —</span>
+          <span id="loaded-range">载入范围 —</span>
+        </div>
+      </section>
+      <ol class="analysis-order" aria-label="固定五层分析顺序">
+        <li>价格定位置</li>
+        <li>均线判趋势</li>
+        <li>成交量看配合</li>
+        <li>MACD看动量变化</li>
+        <li>RSI看相对强弱</li>
+      </ol>
+      <div class="workspace">
+        <section class="chart-card" aria-label="五面板同步技术图表">
+          <form
+            id="range-form"
+            class="display-range-form"
+            aria-label="调整已载入历史的显示区间"
+          >
+            <label
+              >显示开始日期<input type="date" id="display-start" required
+            /></label>
+            <label
+              >显示结束日期<input type="date" id="display-end" required
+            /></label>
+            <button type="submit">调整显示区间</button>
+            <span>仅调整已载入数据的视窗</span>
+          </form>
+          <div class="chart-toolbar">
+            <div class="range-controls" aria-label="显示历史区间">
+              <button type="button" data-range="120">近半年</button
+              ><button type="button" data-range="244">近一年</button
+              ><button type="button" data-range="all">全部历史</button>
+            </div>
+            <span id="visible-range" class="visible-range">—</span>
+          </div>
+          <div id="chart-shell">
+            <div
+              id="chart"
+              aria-label="K线、成交量、MACD、RSI和ADX，共用日期轴"
+            ></div>
+            <div id="legends"></div>
+          </div>
+          <div class="chart-footer">
+            <span>滚轮缩放 · 拖动平移 · 十字光标联动</span
+            ><a
+              href="https://www.tradingview.com/"
+              target="_blank"
+              rel="noreferrer"
+              >图表由 TradingView Lightweight Charts™ 提供</a
+            >
+          </div>
+        </section>
+        <aside class="daily-card" aria-label="交易日精确指标">
+          <div class="daily-header">
+            <h2>交易日明细</h2>
+            <span id="selected-date">—</span>
+          </div>
+          <form id="locate-form" class="locate-form">
+            <input
+              type="date"
+              id="locate-date"
+              aria-label="定位交易日"
+              required
+            /><button type="submit">定位</button>
+          </form>
+          <div id="daily-values"></div>
+          <p class="precision-note">
+            数值展示至8位小数，悬停数值查看原始精度。— 表示指标尚无有效值。
+          </p>
+          <details class="data-check">
+            <summary>行情校验与口径</summary>
+            <p id="validation-note">—</p>
+            <p>
+              成交量及 VOL
+              均线单位为手，成交额为元。价格采用不复权口径，MACD柱值为
+              2×(DIF−DEA)。
+            </p>
+          </details>
+        </aside>
+      </div>
+    </main>
+  </body>
+</html>

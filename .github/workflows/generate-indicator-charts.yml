@@ -88,7 +88,12 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           tag="analysis-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          mapfile -t assets < <(rg --files saved-analysis -g '*.zip' -g '*.sha256' -g '*.json')
+          find saved-analysis -type f \( -name '*.zip' -o -name '*.sha256' -o -name '*.json' \) -print0 > release-assets.list
+          mapfile -d '' -t assets < release-assets.list
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "::error::No ZIP, SHA-256 or JSON assets found in saved-analysis"
+            exit 1
+          fi
           printf 'Analysis bundles and per-run records from %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > release-notes.md
           gh release create "$tag" "${assets[@]}" --repo "$GH_REPO" --target "$GITHUB_SHA" --title "$tag" --notes-file release-notes.md --draft --latest=false
           gh release edit "$tag" --repo "$GH_REPO" --draft=false --latest=false

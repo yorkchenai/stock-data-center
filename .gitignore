@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+work/
+# New runs are reproducible artifacts, retained locally, never overwrite legacy data.
+results/sh*_stock/
+results/sz*_stock/
+results/sh*_index/
+results/sz*_index/
+results/run-records/
+results/**/*.zip
+results/**/*.sha256

@@ -1,0 +1,23 @@
+[
+  {
+    "symbol": "sh688981",
+    "kind": "stock",
+    "start": "2025-09-01",
+    "end": "2025-09-08",
+    "resumption_date": "2025-09-09",
+    "reason": "筹划发行A股购买中芯北方少数股权暨关联交易",
+    "verified_on": "2026-11-21",
+    "sources": [
+      {
+        "announcement": "2025-021",
+        "date": "2025-08-30",
+        "url": "https://static.cninfo.com.cn/finalpage/2025-08-30/1224624974.PDF"
+      },
+      {
+        "announcement": "2025-024",
+        "date": "2025-09-09",
+        "url": "https://star.sse.com.cn/disclosure/listedinfo/announcement/c/new/2025-09-09/688981_20250909_2BQ9.pdf"
+      }
+    ]
+  }
+]

@@ -1,25 +1,19 @@
 {
   "symbol": "000688",
-  "tested_at_utc": "2026-11-21T09:57:27.225256+00:00",
+  "tested_at_utc": "2026-11-21T10:11:59.828690+00:00",
   "status": "success",
   "attempted_sources": [
     {
       "source": "Eastmoney historical K-line",
       "url": "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=1.000688&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5%2Cf6&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56%2Cf57%2Cf58%2Cf59%2Cf60%2Cf61&klt=101&fqt=0&beg=20200701&end=20500101",
-      "attempts": 3,
-      "last_error": "RemoteDisconnected('Remote end closed connection without response')"
-    },
-    {
-      "source": "Tencent historical daily K-line",
-      "url": "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000688%2Cday%2C%2C%2C2000%2Cqfq",
       "attempts": 1
     }
   ],
-  "source": "Tencent historical daily K-line",
-  "rows": 1669,
-  "first_date": "2019-12-31",
+  "source": "Eastmoney historical K-line",
+  "rows": 1551,
+  "first_date": "2020-07-01",
   "last_date": "2026-11-20",
   "volume_unit": "provider-reported volume (verify lot convention)",
   "turnover_unit": "CNY if supplied; empty when unavailable",
-  "missing_turnover_rows": 1669
+  "missing_turnover_rows": 0
 }

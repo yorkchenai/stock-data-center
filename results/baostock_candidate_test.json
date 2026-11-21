@@ -1,0 +1,7 @@
+{
+  "source": "BaoStock",
+  "symbol": "sh.000688",
+  "tested_at_utc": "2026-11-21T09:52:46.667968+00:00",
+  "status": "failed",
+  "error": "No index history returned"
+}

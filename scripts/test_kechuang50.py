@@ -66,7 +66,11 @@ def tencent():
     item = data.get("sh000688") or {}
     raw = item.get("day") or []
     if not raw:
-        raise ValueError("Tencent did not return unadjusted daily history")
+        summary = {"top_level_keys": list(payload)[:15], "data_keys": list(data)[:15], "instrument_keys": list(item)[:15], "instrument_preview": str(item)[:1200], "response_preview": str(payload)[:1800]}
+        if os.getenv("FORCE_TENCENT") == "1":
+            with open("tencent_response_diagnostic.json", "w", encoding="utf-8") as diagnostic:
+                json.dump(summary, diagnostic, ensure_ascii=False, indent=2)
+        raise ValueError("Tencent returned no day history; response shape recorded in tencent_response_diagnostic.json")
     rows = []
     for record in raw:
         # Tencent day records typically contain date, open, close, high, low, volume.

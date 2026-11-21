@@ -15,7 +15,7 @@
       <span class="header-note">日线技术分析</span>
     </header>
     <main>
-      <form id="query-form" class="query-bar">
+      <form id="query-form" class="query-bar" aria-label="加载历史行情">
         <label class="symbol-field"
           >股票 / 指数代码<input
             id="symbol"
@@ -35,12 +35,12 @@
           </select></label
         >
         <label
-          >开始日期<input type="date" id="start" name="start" required
+          >行情开始日期<input type="date" id="start" name="start" required
         /></label>
         <label
-          >结束日期<input type="date" id="end" name="end" required
+          >行情结束日期<input type="date" id="end" name="end" required
         /></label>
-        <button id="load" class="primary" type="submit">加载行情</button>
+        <button id="load" class="primary" type="submit">加载历史行情</button>
         <button id="demo" class="secondary" type="button">重载样本</button>
       </form>
       <p id="status" class="status" role="status" aria-live="polite">
@@ -58,6 +58,7 @@
         <div class="dataset-info">
           <span id="source-label">来源 —</span
           ><span id="history-label">历史记录 —</span>
+          <span id="loaded-range">载入范围 —</span>
         </div>
       </section>
       <ol class="analysis-order" aria-label="固定五层分析顺序">
@@ -69,6 +70,20 @@
       </ol>
       <div class="workspace">
         <section class="chart-card" aria-label="五面板同步技术图表">
+          <form
+            id="range-form"
+            class="display-range-form"
+            aria-label="调整已载入历史的显示区间"
+          >
+            <label
+              >显示开始日期<input type="date" id="display-start" required
+            /></label>
+            <label
+              >显示结束日期<input type="date" id="display-end" required
+            /></label>
+            <button type="submit">调整显示区间</button>
+            <span>仅调整已载入数据的视窗</span>
+          </form>
           <div class="chart-toolbar">
             <div class="range-controls" aria-label="显示历史区间">
               <button type="button" data-range="120">近半年</button

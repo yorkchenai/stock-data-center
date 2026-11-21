@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 import pandas as pd
 
 from stock_analysis.indicators import calculate_indicators
-from stock_analysis.web import ROOT, chart_payload, export_demo, load_demo, make_server
+from stock_analysis.web import ROOT, chart_payload, export_demo, load_demo, make_server, main
 
 
 class WebDataTests(TestCase):
@@ -91,6 +91,14 @@ class WebHTTPTests(TestCase):
         cls.server.server_close()
         cls.thread.join()
         cls.temporary.cleanup()
+
+    def test_service_and_cli_default_to_loopback(self):
+        self.assertEqual(self.server.server_address[0], '127.0.0.1')
+        with mock.patch('stock_analysis.web.make_server') as factory, mock.patch('builtins.print'):
+            factory.return_value.serve_forever.side_effect = KeyboardInterrupt
+            main(['--port', '0'])
+        self.assertEqual(factory.call_args.args[:2], ('127.0.0.1', 0))
+        factory.return_value.server_close.assert_called_once()
 
     def test_home_and_offline_demo_api(self):
         with urlopen(self.base) as response:

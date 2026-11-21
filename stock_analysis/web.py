@@ -155,7 +155,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.export_demo:
         destination = export_demo(args.export_demo, load_demo(args.run_dir))
-        print(f"Demo exported to {destination}\nRun: python -m http.server 8765 --directory {destination}")
+        print(f"Demo exported to {destination}\nRun: python -m http.server 8765 --bind 127.0.0.1 --directory {destination}")
         return
     server = make_server(args.host, args.port, args.run_dir, args.output_root)
     print(f"Interactive charts: http://{args.host}:{server.server_port}", flush=True)

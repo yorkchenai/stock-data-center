@@ -10,6 +10,9 @@ const elements = Object.fromEntries(
     "end",
     "load",
     "demo",
+    "range-form",
+    "display-start",
+    "display-end",
     "status",
     "instrument-name",
     "instrument-code",
@@ -17,6 +20,7 @@ const elements = Object.fromEntries(
     "quote-change",
     "source-label",
     "history-label",
+    "loaded-range",
     "visible-range",
     "chart",
     "chart-shell",
@@ -218,9 +222,21 @@ function positionLegends() {
   const parent = elements["chart-shell"].getBoundingClientRect();
   chart.panes().forEach((pane, index) => {
     const node = pane.getHTMLElement();
-    if (node)
+    if (node) {
       legendElements[index].style.top =
         `${node.getBoundingClientRect().top - parent.top + 5}px`;
+      const scale = chart.priceScale("right", index);
+      const top = Math.min(
+        0.65,
+        Math.max(
+          index === 0 ? 0.18 : 0.3,
+          (legendElements[index].offsetHeight + 14) / pane.getHeight(),
+        ),
+      );
+      if (Math.abs(scale.options().scaleMargins.top - top) > 0.005) {
+        scale.applyOptions({ scaleMargins: { top, bottom: 0.1 } });
+      }
+    }
   });
 }
 new ResizeObserver(() => requestAnimationFrame(positionLegends)).observe(
@@ -256,6 +272,7 @@ function showRow(row) {
       ? `原始值 ${value}`
       : "该指标尚无有效值";
   });
+  requestAnimationFrame(positionLegends);
 }
 
 chart.subscribeCrosshairMove((parameter) => {
@@ -271,8 +288,11 @@ chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
   const first = state.rows[Math.max(0, Math.ceil(range.from))];
   const last =
     state.rows[Math.min(state.rows.length - 1, Math.floor(range.to))];
-  if (first && last)
-    elements["visible-range"].textContent = `${first.date} — ${last.date}`;
+  if (first && last) {
+    elements["visible-range"].textContent = `显示 ${first.date} — ${last.date}`;
+    elements["display-start"].value = first.date;
+    elements["display-end"].value = last.date;
+  }
 });
 
 function setRange(count) {
@@ -314,8 +334,17 @@ function displayDataset(dataset) {
     `来源 ${{ repository_csv: "仓库真实历史样本", local_csv: "已保存行情", eastmoney: "东方财富", tencent: "腾讯" }[dataset.source] || dataset.source} · 不复权`;
   elements["history-label"].textContent =
     `已载入 ${dataset.rows.length.toLocaleString()} 个交易日`;
+  const firstDate = dataset.rows[0].date;
+  const lastDate = dataset.rows.at(-1).date;
+  elements["loaded-range"].textContent = `载入范围 ${firstDate} — ${lastDate}`;
+  for (const input of [elements["display-start"], elements["display-end"]]) {
+    input.min = firstDate;
+    input.max = lastDate;
+  }
   elements.symbol.readOnly = !dataset.live_analysis;
   elements.kind.disabled = !dataset.live_analysis;
+  elements.start.disabled = !dataset.live_analysis;
+  elements.end.disabled = !dataset.live_analysis;
   const check = dataset.validation;
   elements["validation-note"].textContent = check
     ? `已确认停牌 ${check.confirmed_suspension_sessions?.length || 0} 日；未核实缺口 ${check.unverified_missing_sessions?.length ?? check.missing_sessions.length} 日。股票完整性以运行报告为准。`
@@ -325,8 +354,8 @@ function displayDataset(dataset) {
   requestAnimationFrame(positionLegends);
   setStatus(
     dataset.live_analysis
-      ? "移动光标查看逐日数值；“全部历史”显示整个载入区间。"
-      : "离线演示可切换日期区间；更换股票代码请启动 Python 交互服务。",
+      ? "已载入历史。上方可重新获取行情，下方可调整显示区间。"
+      : "离线样本已载入，可在图表上方调整显示区间。获取其他行情请启动 Python 交互服务。",
   );
 }
 
@@ -337,12 +366,12 @@ async function loadDemo() {
   return response.json();
 }
 
-async function runLoad(action) {
+async function runLoad(action, message = "正在读取已保存样本，请稍候…") {
   if (state.busy) return;
   state.busy = true;
   elements.load.disabled = true;
   elements.demo.disabled = true;
-  setStatus("正在获取行情并读取指标结果，请稍候…", "loading");
+  setStatus(message, "loading");
   try {
     await action();
   } catch (error) {
@@ -352,12 +381,19 @@ async function runLoad(action) {
     );
   } finally {
     state.busy = false;
-    elements.load.disabled = false;
+    elements.load.disabled = !state.dataset?.live_analysis;
     elements.demo.disabled = false;
   }
 }
 
 function showDateInterval(start, end) {
+  if (!state.rows.length) throw new Error("请先载入历史行情");
+  if (start > end) throw new Error("显示开始日期不能晚于结束日期");
+  if (start < state.rows[0].date || end > state.rows.at(-1).date) {
+    throw new Error(
+      "显示区间超出已载入历史，请用上方“加载历史行情”扩展载入范围",
+    );
+  }
   const rows = state.rows.filter((row) => row.date >= start && row.date <= end);
   if (!rows.length) throw new Error("所选区间没有交易记录，请调整日期");
   chart
@@ -365,8 +401,20 @@ function showDateInterval(start, end) {
     .setVisibleRange({ from: rows[0].date, to: rows.at(-1).date });
   showRow(rows.at(-1));
 
-  setStatus("显示区间已更新，指标沿用载入历史的计算结果。");
+  setStatus("显示区间已调整，继续使用已载入的行情和指标。");
 }
+
+elements["range-form"].addEventListener("submit", (event) => {
+  event.preventDefault();
+  try {
+    showDateInterval(
+      elements["display-start"].value,
+      elements["display-end"].value,
+    );
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+});
 
 elements["query-form"].addEventListener("submit", (event) => {
   event.preventDefault();
@@ -379,19 +427,6 @@ elements["query-form"].addEventListener("submit", (event) => {
     };
     if (options.start > options.end)
       throw new Error("开始日期不能晚于结束日期");
-    const instrument = state.dataset?.instrument;
-    const sameInstrument =
-      instrument &&
-      options.symbol.toLowerCase() === instrument.market + instrument.code &&
-      options.kind === instrument.kind;
-    if (
-      sameInstrument &&
-      options.start >= state.dataset.requested_start &&
-      options.end <= state.dataset.requested_end
-    ) {
-      showDateInterval(options.start, options.end);
-      return;
-    }
     if (!state.dataset?.live_analysis)
       throw new Error("离线样本仅支持已载入历史，请启动Python服务获取其他区间");
     const response = await fetch("./api/analyze", {
@@ -402,7 +437,7 @@ elements["query-form"].addEventListener("submit", (event) => {
     const result = await response.json();
     if (!response.ok) throw new Error(`行情加载失败：${result.error}`);
     displayDataset(result);
-  });
+  }, "正在从行情源加载历史并读取指标结果，请稍候…");
 });
 elements.demo.addEventListener("click", () =>
   runLoad(async () => displayDataset(await loadDemo())),

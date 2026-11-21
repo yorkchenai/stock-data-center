@@ -13,7 +13,12 @@ python -m stock_analysis.web --port 8765
 
 浏览器打开 `http://127.0.0.1:8765/`。默认载入 `results/000688_daily.csv` 的全部1,551条真实日线，区间为2020-07-01至2026-11-20。演示指标由第一阶段 `calculate_indicators` 计算，页面直接读取结果。初始显示近一年，“全部历史”可以查看本次载入区间的完整记录。显示区间可缩放和平移，五个面板共用同一时间轴和十字光标。
 
-输入股票/指数代码、类型和日期后选择“加载行情”。新代码或超出载入范围的请求由 Python 调用既有 `run_analysis`，继续产生原有行情CSV、逐日指标CSV/JSON、五张PNG、ZIP及运行记录。相同代码在已载入区间内切换日期仅改变视窗，沿用已计算指标和预热历史。切换历史请求的起点会改变递推指标种子，计算口径与第一阶段一致。
+页面分别提供两种操作。
+
+- **加载历史行情**使用上方的代码、类型和行情日期，明确向数据源发起请求，调用既有 `run_analysis` 并生成原有CSV、JSON、PNG、ZIP及运行记录。即使代码和区间相同，点击该按钮也会重新加载。切换载入起点会改变递推指标种子，计算口径与第一阶段一致。
+- **调整显示区间**使用图表上方的显示日期，只改变已载入数据的视窗，保留原有行情、指标及预热结果。滚轮、拖动和快捷区间按钮也只调整视窗。显示日期超出已载入范围时会提示使用上方操作扩展历史。
+
+页面分别标注载入范围和当前显示范围。日期输入本身不会自动获取行情。
 
 页面可通过“定位”跳到指定交易日。鼠标移动到任一面板时，所有图例和交易日明细都显示该日的现有数值。均线和指标图例的复选框控制显示。初始缺失指标以图表留白和明细“—”显示，原始精度可在数值悬停提示中查看。遇到休市、停牌或范围外日期，定位操作显示提示。
 
@@ -35,16 +40,16 @@ python -m stock_analysis.web --run-dir results/sh600519_stock/<运行目录> --p
 
 ```bash
 python -m stock_analysis.web --export-demo work/interactive-demo
-python -m http.server 8765 --directory work/interactive-demo
+python -m http.server 8765 --bind 127.0.0.1 --directory work/interactive-demo
 ```
 
 打开 `http://127.0.0.1:8765/` 查看。导出目录包含网页、图表库、许可文件及真实指标数据，可复制到其他机器。页面采用ES modules和fetch，需通过HTTP服务访问。纯静态演示支持查看、定位及区间切换，更换股票代码由上述Python交互服务提供。导出目标必须为新的独立目录。
 
-PR检查的Actions页面还提供 `interactive-demo-<run_id>-<run_attempt>` Artifact，下载解压后以 `python -m http.server 8765 --directory <解压目录>` 打开。Artifact请求保留30天。
+PR检查的Actions页面还提供 `interactive-demo-<run_id>-<run_attempt>` Artifact，下载解压后以 `python -m http.server 8765 --bind 127.0.0.1 --directory <解压目录>` 打开。Artifact请求保留30天。
 
 ### 技术与验证
 
-采用 Apache-2.0 的 TradingView Lightweight Charts 5.2.0，使用一个图表的五个原生pane，共享日期轴与游标。前端为原生HTML/CSS/ES modules，服务使用Python标准库HTTP server。库的固定版本、许可和NOTICE保存在 `web/vendor/`，页面保留TradingView归属链接。此入口面向本地研究使用，默认监听127.0.0.1。
+采用 Apache-2.0 的 TradingView Lightweight Charts 5.2.0，使用一个图表的五个原生pane，共享日期轴与游标。前端为原生HTML/CSS/ES modules，服务使用Python标准库HTTP server。库的固定版本、许可和NOTICE保存在 `web/vendor/`，页面保留TradingView归属链接。Python交互服务默认只绑定 `127.0.0.1`，仅供本地个人研究使用。该标准库HTTP服务没有公网部署所需的身份验证、TLS和访问控制，不适合直接暴露到公网。静态演示的启动命令也显式绑定127.0.0.1。
 
 ```bash
 python -m unittest discover -s tests -v

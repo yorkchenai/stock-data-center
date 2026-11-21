@@ -18,7 +18,7 @@ EASTMONEY_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get?" + urlli
 })
 # Tencent's historical daily endpoint; returned fields vary by instrument.
 TENCENT_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?" + urllib.parse.urlencode({
-    "param": "sh000688,day,,,2000"
+    "param": "sh000688,day,,,2000,qfq"
 })
 result = {"symbol": SYMBOL, "tested_at_utc": datetime.now(timezone.utc).isoformat(),
           "status": "failed", "attempted_sources": []}
@@ -64,7 +64,7 @@ def tencent():
     payload = request_json(TENCENT_URL)
     data = payload.get("data") or {}
     item = data.get("sh000688") or {}
-    raw = item.get("day") or []
+    raw = item.get("day") or item.get("qfqday") or []
     if not raw:
         summary = {"top_level_keys": list(payload)[:15], "data_keys": list(data)[:15], "instrument_keys": list(item)[:15], "instrument_preview": str(item)[:1200], "response_preview": str(payload)[:1800]}
         if os.getenv("FORCE_TENCENT") == "1":

@@ -1,0 +1,44 @@
+{
+  "source": "AKShare index_zh_daily_tx (Tencent)",
+  "symbol": "sh000688",
+  "tested_at_utc": "2026-11-21T09:57:35.647563+00:00",
+  "status": "price_comparison_passed",
+  "returned_columns": [
+    "date",
+    "open",
+    "close",
+    "high",
+    "low",
+    "volume",
+    "turnover",
+    "amount"
+  ],
+  "raw_rows": 1668,
+  "period_rows": 1551,
+  "first_date": "2020-07-01",
+  "last_date": "2026-11-20",
+  "null_counts": {
+    "open": 0,
+    "high": 0,
+    "low": 0,
+    "close": 0,
+    "volume": 0,
+    "amount": 0
+  },
+  "zero_amount_rows": 0,
+  "baseline_columns": [
+    "date",
+    "open",
+    "close",
+    "high",
+    "low",
+    "volume_lots",
+    "turnover_cny"
+  ],
+  "overlap_rows": 1551,
+  "missing_baseline_dates": [],
+  "open_max_abs_diff": 0.009999999999990905,
+  "high_max_abs_diff": 0.009999999999990905,
+  "low_max_abs_diff": 0.009999999999990905,
+  "close_max_abs_diff": 0.009999999999990905
+}

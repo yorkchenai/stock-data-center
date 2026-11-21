@@ -76,7 +76,9 @@ def tencent():
         values = [record[name] for name in required[1:]]
         if any(__import__("pandas").isna(value) for value in values):
             raise ValueError("Tencent returned missing OHLCV/amount on " + date)
-        rows.append([date] + [str(value) for value in values])
+        op, cl, hi, lo, volume_shares, amount_cny = values
+        # Tencent volume is shares; CSV volume_lots is 100-share lots.
+        rows.append([date, str(op), str(cl), str(hi), str(lo), str(float(volume_shares) / 100), str(amount_cny)])
     rows.sort(key=lambda row: row[0])
     if not rows or any(float(row[6]) <= 0 for row in rows):
         raise ValueError("Tencent returned empty history or invalid amount")
@@ -102,8 +104,8 @@ for source, url, fetcher in sources:
                 writer.writerows(rows)
             result.update({"status": "success", "source": source, "rows": len(rows),
                            "first_date": rows[0][0], "last_date": rows[-1][0],
-                           "volume_unit": "provider-reported volume (verify lot convention)",
-                           "turnover_unit": "CNY if supplied; empty when unavailable",
+                           "volume_unit": "lots (100 shares); Tencent shares divided by 100",
+                           "turnover_unit": "CNY yuan",
                            "missing_turnover_rows": sum(not r[6] for r in rows)})
             break
         except Exception as exc:

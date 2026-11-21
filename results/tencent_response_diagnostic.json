@@ -1,0 +1,15 @@
+{
+  "top_level_keys": [
+    "code",
+    "msg",
+    "data"
+  ],
+  "data_keys": [
+    "sh000688"
+  ],
+  "instrument_keys": [
+    "version"
+  ],
+  "instrument_preview": "{'version': '16'}",
+  "response_preview": "{'code': 1, 'msg': 'bad params', 'data': {'sh000688': {'version': '16'}}}"
+}

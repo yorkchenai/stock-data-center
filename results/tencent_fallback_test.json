@@ -1,13 +1,13 @@
 {
   "symbol": "000688",
-  "tested_at_utc": "2026-11-21T09:45:57.888649+00:00",
+  "tested_at_utc": "2026-11-21T09:48:05.248622+00:00",
   "status": "failed",
   "attempted_sources": [
     {
       "source": "Tencent historical daily K-line",
       "url": "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000688%2Cday%2C%2C%2C2000",
       "attempts": 3,
-      "last_error": "ValueError('Tencent did not return unadjusted daily history')"
+      "last_error": "ValueError('Tencent returned no day history; response shape recorded in tencent_response_diagnostic.json')"
     }
   ],
   "error": "All data sources failed; inspect attempted_sources"

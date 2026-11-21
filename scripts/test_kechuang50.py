@@ -1,4 +1,5 @@
 import csv
+import os
 import json
 import sys
 import time
@@ -77,10 +78,13 @@ def tencent():
     return check_rows(rows)
 
 
-for source, url, fetcher in [
+sources = [
     ("Eastmoney historical K-line", EASTMONEY_URL, eastmoney),
     ("Tencent historical daily K-line", TENCENT_URL, tencent),
-]:
+]
+if os.getenv("FORCE_TENCENT") == "1":
+    sources = [sources[1]]
+for source, url, fetcher in sources:
     attempt_record = {"source": source, "url": url}
     result["attempted_sources"].append(attempt_record)
     for attempt in range(1, 4):

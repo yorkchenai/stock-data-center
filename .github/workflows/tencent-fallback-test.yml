@@ -24,17 +24,20 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tencent-diagnostic
-          path: test_result.json
+          path: |
+            test_result.json
+            tencent_response_diagnostic.json
           if-no-files-found: warn
       - name: Publish isolated Tencent test result
         if: always()
         run: |
           mkdir -p results
           if [ -f test_result.json ]; then cp test_result.json results/tencent_fallback_test.json; fi
+          if [ -f tencent_response_diagnostic.json ]; then cp tencent_response_diagnostic.json results/tencent_response_diagnostic.json; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if [ ! -f results/tencent_fallback_test.json ]; then echo 'No diagnostic JSON produced'; exit 1; fi
-          git add results/tencent_fallback_test.json
+          git add results/tencent_fallback_test.json results/tencent_response_diagnostic.json 2>/dev/null || git add results/tencent_fallback_test.json
           if ! git diff --cached --quiet; then
             git commit -m "test: Tencent fallback result [skip ci]"
             for attempt in 1 2 3; do

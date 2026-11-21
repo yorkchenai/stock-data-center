@@ -1,14 +1,19 @@
 {
   "symbol": "000688",
-  "tested_at_utc": "2026-11-21T09:48:05.248622+00:00",
-  "status": "failed",
+  "tested_at_utc": "2026-11-21T09:50:02.251581+00:00",
+  "status": "success",
   "attempted_sources": [
     {
       "source": "Tencent historical daily K-line",
-      "url": "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000688%2Cday%2C%2C%2C2000",
-      "attempts": 3,
-      "last_error": "ValueError('Tencent returned no day history; response shape recorded in tencent_response_diagnostic.json')"
+      "url": "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000688%2Cday%2C%2C%2C2000%2Cqfq",
+      "attempts": 1
     }
   ],
-  "error": "All data sources failed; inspect attempted_sources"
+  "source": "Tencent historical daily K-line",
+  "rows": 1669,
+  "first_date": "2019-12-31",
+  "last_date": "2026-11-20",
+  "volume_unit": "provider-reported volume (verify lot convention)",
+  "turnover_unit": "CNY if supplied; empty when unavailable",
+  "missing_turnover_rows": 1669
 }

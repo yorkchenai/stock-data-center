@@ -1,0 +1,35 @@
+name: On-demand stock fetch
+on:
+  push:
+    paths:
+      - 'requests/*.json'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: stock-fetch
+  cancel-in-progress: false
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch market data
+        run: python scripts/test_kechuang50.py
+      - name: Commit result
+        run: |
+          mkdir -p results
+          cp kechuang50_daily.csv results/000688_daily.csv
+          cp test_result.json results/000688_result.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/000688_daily.csv results/000688_result.json
+          if ! git diff --cached --quiet; then
+            git commit -m "data: fetch 000688 on demand"
+            git push
+          fi

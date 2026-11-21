@@ -1,0 +1,12 @@
+{
+  "calendar": "exchange_calendars:XSHG",
+  "calendar_is_independent": true,
+  "start": "2020-07-01",
+  "end": "2026-11-20",
+  "expected_sessions": 1551,
+  "observed_unique_dates": 1551,
+  "missing_sessions": [],
+  "unexpected_dates": [],
+  "calendar_match": true,
+  "caveat": "Calendar comparison does not independently verify price, volume, or index-specific suspension rules."
+}

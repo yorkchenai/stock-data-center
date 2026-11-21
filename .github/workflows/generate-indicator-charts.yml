@@ -4,24 +4,92 @@ on:
     paths:
       - 'chart_requests/*.json'
   workflow_dispatch:
+    inputs:
+      symbol:
+        description: Stock or index code, e.g. 600519 or sh000001
+        required: true
+        default: '600519'
+      kind:
+        description: Instrument type
+        type: choice
+        options: [auto, stock, index]
+        default: auto
+      start:
+        description: Start date YYYY-MM-DD
+        default: '2025-01-01'
+        required: true
+      end:
+        description: End date YYYY-MM-DD, empty uses yesterday in Shanghai
+        required: false
+      persist:
+        description: Retain the result as a GitHub Release asset
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
-  charts:
+  analyze:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install analysis dependencies
-        run: python -m pip install -r requirements.txt
-      - name: Generate five charts from existing validated CSV
-        run: python scripts/generate_indicators.py
-      - name: Preserve isolated outputs
+      - run: python -m pip install -r requirements.txt
+      - name: Analyze requested instrument
+        env:
+          IS_MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+          SYMBOL: ${{ inputs.symbol }}
+          KIND: ${{ inputs.kind }}
+          START_DATE: ${{ inputs.start }}
+          END_DATE: ${{ inputs.end }}
+        run: |
+          if [ "$IS_MANUAL" = "true" ]; then
+            args=("$SYMBOL" --kind "$KIND" --start "$START_DATE" --output-root work/analysis)
+            if [ -n "$END_DATE" ]; then args+=(--end "$END_DATE"); fi
+          else
+            args=(000688 --input results/000688_daily.csv --start 2020-07-01 --output-root work/analysis)
+          fi
+          python -m stock_analysis "${args[@]}"
+      - name: Save bundles and run records
+        id: upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: indicator-charts-000688
-          path: results/sh000688_index/
+          name: analysis-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            work/analysis/**/*.zip
+            work/analysis/**/*.sha256
+            work/analysis/run-records/*.json
+          retention-days: 30
           if-no-files-found: error
+      - name: Show download location
+        if: always() && steps.upload.outcome == 'success'
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          echo "[Download analysis bundles and run records]($ARTIFACT_URL)" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Artifacts request 30-day retention, subject to repository limits. Extract the ZIP and open preview.html.' >> "$GITHUB_STEP_SUMMARY"
+  persist:
+    needs: analyze
+    if: inputs.persist
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: analysis-${{ github.run_id }}-${{ github.run_attempt }}
+          path: saved-analysis
+      - name: Save long-term Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="analysis-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mapfile -t assets < <(rg --files saved-analysis -g '*.zip' -g '*.sha256' -g '*.json')
+          printf 'Analysis bundles and per-run records from %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > release-notes.md
+          gh release create "$tag" "${assets[@]}" --repo "$GH_REPO" --target "$GITHUB_SHA" --title "$tag" --notes-file release-notes.md --draft --latest=false
+          gh release edit "$tag" --repo "$GH_REPO" --draft=false --latest=false
+          echo "[Long-term analysis archive](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${tag})" >> "$GITHUB_STEP_SUMMARY"

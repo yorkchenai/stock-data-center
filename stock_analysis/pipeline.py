@@ -5,11 +5,13 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 import argparse
 import json
+import os
 import tempfile
 
 import pandas as pd
 
 from .charts import CHART_FILES, generate_charts
+from .artifacts import save_run
 from .data import FetchError, fetch_daily
 from .indicators import calculate_indicators
 from .symbols import resolve_symbol
@@ -27,9 +29,17 @@ def run_analysis(instrument, start, end, output_root=Path("results"), input_csv=
     parent.mkdir(parents=True, exist_ok=True)
     prefix = datetime.now(ZoneInfo("UTC")).strftime("%Y%m%dT%H%M%SZ_")
     out = Path(tempfile.mkdtemp(prefix=prefix, dir=parent))
-    report = {"status": "running", "instrument": asdict(instrument), "start": start, "end": end,
+    report = {"status": "running", "schema_version": 1, "run_id": instrument.key + "_" + out.name,
+              "started_at_utc": datetime.now(ZoneInfo("UTC")).isoformat(),
+              "requested_source": "local_csv" if input_csv is not None else source,
+              "instrument": asdict(instrument), "start": start, "end": end,
               "output_dir": str(out.resolve()), "analysis_layers": ANALYSIS_LAYERS,
               "supplementary_indicator": "ADX14", "adjustment": "none"}
+    if os.getenv("GITHUB_RUN_ID"):
+        report["github_run_url"] = (
+            f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
+            f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+        )
     try:
         def validate(frame):
             audit = audit_calendar(frame, instrument, start, end)
@@ -62,7 +72,7 @@ def run_analysis(instrument, start, end, output_root=Path("results"), input_csv=
             report["attempts"] = exc.attempts
         raise
     finally:
-        (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+        save_run(report, out, output_root)
     return indicators, report
 
 

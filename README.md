@@ -58,13 +58,33 @@ python -m unittest discover -s tests -v
 | `charts/03_macd.png` | DIF、DEA、两倍柱值 |
 | `charts/04_rsi.png` | RSI6、RSI12、RSI14、RSI24 和 30/50/70 参考线 |
 | `charts/05_adx.png` | ADX14、+DI、−DI |
-| `report.json` | 标的、请求区间、实际区间、来源尝试、日历缺口、五层顺序、文件清单及运行状态 |
+| `report.json` | schema_version=1、run_id、标的、区间、来源尝试、停牌分类、五层顺序、运行状态及保存位置 |
+| `record.json` | 单次运行简要记录，包含代码、请求/实际来源、区间、状态、时间、输出位置和 Actions 运行链接 |
+| `preview.html` | 离线查看五张图和校验结果，图像内嵌，数据文件可从解压目录打开 |
+| `manifest.json` | ZIP 内容文件的大小与 SHA-256 校验清单 |
 
-新运行目录默认被 Git 忽略。它们保留在执行机器，可在 CI 产物中下载或在自己的环境重跑。失败运行保存 `status=failed` 的报告，可能有中间文件，使用前检查状态。
+每次运行自动生成 `<市场代码>_<类型>_<运行目录>.zip` 及 `.zip.sha256`，位于该标的目录，ZIP 包含表中全部文件。独立简要记录另外存入 `<output-root>/run-records/<run_id>.json`，并发运行各自写记录。ZIP 先写临时文件，再原子发布。取数失败时也打包已有诊断，记录 `status=failed`；打包失败返回非零状态并记录 `artifact_error`，清除未完整发布的包。新产物及运行记录由 Git 忽略。
+
+### 保存与下载
+
+| 保存位置 | 生命周期与用途 | 访问方式 |
+| --- | --- | --- |
+| 本地或云端工作目录、`work/`、系统临时目录 | 取决于执行环境保留期限，运行结束后应导出需要的包 | CLI 输出中的 `artifacts.archive`，解压后打开 `preview.html` |
+| GitHub Actions Artifacts | 工作流请求保留30天，受仓库保留上限约束，到期或运行被删除后可能消失 | Actions 运行页底部 Artifacts 和运行 Summary 中的下载链接 |
+| 自有持久化目录 | 由所选磁盘、备份和保留策略维护 | 使用 `--output-root /mnt/stock-archives`，或将 ZIP、校验文件和记录复制到自有存储 |
+| GitHub Release 附件 | 独立于 Actions Artifacts 到期策略，持续保存至有人删除相关 Release 或附件 | 手动工作流勾选 `persist` 后，在 Releases 下载 ZIP、校验文件和运行记录 |
+
+在 Actions 中选择 **Generate stock indicator charts → Run workflow**，选择目标分支，输入 `symbol`、`kind`、`start`、`end`。`end` 为空时使用上海时区昨天。默认生成临时 Actions Artifact；需要长期保留时勾选 `persist`。主分析任务只有仓库读取权限，长期保存任务单独使用 `contents: write`。每次长期保存使用唯一 `analysis-<run_id>-<run_attempt>` 标签并指向该次代码提交，先上传 Draft Release，成功后发布，保持仓库现有访问范围。该工作流复用了原工作流文件，在 PR 合并前也可选择分支运行。
+
+PR 测试工作流会用仓库内真实科创50历史生成 `analysis-sample-<run_id>-<run_attempt>` 下载产物。原 `chart_requests` 推送入口继续离线生成科创50产物。
+
+下载 Artifact 需要登录有仓库读取权限的 GitHub 账号。下载后先解压 Actions 外层包，再解压其中的单次运行 ZIP，打开 `preview.html`。校验包可执行 `sha256sum -c <包名>.zip.sha256`。文件逐项校验依据包内 `manifest.json`。移动包后，记录中的绝对路径保留原运行位置，包内相对路径继续可用。
+
+Artifacts 下载及保留规则见 [GitHub 文档](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts)。Release 的附件与访问规则见 [GitHub 文档](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)。本次 Release 上传路径尚未实际执行验收，当前执行环境的 GitHub CLI API 请求返回 Forbidden。
 
 东方财富使用 `secid=1.<沪市代码>` 或 `0.<深市代码>`，日线 `klt=101`，不复权 `fqt=0`。腾讯使用 AKShare `stock_zh_a_hist_tx(..., adjust="")`，该函数支持股票和指数，按年份取历史，返回成交量为股、成交额为元。这里固定 AKShare 1.20.65 以固定该字段契约，成交量除以100转换为手。此前 `index_zh_daily_tx` 固定使用前复权参数，本次使用显式不复权接口统一主备口径。单次运行采用一个来源的完整序列。
 
-数据校验拒绝缺字段、重复日期、非法日期、非有限值、非正价格、OHLC 上下界错误、负量额及非交易日。缺口单独记录，保留停牌零成交数据，不补造行。XSHG 日历作为沪深交易日参考，比较完整请求区间。指数内部交易日缺口触发备用源；首尾缺口可能来自发布日期或截断，报告保留。股票缺口可能来自停牌、上市日期或数据缺失，未经上市及停牌资料核对时，股票的 `completeness_verified` 始终为 false，即使日期完全匹配。
+数据校验拒绝缺字段、重复日期、非法日期、非有限值、非正价格、OHLC 上下界错误、负量额及非交易日。缺口单独记录，保留停牌零成交数据，不补造行。XSHG 日历作为沪深交易日参考，比较完整请求区间。指数内部交易日缺口触发备用源；首尾缺口可能来自发布日期或截断，报告保留。报告保留全部 `missing_sessions`，并按有来源的证据登记拆分为 `confirmed_suspension_sessions` 和 `unverified_missing_sessions`。`stock_analysis/suspensions.json` 当前仅登记核实过的中芯国际 2025-09-01 至 2025-09-08 停牌区间和 2025-09-09 复牌日，记录两份公告链接及核实日期。其他日期、其他代码的缺口继续保持未核实。停牌期间若来源返回行情，会记录 `suspension_data_conflicts`，不自动删除原始行。`active_session_dates_match` 仅表示本次日期与已登记停牌证据一致。股票的 `completeness_verified` 继续为 false，因为上市及全部停牌资料覆盖尚未完整建立。核实证据见 [补充验收记录](docs/pr1-followup-validation.md)。
 
 ## 指标口径与初始化
 
@@ -92,6 +112,7 @@ TR 为 high−low、abs(high−前close)、abs(low−前close) 的最大值。�
 - `indicators.py` 的 `calculate_indicators(frame)` 返回独立 DataFrame，可供未来交互式图表使用。
 - `charts.py` 消费已计算的 DataFrame，不含指标计算公式。
 - `pipeline.py` 串联入口、独立输出和报告。
+- `artifacts.py` 保存 ZIP、离线预览、文件校验清单和独立运行记录。
 
 ```python
 import pandas as pd
@@ -103,6 +124,8 @@ indicators = calculate_indicators(frame)
 # 也可直接获得在线分析的 DataFrame 和运行报告
 indicators, report = run_analysis(resolve_symbol("600519"), "2025-01-01", "2026-11-20")
 ```
+
+未来交互式图表可按 `date` 将 `indicators.json` 中的 OHLC/MA、volume/VOL、DIF/DEA/MACD_hist、RSI、ADX/DI 列分组，同步五图日期和游标。字段含义及单位见上表，日期为唯一升序键，初始未定义指标为 null，停牌日保留缺口。前端读取已计算数值并控制展示区间，计算公式继续由指标模块维护。`report.json` 的 `schema_version=1` 标识数据契约。
 
 报告固定保留以下顺序，后续分析与回测模块可据此扩展。
 

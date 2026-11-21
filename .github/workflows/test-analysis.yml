@@ -6,6 +6,7 @@ on:
       - 'tests/**'
       - 'scripts/generate_indicators.py'
       - 'requirements.txt'
+      - '.github/workflows/generate-indicator-charts.yml'
       - '.github/workflows/test-analysis.yml'
   workflow_dispatch:
 permissions:
@@ -20,3 +21,22 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
+      - name: Generate downloadable real-history sample
+        run: python -m stock_analysis 000688 --input results/000688_daily.csv --start 2020-07-01 --end 2026-11-20 --output-root work/ci-analysis
+      - name: Upload sample bundle and records
+        if: always()
+        id: sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-sample-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            work/ci-analysis/**/*.zip
+            work/ci-analysis/**/*.sha256
+            work/ci-analysis/run-records/*.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Show sample download
+        if: always() && steps.sample.outcome == 'success'
+        env:
+          ARTIFACT_URL: ${{ steps.sample.outputs.artifact-url }}
+        run: echo "[Download analysis sample]($ARTIFACT_URL)" >> "$GITHUB_STEP_SUMMARY"

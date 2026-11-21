@@ -1,4 +1,6 @@
 """Strict OHLCV normalization and independent mainland session comparison."""
+import json
+from pathlib import Path
 import numpy as np
 import pandas as pd
 
@@ -47,14 +49,27 @@ def audit_calendar(frame, instrument, start, end):
     unexpected = sorted(actual - expected)
     first, last = min(actual), max(actual)
     interior = [day for day in missing if first <= day <= last]
+    evidence = json.loads(Path(__file__).with_name("suspensions.json").read_text(encoding="utf-8"))
+    relevant = [item for item in evidence if item["symbol"] == instrument.symbol
+                and item["kind"] == instrument.kind and item["start"] <= end and item["end"] >= start]
+    suspended = {day for day in expected if any(item["start"] <= day <= item["end"] for item in relevant)}
+    confirmed = sorted(set(missing) & suspended)
+    unverified = sorted(set(missing) - suspended)
+    suspension_conflicts = sorted(actual & suspended)
     if unexpected:
         raise ValueError(f"Non-session dates returned: {unexpected}")
     return {
         "calendar": "exchange_calendars:XSHG", "calendar_version": xcals.__version__,
-        "calendar_scope": "Mainland session reference, excludes stock-specific suspension/listing history",
+        "calendar_scope": "Mainland sessions plus cited suspension exceptions; full stock listing/suspension coverage unverified",
         "expected_sessions": len(expected), "observed_sessions": len(actual),
         "missing_sessions": missing, "interior_missing_sessions": interior,
+        "confirmed_suspension_sessions": confirmed,
+        "unverified_missing_sessions": unverified,
+        "suspension_evidence": relevant,
+        "suspension_data_conflicts": suspension_conflicts,
+        "expected_active_sessions": len(expected - suspended),
+        "active_session_dates_match": not unverified and not suspension_conflicts,
         "unexpected_dates": unexpected, "calendar_match": not missing,
         "completeness_verified": instrument.kind == "index" and not missing,
-        "note": "Missing dates can reflect IPO dates, suspensions or provider truncation. No rows are filled. Stock completeness needs listing/suspension data.",
+        "note": "Only cited suspension intervals are classified as confirmed. Other gaps remain unverified. No rows are filled. Stock completeness also needs listing/suspension coverage and source verification.",
     }

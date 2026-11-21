@@ -1,0 +1,10 @@
+{
+  "rows": 1551,
+  "first_date": "2020-07-01",
+  "last_date": "2026-11-20",
+  "basic_integrity_pass": true,
+  "issues": [],
+  "exchange_calendar_verified": false,
+  "volume_unit_verified": false,
+  "note": "Trading-day completeness requires an independent SSE trading calendar; source unit conventions require independent confirmation."
+}

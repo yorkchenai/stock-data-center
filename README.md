@@ -2,6 +2,57 @@
 
 A 股股票和主要指数的日线数据、技术指标与静态图表分析引擎。
 
+## 交互式技术分析界面
+
+从仓库根目录启动本地服务，运行时使用已有 Python 依赖。图表库随仓库保存，启动科创50演示可离线完成，无需 Node 或前端构建步骤。
+
+```bash
+python -m pip install -r requirements.txt
+python -m stock_analysis.web --port 8765
+```
+
+浏览器打开 `http://127.0.0.1:8765/`。默认载入 `results/000688_daily.csv` 的全部1,551条真实日线，区间为2020-07-01至2026-11-20。演示指标由第一阶段 `calculate_indicators` 计算，页面直接读取结果。初始显示近一年，“全部历史”可以查看本次载入区间的完整记录。显示区间可缩放和平移，五个面板共用同一时间轴和十字光标。
+
+输入股票/指数代码、类型和日期后选择“加载行情”。新代码或超出载入范围的请求由 Python 调用既有 `run_analysis`，继续产生原有行情CSV、逐日指标CSV/JSON、五张PNG、ZIP及运行记录。相同代码在已载入区间内切换日期仅改变视窗，沿用已计算指标和预热历史。切换历史请求的起点会改变递推指标种子，计算口径与第一阶段一致。
+
+页面可通过“定位”跳到指定交易日。鼠标移动到任一面板时，所有图例和交易日明细都显示该日的现有数值。均线和指标图例的复选框控制显示。初始缺失指标以图表留白和明细“—”显示，原始精度可在数值悬停提示中查看。遇到休市、停牌或范围外日期，定位操作显示提示。
+
+五面板依次为价格与K线/MA、成交量/VOL、MACD、RSI及独立补充ADX。固定五层分析顺序显示在图表上方，ADX单独标识。
+
+- `volume_lots`、VOL5、VOL10均直接使用后端手数，界面统一标注“手”。
+- MACD、RSI、ADX和各均线直接读取后端逐日结果，前端仅适配图表数据及显示格式。
+- 未预热值从JSON null映射为有日期的空白点，数值0保持为0。
+
+### 复用已有指标文件
+
+```bash
+python -m stock_analysis.web --run-dir results/sh600519_stock/<运行目录> --port 8765
+```
+
+指定目录需要成功的 `report.json`，以及完整的 `indicators.json` 或 `indicators.csv`。优先读取JSON，缺少JSON时读取CSV；该路径直接复用已保存指标。需要第一阶段新运行目录中的完整字段，包括RSI12和VOL5/10。
+
+### 下载或导出真实数据演示
+
+```bash
+python -m stock_analysis.web --export-demo work/interactive-demo
+python -m http.server 8765 --directory work/interactive-demo
+```
+
+打开 `http://127.0.0.1:8765/` 查看。导出目录包含网页、图表库、许可文件及真实指标数据，可复制到其他机器。页面采用ES modules和fetch，需通过HTTP服务访问。纯静态演示支持查看、定位及区间切换，更换股票代码由上述Python交互服务提供。导出目标必须为新的独立目录。
+
+PR检查的Actions页面还提供 `interactive-demo-<run_id>-<run_attempt>` Artifact，下载解压后以 `python -m http.server 8765 --directory <解压目录>` 打开。Artifact请求保留30天。
+
+### 技术与验证
+
+采用 Apache-2.0 的 TradingView Lightweight Charts 5.2.0，使用一个图表的五个原生pane，共享日期轴与游标。前端为原生HTML/CSS/ES modules，服务使用Python标准库HTTP server。库的固定版本、许可和NOTICE保存在 `web/vendor/`，页面保留TradingView归属链接。此入口面向本地研究使用，默认监听127.0.0.1。
+
+```bash
+python -m unittest discover -s tests -v
+node --test tests/test_chart_data.mjs
+```
+
+Node 22或更新版本用于前端测试。测试覆盖原有功能、HTTP参数与失败处理、既有JSON/CSV复用、真实数据演示导出、成交量单位不重复换算、预热空值和超过120日的数据保留。阶段验收见 [交互式图表验收记录](docs/interactive-charts-validation.md)。
+
 ## 安装与运行
 
 Python 3.11 或更新版本，在仓库根目录执行。

@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'stock_analysis/**'
+      - 'web/**'
       - 'tests/**'
       - 'scripts/generate_indicators.py'
       - 'requirements.txt'
@@ -20,7 +21,20 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install -r requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - run: python -m unittest discover -s tests -v
+      - run: node --test tests/test_chart_data.mjs
+      - name: Export real-history interactive demo
+        run: python -m stock_analysis.web --export-demo work/interactive-demo
+      - name: Upload interactive demo
+        uses: actions/upload-artifact@v4
+        with:
+          name: interactive-demo-${{ github.run_id }}-${{ github.run_attempt }}
+          path: work/interactive-demo/
+          retention-days: 30
+          if-no-files-found: error
       - name: Generate downloadable real-history sample
         run: python -m stock_analysis 000688 --input results/000688_daily.csv --start 2020-07-01 --end 2026-11-20 --output-root work/ci-analysis
       - name: Upload sample bundle and records

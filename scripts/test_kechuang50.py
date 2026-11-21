@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import time
 import sys
 import urllib.parse
 import urllib.request
@@ -15,9 +16,21 @@ URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get?" + urllib.parse.ur
 request = urllib.request.Request(URL, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"})
 result = {"symbol": SYMBOL, "tested_at_utc": datetime.now(timezone.utc).isoformat(), "source": "Eastmoney historical K-line", "url": URL}
 try:
-    with urllib.request.urlopen(request, timeout=25) as response:
-        body = response.read()
-        result["http_status"] = response.status
+    # Retry transient disconnects, timeouts and upstream 5xx responses.
+    # A retry cannot bypass provider-side blocking.
+    for attempt in range(1, 4):
+        try:
+            with urllib.request.urlopen(request, timeout=25) as response:
+                body = response.read()
+                result["http_status"] = response.status
+            result["attempts"] = attempt
+            break
+        except Exception as exc:
+            result["attempts"] = attempt
+            result["last_request_error"] = repr(exc)
+            if attempt == 3:
+                raise
+            time.sleep(attempt * 3)
     payload = json.loads(body)
     data = payload.get("data") or {}
     klines = data.get("klines") or []

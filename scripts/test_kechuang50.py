@@ -61,30 +61,31 @@ def eastmoney():
 
 
 def tencent():
-    payload = request_json(TENCENT_URL)
-    data = payload.get("data") or {}
-    item = data.get("sh000688") or {}
-    raw = item.get("day") or item.get("qfqday") or []
-    if not raw:
-        summary = {"top_level_keys": list(payload)[:15], "data_keys": list(data)[:15], "instrument_keys": list(item)[:15], "instrument_preview": str(item)[:1200], "response_preview": str(payload)[:1800]}
-        if os.getenv("FORCE_TENCENT") == "1":
-            with open("tencent_response_diagnostic.json", "w", encoding="utf-8") as diagnostic:
-                json.dump(summary, diagnostic, ensure_ascii=False, indent=2)
-        raise ValueError("Tencent returned no day history; response shape recorded in tencent_response_diagnostic.json")
+    # Validated alternate: AKShare Tencent index daily data includes amount.
+    import akshare as ak
+    frame = ak.index_zh_daily_tx(symbol="sh000688")
+    required = ["date", "open", "close", "high", "low", "volume", "amount"]
+    missing = [name for name in required if name not in frame.columns]
+    if missing:
+        raise ValueError("Tencent missing fields: " + ", ".join(missing))
     rows = []
-    for record in raw:
-        # Tencent day records typically contain date, open, close, high, low, volume.
-        # The endpoint does not guarantee turnover; never substitute another metric.
-        if len(record) < 6:
-            raise ValueError("Incomplete Tencent row")
-        date, op, cl, hi, lo, vol = record[:6]
-        rows.append([date, op, cl, hi, lo, vol, ""])
+    for _, record in frame.iterrows():
+        date = str(record["date"])[:10]
+        if date < START_DATE or date > END_DATE:
+            continue
+        values = [record[name] for name in required[1:]]
+        if any(__import__("pandas").isna(value) for value in values):
+            raise ValueError("Tencent returned missing OHLCV/amount on " + date)
+        rows.append([date] + [str(value) for value in values])
+    rows.sort(key=lambda row: row[0])
+    if not rows or any(float(row[6]) <= 0 for row in rows):
+        raise ValueError("Tencent returned empty history or invalid amount")
     return check_rows(rows)
 
 
 sources = [
     ("Eastmoney historical K-line", EASTMONEY_URL, eastmoney),
-    ("Tencent historical daily K-line", TENCENT_URL, tencent),
+    ("AKShare Tencent index_zh_daily_tx", "akshare:index_zh_daily_tx:sh000688", tencent),
 ]
 if os.getenv("FORCE_TENCENT") == "1":
     sources = [sources[1]]

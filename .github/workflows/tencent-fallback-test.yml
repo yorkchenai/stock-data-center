@@ -1,0 +1,33 @@
+name: Tencent fallback verification
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'requests/tencent-fallback-*.json'
+permissions:
+  contents: write
+jobs:
+  tencent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Force Tencent-only data retrieval
+        env:
+          FORCE_TENCENT: '1'
+        run: |
+          python scripts/test_kechuang50.py
+      - name: Publish isolated Tencent test result
+        if: always()
+        run: |
+          mkdir -p results
+          if [ -f test_result.json ]; then cp test_result.json results/tencent_fallback_test.json; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/tencent_fallback_test.json
+          if ! git diff --cached --quiet; then
+            git commit -m "test: Tencent fallback result [skip ci]"
+            git push
+          fi

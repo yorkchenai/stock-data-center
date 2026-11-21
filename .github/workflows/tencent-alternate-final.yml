@@ -1,0 +1,36 @@
+name: Tencent alternate final candidate
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'requests/tencent-alternate-final-*.json'
+permissions:
+  contents: write
+jobs:
+  final-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install akshare pandas
+      - name: Run diagnostic exactly once
+        run: python scripts/test_tencent_alternate.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tencent-alternate-final-report
+          path: results/tencent_alternate_candidate.json
+      - name: Publish diagnostic report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/tencent_alternate_candidate.json
+          if ! git diff --cached --quiet; then
+            git commit -m "test: Tencent alternate final report [skip ci]"
+            for i in 1 2 3; do
+              if git push; then exit 0; fi
+              git pull --rebase origin main || exit 1
+            done
+            exit 1
+          fi

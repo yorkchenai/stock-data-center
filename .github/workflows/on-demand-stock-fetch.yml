@@ -23,6 +23,8 @@ jobs:
           mkdir -p results
           cp kechuang50_daily.csv results/000688_daily.csv
           python scripts/validate_kechuang50.py
+          python -m pip install 'exchange-calendars>=4,<5'
+          python scripts/audit_exchange_calendar.py
       - name: Publish result
         if: always()
         run: |

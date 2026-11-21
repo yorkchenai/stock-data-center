@@ -19,6 +19,13 @@ jobs:
           FORCE_TENCENT: '1'
         run: |
           python scripts/test_kechuang50.py
+      - name: Preserve Tencent diagnostic artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tencent-diagnostic
+          path: test_result.json
+          if-no-files-found: warn
       - name: Publish isolated Tencent test result
         if: always()
         run: |
@@ -26,8 +33,15 @@ jobs:
           if [ -f test_result.json ]; then cp test_result.json results/tencent_fallback_test.json; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ ! -f results/tencent_fallback_test.json ]; then echo 'No diagnostic JSON produced'; exit 1; fi
           git add results/tencent_fallback_test.json
           if ! git diff --cached --quiet; then
             git commit -m "test: Tencent fallback result [skip ci]"
-            git push
+            for attempt in 1 2 3; do
+              if git push; then exit 0; fi
+              git fetch origin main
+              git rebase origin/main || exit 1
+              sleep 2
+            done
+            exit 1
           fi

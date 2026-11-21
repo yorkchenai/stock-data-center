@@ -1,0 +1,16 @@
+{
+  "status": "success",
+  "symbol": "000688",
+  "source_rows": 1551,
+  "plotted_rows": 120,
+  "first_plot_date": "2026-05-28",
+  "last_plot_date": "2026-11-20",
+  "files": [
+    "01_price_ma.png",
+    "02_volume_ma.png",
+    "03_macd.png",
+    "04_rsi.png",
+    "05_adx.png"
+  ],
+  "calculation_seconds": 1.254
+}

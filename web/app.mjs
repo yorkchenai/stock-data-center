@@ -55,6 +55,7 @@ const state = {
   rows: [],
   byDate: new Map(),
   busy: false,
+  displayRangeDraft: false,
 };
 const detailGroups = [
   [
@@ -308,12 +309,17 @@ chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
     state.rows[Math.min(state.rows.length - 1, Math.floor(range.to))];
   if (first && last) {
     elements["visible-range"].textContent = `显示 ${first.date} — ${last.date}`;
-    elements["display-start"].value = first.date;
-    elements["display-end"].value = last.date;
+    // A redraw/range callback can arrive while the user edits either date.
+    // Keep that unsubmitted draft until Apply or an explicit chart action.
+    if (!state.displayRangeDraft) {
+      elements["display-start"].value = first.date;
+      elements["display-end"].value = last.date;
+    }
   }
 });
 
 function setRange(count) {
+  state.displayRangeDraft = false;
   if (!state.rows.length) return;
   if (count === "all") chart.timeScale().fitContent();
   else
@@ -424,6 +430,7 @@ function showDateInterval(start, end) {
   }
   const rows = state.rows.filter((row) => row.date >= start && row.date <= end);
   if (!rows.length) throw new Error("所选区间没有交易记录，请调整日期");
+  state.displayRangeDraft = false;
   chart
     .timeScale()
     .setVisibleRange({ from: rows[0].date, to: rows.at(-1).date });
@@ -432,6 +439,16 @@ function showDateInterval(start, end) {
   setStatus("显示区间已调整，继续使用已载入的行情和指标。");
 }
 
+for (const name of ["display-start", "display-end"]) {
+  elements[name].addEventListener("input", () => {
+    state.displayRangeDraft = true;
+  });
+}
+for (const event of ["pointerdown", "wheel"]) {
+  elements.chart.addEventListener(event, () => {
+    state.displayRangeDraft = false;
+  });
+}
 elements["range-form"].addEventListener("submit", (event) => {
   event.preventDefault();
   try {
@@ -488,6 +505,7 @@ elements["locate-form"].addEventListener("submit", (event) => {
   const index = state.rows.indexOf(row);
   const current = chart.timeScale().getVisibleLogicalRange();
   const width = Math.max(20, current ? current.to - current.from : 120);
+  state.displayRangeDraft = false;
   chart.timeScale().setVisibleLogicalRange({
     from: Math.max(0, index - width / 2),
     to: Math.min(state.rows.length - 1, index + width / 2),

@@ -15,6 +15,7 @@ export async function checkChartControls(
       requests++;
   };
   page.on("request", count);
+  let stage = "panel and unit labels";
   try {
     assert.equal(await page.locator(".pane-legend").count(), 5);
     const details = await page.locator("#daily-values").textContent();
@@ -25,6 +26,7 @@ export async function checkChartControls(
       new RegExp(rows.toLocaleString("en-US")),
     );
 
+    stage = "all history";
     await page.locator('[data-range="all"]').click();
     await page.waitForFunction(
       ({ firstDate, lastDate }) => {
@@ -33,6 +35,7 @@ export async function checkChartControls(
       },
       { firstDate, lastDate },
     );
+    stage = "display interval";
     await page.locator("#display-start").fill("2021-01-01");
     await page.locator("#display-end").fill("2021-12-31");
     await page.locator("#range-form button").click();
@@ -51,6 +54,7 @@ export async function checkChartControls(
       new RegExp(rows.toLocaleString("en-US")),
     );
 
+    stage = "crosshair";
     await page.locator('[data-range="all"]').click();
     const chart = page.locator("#chart");
     await chart.scrollIntoViewIfNeeded();
@@ -67,6 +71,7 @@ export async function checkChartControls(
     const crosshairDate = await page.locator("#selected-date").textContent();
     assert.match(crosshairDate, /^\d{4}-\d{2}-\d{2}$/);
     const beforeZoom = await page.locator("#visible-range").textContent();
+    stage = "zoom";
     await page.mouse.wheel(0, -240);
     await page.waitForFunction(
       (before) =>
@@ -74,6 +79,7 @@ export async function checkChartControls(
       beforeZoom,
     );
     const afterZoom = await page.locator("#visible-range").textContent();
+    stage = "pan";
     await page.mouse.down();
     await page.mouse.move(point.x + 80, point.y, { steps: 5 });
     await page.mouse.up();
@@ -98,6 +104,18 @@ export async function checkChartControls(
       zoom_changed_range: true,
       pan_changed_range: true,
     };
+  } catch (error) {
+    const state = await page.evaluate(() => ({
+      visible: document.querySelector("#visible-range").textContent,
+      start: document.querySelector("#display-start").value,
+      end: document.querySelector("#display-end").value,
+      status: document.querySelector("#status").textContent,
+      selected: document.querySelector("#selected-date").textContent,
+      validLegendValues: document.querySelectorAll(
+        '.pane-legend .legend-value[title^="原始值 "]',
+      ).length,
+    }));
+    throw new Error(`${stage}: ${error.message}; ${JSON.stringify(state)}`);
   } finally {
     page.off("request", count);
   }

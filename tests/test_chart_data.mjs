@@ -152,7 +152,9 @@ test("history loading and local display adjustments use separate actions", async
   }));
   let displayedRange;
   const timeScale = {
-    subscribeVisibleLogicalRangeChange() {},
+    subscribeVisibleLogicalRangeChange(callback) {
+      this.onRangeChange = callback;
+    },
     fitContent() {},
     setVisibleLogicalRange() {},
     setVisibleRange(range) {
@@ -229,12 +231,31 @@ test("history loading and local display adjustments use separate actions", async
     const legend = element("legends").children[0];
     legend.offsetHeight = 70; // Simulate a wrapped legend after a resize.
     element("display-start").value = rows[1].date;
+    element("display-start").listeners.input();
     element("display-end").value = rows[2].date;
+    element("display-end").listeners.input();
+    timeScale.onRangeChange({ from: 0, to: 2 });
+    assert.equal(
+      element("display-start").value,
+      rows[1].date,
+      "redraw must preserve edited start",
+    );
+    assert.equal(
+      element("display-end").value,
+      rows[2].date,
+      "redraw must preserve edited end",
+    );
     element("range-form").submit();
     await flush();
     assert.ok(scales[0].margins.top >= 84 / 180);
     assert.match(element("status").textContent, /显示区间已调整/);
     assert.deepEqual(displayedRange, { from: rows[1].date, to: rows[2].date });
+    timeScale.onRangeChange({ from: 0, to: 2 });
+    assert.equal(
+      element("display-start").value,
+      rows[0].date,
+      "submitted draft resumes viewport sync",
+    );
     assert.equal(requests.length, 1, "display adjustment must not fetch");
     assert.equal(
       series[0].values.length,

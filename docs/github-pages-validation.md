@@ -55,9 +55,15 @@
 
 本轮最终远端状态、四代码逐日报告和部署阻碍持续记录在 [PR #3](https://github.com/yorkchenai/stock-data-center/pull/3) 的说明和检查产物中。提交8de35aa的PR构建及live-probe全部通过；四代码每个1551行，原始行情/19指标/日历对照均通过，最大指标绝对差3.19e-12；Python额外独立HTTP仍为unverified。push运行44983455745的deploy在configure-pages报告Not Found：Pages未启用，deployed-probe因此跳过。之后部署工作流增加enablement:true，使用已有pages:write权限尝试启用Actions类型Pages；不修改可见性或付费配置。此尝试的最终结果见PR检查。尚未成功部署并完成实际来源探测时，目标网址不代表已上线。
 
+## Public与实际来源复核补充
+
+用户将仓库公开并启用Actions Pages、允许feat/github-pages环境分支后，44983742806第4次尝试部署成功，deployed-probe在真实 `https://yorkchenai.github.io/stock-data-center/` 来源成功验证四代码，每个1551行，页面加载及原始行情/指标对照通过。该次发布SHA为05e7fdb；后续发布和最终验收SHA以PR #3最新报告与站点build-info.json为准，main仍未合并。
+
+补充逐代码交互检查复现了切换股票后的日期输入问题：图表异步重绘回调会覆盖尚未提交的显示日期。修复只为日期草稿增加保护，提交、快捷区间或主动操作图表后恢复视窗同步，不触发行情请求。控制器回归测试通过；用真实科创50和茅台历史数据在1280×720连续切换六次的受控响应测试全部通过，三种桌面与手机触摸视口的同一交互检查通过。真实github.io使用同一检查复核日期区间、手单位、全历史、十字光标、缩放和平移，并记录显示操作期间行情请求数。
+
 ## 需要维护者检查的设置
 
-最新管理设置复核：仓库API返回 `visibility=public`、`has_pages=true`，用户截图也确认Pages Source为GitHub Actions。2026-11-22重跑44983742806第3次尝试时，deploy尚未启动runner就被环境规则拒绝：`Branch "feat/github-pages" is not allowed to deploy to github-pages due to environment protection rules.` 这不是产品代码错误，不能通过改用其他环境或合并main绕过。Settings → Environments → github-pages的分支规则需允许feat/github-pages进行本轮审查部署；若配置了Required reviewers，需要维护者批准部署任务。审查合并后应恢复只允许main，并移除临时分支触发。工作流只需要contents:read，部署job额外pages:write和id-token:write，不需要PAT、数据库或付费资源。
+最新管理设置复核：仓库API返回 `visibility=public`、`has_pages=true`，用户截图也确认Pages Source为GitHub Actions。2026-11-22重跑44983742806第3次尝试时，deploy尚未启动runner就被环境规则拒绝：`Branch "feat/github-pages" is not allowed to deploy to github-pages due to environment protection rules.` 该限制后来由用户明确允许审查分支后解除，没有改用其他环境或合并main绕过。Settings → Environments → github-pages的分支规则需允许feat/github-pages进行本轮审查部署；若配置了Required reviewers，需要维护者批准部署任务。审查合并后应恢复只允许main，并移除临时分支触发。工作流只需要contents:read，部署job额外pages:write和id-token:write，不需要PAT、数据库或付费资源。
 
 维护者需在github-pages的Deployment branches and tags新增Branch规则 `feat/github-pages`，保留main；完成后重跑部署。页面验收脚本现复用同一交互检查，逐代码确认五面板、手单位、全部历史、2021年显示区间不取数，以及十字光标、缩放和平移。该交互检查已通过本地三种桌面视口及手机触摸模拟，真实github.io的结果见PR最终报告。
 

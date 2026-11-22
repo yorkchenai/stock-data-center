@@ -53,11 +53,11 @@
 
 这不是github.io来源验证。第二次运行44983059629中东方财富CORS也出现ERR_EMPTY_RESPONSE，腾讯分段返回640条向前扩展记录，暴露合并重叠日期问题。本轮已按每段的请求年份裁剪，再合并；段内重复仍拒绝。实际观察：2020段486行，2022/2024/2026段各640行，后者起点分别延伸到2021-05-18、2023-05-17和2024-04-01。裁剪后的真实科创50完整1551行已通过原Python/AkShare源适配器、全部指标及交易日历对照；相关回归测试通过。没有补行或根据重复日期任取一条。
 
-本轮最终远端状态、四代码逐日报告和部署阻碍持续记录在 [PR #3](https://github.com/yorkchenai/stock-data-center/pull/3) 的说明和检查产物中。尚未启用Pages时，目标网址不代表已上线。
+本轮最终远端状态、四代码逐日报告和部署阻碍持续记录在 [PR #3](https://github.com/yorkchenai/stock-data-center/pull/3) 的说明和检查产物中。提交8de35aa的PR构建及live-probe全部通过；四代码每个1551行，原始行情/19指标/日历对照均通过，最大指标绝对差3.19e-12；Python额外独立HTTP仍为unverified。push运行44983455745的deploy在configure-pages报告Not Found：Pages未启用，deployed-probe因此跳过。之后部署工作流增加enablement:true，使用已有pages:write权限尝试启用Actions类型Pages；不修改可见性或付费配置。此尝试的最终结果见PR检查。尚未成功部署并完成实际来源探测时，目标网址不代表已上线。
 
 ## 需要维护者检查的设置
 
-仓库API当前返回 `private=true`、`has_pages=false`，尚未启用Pages。Settings → Pages → Build and deployment → Source选择GitHub Actions。GitHub个人免费账号的私有仓库通常不提供Pages；若设置页要求升级，不购买方案，应先由用户决定是否将仓库公开，或使用已有支持私有仓库Pages的计划。本轮不更改仓库可见性。Settings → Environments → github-pages的分支规则需允许feat/github-pages进行本轮审查部署；若配置了Required reviewers，需要维护者批准部署任务。审查合并后应恢复只允许main，并移除临时分支触发。工作流只需要contents:read，部署job额外pages:write和id-token:write，不需要PAT、数据库或付费资源。
+仓库API当前返回 `private=true`、`has_pages=false`，尚未启用Pages。部署工作流先尝试自动启用，若权限或资格阻止，再由维护者在Settings → Pages → Build and deployment → Source选择GitHub Actions。GitHub个人免费账号的私有仓库通常不提供Pages；若设置页要求升级，不购买方案，应先由用户决定是否将仓库公开，或使用已有支持私有仓库Pages的计划。本轮不更改仓库可见性。Settings → Environments → github-pages的分支规则需允许feat/github-pages进行本轮审查部署；若配置了Required reviewers，需要维护者批准部署任务。审查合并后应恢复只允许main，并移除临时分支触发。工作流只需要contents:read，部署job额外pages:write和id-token:write，不需要PAT、数据库或付费资源。
 
 若当前连接不能设置Pages，维护者需完成上述设置，然后重跑工作流；不要直接合并来绕过审查。
 

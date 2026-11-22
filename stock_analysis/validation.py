@@ -39,11 +39,16 @@ def audit_calendar(frame, instrument, start, end):
     import exchange_calendars as xcals
 
     # XSHG is a mainland-session reference for SZ too, not a suspension calendar.
+    calendar_end = xcals.get_calendar("XSHG").bound_max()
+    if pd.Timestamp(end) > calendar_end:
+        raise ValueError("Requested end exceeds published XSHG calendar coverage")
     calendar = xcals.get_calendar(
         "XSHG", start=pd.Timestamp(start) - pd.Timedelta(days=14),
-        end=pd.Timestamp(end) + pd.Timedelta(days=14),
+        end=min(pd.Timestamp(end) + pd.Timedelta(days=14), calendar_end),
     )
-    expected = set(calendar.sessions_in_range(start, end).strftime("%Y-%m-%d"))
+    sessions = calendar.sessions
+    sessions = sessions[(sessions >= pd.Timestamp(start)) & (sessions <= pd.Timestamp(end))]
+    expected = set(sessions.strftime("%Y-%m-%d"))
     actual = set(frame.date.dt.strftime("%Y-%m-%d"))
     missing = sorted(expected - actual)
     unexpected = sorted(actual - expected)

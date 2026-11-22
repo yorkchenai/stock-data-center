@@ -1,0 +1,10 @@
+{
+  "calculation_start": "2025-01-01",
+  "instruments": {
+    "sz300078": "思创智联",
+    "sh600519": "贵州茅台",
+    "sh688981": "中芯国际",
+    "sz399006": "创业板指"
+  },
+  "redistribution_permissions": []
+}

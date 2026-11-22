@@ -1,5 +1,7 @@
 # stock-data-center
 
+四标的日线 JSON、更新机制与发布前授权审查见 [日线快照 v1](docs/stock-snapshots-v1.md)。
+
 A 股股票和主要指数的日线数据、技术指标与静态图表分析引擎。
 
 ## GitHub Pages 在线版（第三阶段候选）

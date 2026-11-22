@@ -1,4 +1,21 @@
 import { COLORS, PANELS, dateKey, formatValue, seriesData } from "./data.mjs";
+import { fetchHistory } from "./providers.mjs";
+
+const isPages = document.documentElement?.dataset?.mode === "pages";
+let calendarPromise;
+function loadCalendar() {
+  calendarPromise ||= fetch("./calendar.json", { cache: "no-store" })
+    .then((response) => {
+      if (!response.ok)
+        throw new Error(`无法读取交易日历（HTTP ${response.status}）`);
+      return response.json();
+    })
+    .catch((error) => {
+      calendarPromise = null;
+      throw error;
+    });
+  return calendarPromise;
+}
 
 const LC = window.LightweightCharts;
 const elements = Object.fromEntries(
@@ -30,6 +47,7 @@ const elements = Object.fromEntries(
     "locate-date",
     "daily-values",
     "validation-note",
+    "data-timestamp",
   ].map((id) => [id, document.getElementById(id)]),
 );
 const state = {
@@ -341,26 +359,36 @@ function displayDataset(dataset) {
     input.min = firstDate;
     input.max = lastDate;
   }
-  elements.symbol.readOnly = !dataset.live_analysis;
-  elements.kind.disabled = !dataset.live_analysis;
-  elements.start.disabled = !dataset.live_analysis;
-  elements.end.disabled = !dataset.live_analysis;
+  const canLoad = isPages || dataset.live_analysis;
+  elements.symbol.readOnly = !canLoad;
+  elements.kind.disabled = !canLoad;
+  elements.start.disabled = !canLoad;
+  elements.end.disabled = !canLoad;
+  elements["data-timestamp"].textContent = dataset.snapshot
+    ? `存档样本 · 构建于 ${dataset.generated_at_utc}；非最新行情`
+    : dataset.fetched_at_utc
+      ? `取数完成 ${dataset.fetched_at_utc}`
+      : "";
   const check = dataset.validation;
   elements["validation-note"].textContent = check
-    ? `已确认停牌 ${check.confirmed_suspension_sessions?.length || 0} 日；未核实缺口 ${check.unverified_missing_sessions?.length ?? check.missing_sessions.length} 日。股票完整性以运行报告为准。`
+    ? `已确认停牌 ${check.confirmed_suspension_sessions?.length || 0} 日；未核实缺口 ${check.unverified_missing_sessions?.length ?? check.missing_sessions.length} 日；停牌数据冲突 ${check.suspension_data_conflicts?.length || 0} 日。未核实缺口包括上市前或范围边界，不能直接认定为源数据缺失。股票完整性仍需核实。`
     : "演示使用仓库已保存的1551条科创50真实日线。指标由现有Python模块计算。";
   showRow(dataset.rows.at(-1));
   setRange("244");
   requestAnimationFrame(positionLegends);
   setStatus(
-    dataset.live_analysis
-      ? "已载入历史。上方可重新获取行情，下方可调整显示区间。"
-      : "离线样本已载入，可在图表上方调整显示区间。获取其他行情请启动 Python 交互服务。",
+    isPages
+      ? dataset.snapshot
+        ? "已展示明确标注日期的存档样本。点击“加载历史行情”向公开行情源取数；调整显示区间只改变视窗。"
+        : `已从公开行情源载入历史。${dataset.attempts?.some((a) => a.status === "failed") ? "东方财富请求失败，已使用腾讯备用源。" : ""}调整显示区间只改变视窗。`
+      : dataset.live_analysis
+        ? "已载入历史。上方可重新获取行情，下方可调整显示区间。"
+        : "离线样本已载入，可在图表上方调整显示区间。获取其他行情请启动 Python 交互服务。",
   );
 }
 
 async function loadDemo() {
-  const response = await fetch("./api/demo");
+  const response = await fetch("./api/demo", { cache: "no-store" });
   if (!response.ok)
     throw new Error(`无法读取演示数据（HTTP ${response.status}）`);
   return response.json();
@@ -381,7 +409,7 @@ async function runLoad(action, message = "正在读取已保存样本，请稍�
     );
   } finally {
     state.busy = false;
-    elements.load.disabled = !state.dataset?.live_analysis;
+    elements.load.disabled = !isPages && !state.dataset?.live_analysis;
     elements.demo.disabled = false;
   }
 }
@@ -427,6 +455,11 @@ elements["query-form"].addEventListener("submit", (event) => {
     };
     if (options.start > options.end)
       throw new Error("开始日期不能晚于结束日期");
+    if (isPages) {
+      const result = await fetchHistory(options, await loadCalendar());
+      displayDataset(result);
+      return;
+    }
     if (!state.dataset?.live_analysis)
       throw new Error("离线样本仅支持已载入历史，请启动Python服务获取其他区间");
     const response = await fetch("./api/analyze", {
@@ -465,4 +498,5 @@ elements["locate-form"].addEventListener("submit", (event) => {
   showRow(row);
   setStatus(`已定位 ${row.date}，右侧显示该交易日原始指标数值。`);
 });
+if (isPages) elements.demo.textContent = "查看存档样本";
 runLoad(async () => displayDataset(await loadDemo()));

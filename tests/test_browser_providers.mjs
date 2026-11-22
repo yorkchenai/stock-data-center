@@ -137,6 +137,42 @@ test("Tencent divides long history into bounded two-year requests", async () => 
   assert.match(requests[0], /2020-01-01,2021-12-31,640,$/);
   assert.match(requests.at(-1), /2026-01-01,2027-12-31,640,$/);
 });
+test("Tencent padded overlaps are trimmed to each requested segment, with internal duplicates rejected", async () => {
+  const raw = (date) => [date, 10, 11, 12, 9, 234, {}, 0, 12];
+  const instrument = resolveSymbol("000688");
+  const rows = await fetchTencent(
+    instrument,
+    "2020-07-01",
+    "2023-12-31",
+    async (url) => {
+      const year = new URL(url).searchParams
+        .get("param")
+        .split(",")[2]
+        .slice(0, 4);
+      return {
+        data: {
+          sh000688: {
+            day: (year === "2020"
+              ? ["2020-07-01", "2021-12-31"]
+              : ["2021-12-31", "2022-01-04", "2023-12-29"]
+            ).map(raw),
+          },
+        },
+      };
+    },
+  );
+  assert.deepEqual(
+    rows.map((row) => row.date),
+    ["2020-07-01", "2021-12-31", "2022-01-04", "2023-12-29"],
+  );
+  await assert.rejects(
+    fetchTencent(instrument, "2020-07-01", "2021-12-31", async () => ({
+      data: { sh000688: { day: [raw("2020-07-01"), raw("2020-07-01")] } },
+    })),
+    /重复/,
+  );
+});
+
 test("calendar keeps confirmed suspensions separate and rejects index interior gaps", () => {
   const dates = ["2025-01-06", "2025-01-07", "2025-01-08"];
   const config = {

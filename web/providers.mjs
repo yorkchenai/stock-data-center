@@ -98,7 +98,14 @@ export async function fetchTencent(
     const payload = await getJSON(url.href);
     if (payload?.data?.[instrument.market + instrument.code]?.day?.length === 0)
       continue; // Before listing remains a calendar gap.
-    all.push(...parseTencent(payload, instrument));
+    // Tencent may pad a two-year query backwards to 640 rows. Retain only
+    // this segment's requested calendar years before joining; never choose
+    // between conflicting records or synthesize missing days.
+    all.push(
+      ...parseTencent(payload, instrument).filter(
+        (row) => row.date >= `${year}-01-01` && row.date <= `${year + 1}-12-31`,
+      ),
+    );
   }
   return normalizeDaily(all.filter((r) => r.date >= start && r.date <= end));
 }

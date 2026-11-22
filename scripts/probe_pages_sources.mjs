@@ -3,6 +3,7 @@
 import { chromium } from "playwright-core";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { checkChartControls } from "./pages_chart_checks.mjs";
 
 const output = process.env.PROBE_OUTPUT || "work/pages-live";
 await mkdir(output, { recursive: true });
@@ -117,6 +118,19 @@ try {
           "error",
         ) && (await page.locator(".pane-legend").count()) === 5;
       if (!summary.ui_passed) summary.status = "failed";
+      if (summary.ui_passed) {
+        try {
+          summary.controls = await checkChartControls(page, {
+            firstDate: result.dataset.rows[0].date,
+            lastDate: result.dataset.rows.at(-1).date,
+            rows: result.dataset.rows.length,
+          });
+        } catch (error) {
+          summary.status = "failed";
+          summary.ui_passed = false;
+          summary.controls = { status: "failed", error: error.message };
+        }
+      }
       await page.screenshot({
         path: path.join(output, `${symbol}.png`),
         fullPage: true,

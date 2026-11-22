@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
+import { checkChartControls } from "./pages_chart_checks.mjs";
 
 const site = path.resolve(process.env.PAGES_SITE || "work/pages-site");
 const output = process.env.BROWSER_OUTPUT || "work/pages-browser";
@@ -135,23 +136,12 @@ try {
     assert.ok(
       requests.some((url) => url.startsWith("https://push2his.eastmoney.com/")),
     );
-    const chart = page.locator("#chart");
-    await chart.scrollIntoViewIfNeeded();
-    const box = await chart.boundingBox();
-    if (mobile) {
-      await page.touchscreen.tap(box.x + box.width / 2, box.y + 120);
-      assert.match(
-        await page.locator("#selected-date").textContent(),
-        /^\d{4}-\d{2}-\d{2}$/,
-      );
-    }
-    await page.mouse.move(box.x + box.width / 2, box.y + 120);
-    await page.mouse.wheel(0, -120);
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width / 2 + 80, box.y + 120, {
-      steps: 5,
+    const controls = await checkChartControls(page, {
+      firstDate: snapshot.rows[0].date,
+      lastDate: snapshot.rows.at(-1).date,
+      rows: snapshot.rows.length,
+      mobile,
     });
-    await page.mouse.up();
     const layout = await page.evaluate(() => {
       const legends = [...document.querySelectorAll(".pane-legend")].map(
         (element) => {
@@ -185,6 +175,7 @@ try {
       height,
       mobile,
       status: "passed",
+      controls,
       ...layout,
     });
     // Explicit failure must leave old data clearly identified and show an error.

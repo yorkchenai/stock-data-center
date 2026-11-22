@@ -57,9 +57,9 @@
 
 ## 需要维护者检查的设置
 
-仓库API当前返回 `private=true`、`has_pages=false`，尚未启用Pages。部署工作流先尝试自动启用，若权限或资格阻止，再由维护者在Settings → Pages → Build and deployment → Source选择GitHub Actions。GitHub个人免费账号的私有仓库通常不提供Pages；若设置页要求升级，不购买方案，应先由用户决定是否将仓库公开，或使用已有支持私有仓库Pages的计划。本轮不更改仓库可见性。Settings → Environments → github-pages的分支规则需允许feat/github-pages进行本轮审查部署；若配置了Required reviewers，需要维护者批准部署任务。审查合并后应恢复只允许main，并移除临时分支触发。工作流只需要contents:read，部署job额外pages:write和id-token:write，不需要PAT、数据库或付费资源。
+最新管理设置复核：仓库API返回 `visibility=public`、`has_pages=true`，用户截图也确认Pages Source为GitHub Actions。2026-11-22重跑44983742806第3次尝试时，deploy尚未启动runner就被环境规则拒绝：`Branch "feat/github-pages" is not allowed to deploy to github-pages due to environment protection rules.` 这不是产品代码错误，不能通过改用其他环境或合并main绕过。Settings → Environments → github-pages的分支规则需允许feat/github-pages进行本轮审查部署；若配置了Required reviewers，需要维护者批准部署任务。审查合并后应恢复只允许main，并移除临时分支触发。工作流只需要contents:read，部署job额外pages:write和id-token:write，不需要PAT、数据库或付费资源。
 
-若当前连接不能设置Pages，维护者需完成上述设置，然后重跑工作流；不要直接合并来绕过审查。
+维护者需在github-pages的Deployment branches and tags新增Branch规则 `feat/github-pages`，保留main；完成后重跑部署。页面验收脚本现复用同一交互检查，逐代码确认五面板、手单位、全部历史、2021年显示区间不取数，以及十字光标、缩放和平移。该交互检查已通过本地三种桌面视口及手机触摸模拟，真实github.io的结果见PR最终报告。
 
 ## 纯浏览器方案不能稳定工作时的免费替代设计
 

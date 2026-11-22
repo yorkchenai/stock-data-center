@@ -12,6 +12,8 @@ import pandas as pd
 from stock_analysis.indicators import calculate_indicators
 from stock_analysis.pages import build_pages
 from stock_analysis.web import INDICATOR_FIELDS, ROOT
+from stock_analysis.symbols import resolve_symbol
+from scripts.verify_pages_live import parse_browser_responses
 
 
 def browser_indicators(frame):
@@ -55,6 +57,26 @@ class BrowserEngineTests(TestCase):
 
 
 class PagesBuildTests(TestCase):
+    def test_captured_eastmoney_response_uses_existing_python_adapter(self):
+        dataset = {'source': 'eastmoney', 'requested_start': '2025-01-06', 'requested_end': '2025-01-06'}
+        payload = {'data': {'code': '000688', 'klines': ['2025-01-06,10,11,12,9,234,123456']}}
+        daily, _ = parse_browser_responses(resolve_symbol('000688'), dataset,
+            [{'url': 'https://push2his.eastmoney.com/api/qt/stock/kline/get', 'payload': payload}])
+        self.assertEqual(daily.volume_lots.iloc[0], 234)
+        self.assertEqual(daily.turnover_cny.iloc[0], 123456)
+
+    def test_captured_tencent_response_uses_akshare_units(self):
+        # Numerical transport fixture only; these are not real market prices.
+        dataset = {'source': 'tencent', 'requested_start': '2025-01-06', 'requested_end': '2025-01-06'}
+        for symbol in ['000688', '600519', '399006', 'sh000001', '688981']:
+            instrument = resolve_symbol(symbol)
+            raw_volume = 23400 if symbol == '688981' else 234
+            payload = {'data': {instrument.symbol: {'day': [['2025-01-06', 10, 11, 12, 9, raw_volume, {}, 0, 12.3456]]}}}
+            daily, _ = parse_browser_responses(instrument, dataset,
+                [{'url': 'https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get', 'payload': payload}])
+            self.assertEqual(daily.volume_lots.iloc[0], 234)
+            self.assertEqual(daily.turnover_cny.iloc[0], 12.3456 * 10000)
+
     def test_relative_site_calendar_real_snapshot_and_no_overwrite(self):
         with TemporaryDirectory() as temporary:
             output = build_pages(Path(temporary) / "site", calendar_end="2026-11-30")
@@ -63,6 +85,7 @@ class PagesBuildTests(TestCase):
             self.assertIn('src="./app.mjs"', html)
             self.assertTrue((output / "providers.mjs").exists())
             self.assertTrue((output / ".nojekyll").exists())
+            self.assertEqual(json.loads((output / "build-info.json").read_text())['calendar_end'], "2026-11-30")
             calendar = json.loads((output / "calendar.json").read_text())
             self.assertEqual(calendar['end'], "2026-11-30")
             self.assertIn("2020-07-01", calendar['sessions'])

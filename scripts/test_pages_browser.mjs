@@ -138,6 +138,13 @@ try {
     const chart = page.locator("#chart");
     await chart.scrollIntoViewIfNeeded();
     const box = await chart.boundingBox();
+    if (mobile) {
+      await page.touchscreen.tap(box.x + box.width / 2, box.y + 120);
+      assert.match(
+        await page.locator("#selected-date").textContent(),
+        /^\d{4}-\d{2}-\d{2}$/,
+      );
+    }
     await page.mouse.move(box.x + box.width / 2, box.y + 120);
     await page.mouse.wheel(0, -120);
     await page.mouse.down();

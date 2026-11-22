@@ -12,7 +12,7 @@ A 股股票和主要指数的日线数据、技术指标与静态图表分析引
 
 浏览器 `engine.mjs` 对照移植Python原有算法，图表适配层不计算公式。成交量源入口只统一一次单位：东方财富为手；腾讯sh688/sh689原始股数转手，其他受支持股票/指数保持手，成交额万元转元。图表及VOL5/VOL10不再除以100。MACD柱保持 `2×(DIF−DEA)`，RSI/ADX初始化和预热null保持原定义。日历与停牌证据由Python构建，越界拒绝请求，不推测节假日或补造行情。
 
-维护者需在 **Settings → Pages → Source** 选择 **GitHub Actions**。若github-pages环境限制部署分支，本轮需允许 `feat/github-pages` 以便合并前审查部署；如设置了部署审批，批准相应任务。PR构建只测试、上传产物，部署job仅对main或本轮开发分支push执行。工作流安排工作日UTC09:20重建日历；日历有效范围明确写入calendar.json，最多到当年年底，超出范围提示更新。合并后恢复仅main部署。
+维护者需在 **Settings → Pages → Source** 选择 **GitHub Actions**。当前仓库为private且尚未启用Pages；若设置页要求升级，不购买资源，应先确认是否公开仓库，或是否已有支持私有仓库Pages的计划。若github-pages环境限制部署分支，本轮需允许 `feat/github-pages` 以便合并前审查部署；如设置了部署审批，批准相应任务。PR构建只测试、上传产物，部署job仅对main或本轮开发分支push执行。工作流安排工作日UTC09:20重建日历；日历有效范围明确写入calendar.json，最多到当年年底，超出范围提示更新。合并后恢复仅main部署。
 
 本地开发验证（仅开发者需要Python和Node；线上访客不需要）：
 

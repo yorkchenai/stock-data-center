@@ -4,6 +4,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 import argparse
 import json
+import os
 
 import exchange_calendars as xcals
 import pandas as pd
@@ -30,6 +31,11 @@ def build_pages(destination, calendar_end=None):
         "suspensions": json.loads((ROOT / "stock_analysis/suspensions.json").read_text(encoding="utf-8")),
     }
     (output / "calendar.json").write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+    (output / "build-info.json").write_text(json.dumps({
+        "schema_version": 1, "commit_sha": os.getenv("GITHUB_SHA", "local-unversioned"),
+        "generated_at_utc": now.isoformat(), "calendar_end": end,
+        "snapshot_last_date": dataset["rows"][-1]["date"],
+    }, ensure_ascii=False, allow_nan=False), encoding="utf-8")
     (output / ".nojekyll").touch()
     return output
 

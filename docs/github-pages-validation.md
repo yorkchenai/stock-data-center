@@ -22,7 +22,7 @@
 - 腾讯proxy和web两个域名的newfqkline接口均实际返回科创50的2020–2021年486条记录（包括本项目演示起点前的数据），含OHLC、原始成交量及成交额。web域名的脚本响应含允许跨域的头。
 - 本机headless Chromium对上述接口的CORS和脚本探测被云代理证书信任问题阻断，错误为 `net::ERR_CERT_AUTHORITY_INVALID`。没有禁用TLS验证，也没有据此把服务判成CORS不支持。
 - 当前云代理拒绝 `yorkchenai.github.io`，CONNECT返回403；GitHub Pages配置API的CLI读取也被拒绝。此时无法从这台云机器完成实际Pages验收，不能宣称已上线。
-- 41项Python测试通过，13项Node测试通过。全部1551行真实科创50及36组明确标注的人工数值测试序列，逐日对照Python所有19个输出字段（包含涨跌幅）。原始输入要求完全相等，null掩码完全相等，浮点容差 `atol=1e-9, rtol=1e-12`。
+- 43项Python测试通过，13项Node测试通过。全部1551行真实科创50及36组明确标注的人工数值测试序列，逐日对照Python所有19个输出字段（包含涨跌幅）。原始输入要求完全相等，null掩码完全相等，浮点容差 `atol=1e-9, rtol=1e-12`。
 - 指标算法保持原Python定义：MA/VOL满窗口均值；EMA首个收盘价初始化、adjust=False；DEA为DIF的EMA9，MACD_hist=2×(DIF−DEA)；RSI在索引period以最初period个价差均值初始化，Wilder递推，平盘为50；DI14在索引14初始化平滑和，ADX14在索引27用第14至27行DX均值初始化。没有用显示区间重新播种指标。
 - 本地标准Chromium在1366×768、1440×900、1920×1080及390×844触摸模拟视口通过页面检查：五面板、全历史、显示日期不发请求、显式加载、滚轮/拖动、图例不横向裁切、脚本无运行错误、失败时保留已标注旧数据并显示明确错误。这里行情响应为原始真实科创50数据的受控测试响应，不是在线取数成功证据。截图及结构化报告由CI上传。手机覆盖为Chromium触摸模拟，未完成实体iOS Safari/Android设备验收。
 
@@ -39,15 +39,23 @@
 `.github/workflows/pages.yml`：
 
 1. build运行离线Python/Node及桌面/手机视口测试，生成相对路径站点，上传pages-review和Pages artifact。
-2. live-probe在GitHub runner的本地HTTP来源测试四个代码的完整历史、各源CORS/JSONP，并再次由Python独立请求同一数据源逐日对照OHLCV、成交额和全部指标。该来源不是github.io，报告记录实际origin。
+2. live-probe在GitHub runner的本地HTTP来源测试四个代码的完整历史、各源CORS/JSONP，捕获原始源响应，再由原有Python源适配器独立解析并计算指标，逐日对照OHLCV、成交额和全部指标。额外的Python独立HTTP请求分别记录passed或unverified；连接失败不伪装为通过，若取得不同数值则整体验证失败。该来源不是github.io，报告记录实际origin。
 3. 只有build与live-probe成功后才允许deploy；PR事件不授予Pages/OIDC写权限、不部署。main及本轮经授权的feat/github-pages分支push可部署，便于不合并main进行审查。
-4. deploy成功后，deployed-probe必须在真实 `https://yorkchenai.github.io/stock-data-center/` 来源再次执行四代码取数和Python对照。只有这一层通过才称为实际Pages取数验收完成。若部署后探测失败，工作流失败且保留报告，不声称部署后的行情可靠；部署本身不会自动回滚。
+4. deploy成功后，deployed-probe必须在真实 `https://yorkchenai.github.io/stock-data-center/` 来源再次执行四代码取数、页面加载和Python对照，并核对build-info.json提交SHA。只有这一层通过才称为实际Pages取数验收完成。若部署后探测失败，工作流失败且保留报告，不声称部署后的行情可靠；部署本身不会自动回滚。
 
-检查和产物链接将在真实运行完成后补充。目标网址目前仅是计划部署地址。
+首次远端运行：[44982624994](https://github.com/yorkchenai/stock-data-center/actions/runs/44982624994)。build成功，live-probe浏览器步骤成功；独立Python HTTP请求因远端断开连接失败，原门槛阻止了deploy。未把此次失败写成通过。之后保留独立HTTP结果，同时增加“实际浏览器原始响应 → 原Python源适配器 → 原Python指标”对照，校验数值不再依赖第二次HTTP连接。
+
+| GitHub runner 本地HTTP来源实测 | CORS | JSONP/脚本 |
+| --- | --- | --- |
+| 东方财富完整科创50 | 200，1551行；四验收代码均各1551行 | 失败，ERR_EMPTY_RESPONSE |
+| 腾讯proxy域名2020–2021 | 200，486行 | 通过，486行 |
+| 腾讯web域名2020–2021 | 200，486行 | 通过，486行 |
+
+这不是github.io来源验证。最终远端检查、逐日对照和部署结果将在本轮运行结束后补充。
 
 ## 需要维护者检查的设置
 
-Settings → Pages → Build and deployment → Source选择GitHub Actions。Settings → Environments → github-pages的分支规则需允许feat/github-pages进行本轮审查部署；若配置了Required reviewers，需要维护者批准部署任务。审查合并后应恢复只允许main，并移除临时分支触发。工作流只需要contents:read，部署job额外pages:write和id-token:write，不需要PAT、数据库或付费资源。
+仓库API当前返回 `private=true`、`has_pages=false`，尚未启用Pages。Settings → Pages → Build and deployment → Source选择GitHub Actions。GitHub个人免费账号的私有仓库通常不提供Pages；若设置页要求升级，不购买方案，应先由用户决定是否将仓库公开，或使用已有支持私有仓库Pages的计划。本轮不更改仓库可见性。Settings → Environments → github-pages的分支规则需允许feat/github-pages进行本轮审查部署；若配置了Required reviewers，需要维护者批准部署任务。审查合并后应恢复只允许main，并移除临时分支触发。工作流只需要contents:read，部署job额外pages:write和id-token:write，不需要PAT、数据库或付费资源。
 
 若当前连接不能设置Pages，维护者需完成上述设置，然后重跑工作流；不要直接合并来绕过审查。
 

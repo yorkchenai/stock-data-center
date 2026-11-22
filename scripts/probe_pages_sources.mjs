@@ -34,21 +34,53 @@ try {
   report.actual_url = page.url();
   report.origin = new URL(page.url()).origin;
   await page.locator("#history-label").filter({ hasText: "1,551" }).waitFor();
-  const end = process.env.PROBE_END || "2026-11-20";
+  report.build = await page.evaluate(async () =>
+    (await fetch("./build-info.json", { cache: "no-store" })).json(),
+  );
+  if (
+    process.env.GITHUB_SHA &&
+    report.build.commit_sha !== process.env.GITHUB_SHA
+  )
+    throw new Error("Deployed build SHA does not match the tested commit");
+  const today = Object.fromEntries(
+    new Intl.DateTimeFormat("en", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts()
+      .map((part) => [part.type, part.value]),
+  );
+  const end =
+    process.env.PROBE_END ||
+    new Date(
+      Date.UTC(Number(today.year), Number(today.month) - 1, Number(today.day)) -
+        86400000,
+    )
+      .toISOString()
+      .slice(0, 10);
   for (const symbol of ["000688", "600519", "399006", "sh000001"]) {
     const result = await page.evaluate(
       async ({ symbol, end }) => {
-        const { fetchHistory } = await import("./providers.mjs");
+        const { fetchHistory, requestJSON } = await import("./providers.mjs");
         const calendar = await (
           await fetch("./calendar.json", { cache: "no-store" })
         ).json();
         try {
+          const responses = [];
           return {
             status: "success",
             dataset: await fetchHistory(
               { symbol, kind: "auto", start: "2020-07-01", end },
               calendar,
+              async (url) => {
+                const payload = await requestJSON(url);
+                responses.push({ url, payload });
+                return payload;
+              },
             ),
+            responses,
           };
         } catch (error) {
           return { status: "failed", error: error.message };
@@ -56,18 +88,41 @@ try {
       },
       { symbol, end },
     );
-    report.symbols.push({
+    const summary = {
       symbol,
       status: result.status,
       source: result.dataset?.source,
       rows: result.dataset?.rows.length,
       attempts: result.dataset?.attempts,
       error: result.error,
-    });
+    };
     await writeFile(
       path.join(output, `${symbol}.json`),
       JSON.stringify(result, null, 2),
     );
+    if (result.status === "success") {
+      await page.locator("#symbol").fill(symbol);
+      await page.locator("#kind").selectOption("auto");
+      await page.locator("#start").fill("2020-07-01");
+      await page.locator("#end").fill(end);
+      await page.locator("#load").click();
+      await page.waitForFunction(
+        () => !document.querySelector("#load").disabled,
+        null,
+        { timeout: 180000 },
+      );
+      summary.ui_status = await page.locator("#status").textContent();
+      summary.ui_passed =
+        !(await page.locator("#status").getAttribute("class")).includes(
+          "error",
+        ) && (await page.locator(".pane-legend").count()) === 5;
+      if (!summary.ui_passed) summary.status = "failed";
+      await page.screenshot({
+        path: path.join(output, `${symbol}.png`),
+        fullPage: true,
+      });
+    }
+    report.symbols.push(summary);
     await page.waitForTimeout(1000);
   }
   for (const [source, base] of [

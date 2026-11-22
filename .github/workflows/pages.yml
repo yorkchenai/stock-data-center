@@ -13,7 +13,7 @@ on:
         ".github/workflows/pages.yml",
       ]
   push:
-    branches: [main, feat/github-pages]
+    branches: [main]
     paths:
       [
         "web/**",
@@ -103,9 +103,8 @@ jobs:
           if-no-files-found: error
   deploy:
     needs: [build, live-probe]
-    # The explicitly authorized development branch can be deployed for review
-    # without merging main. PRs/forks never receive Pages/OIDC write permission.
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/github-pages')
+    # Only main can deploy, including manual runs. PRs keep read-only checks.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -122,7 +121,7 @@ jobs:
         id: deployment
   deployed-probe:
     needs: deploy
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

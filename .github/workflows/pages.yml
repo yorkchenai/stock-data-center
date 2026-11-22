@@ -5,6 +5,7 @@ on:
       [
         "web/**",
         "stock_analysis/**",
+        "config/snapshots.json",
         "scripts/*pages*",
         "scripts/calculate_browser_indicators.mjs",
         "tests/**",
@@ -18,6 +19,7 @@ on:
       [
         "web/**",
         "stock_analysis/**",
+        "config/snapshots.json",
         "scripts/*pages*",
         "scripts/calculate_browser_indicators.mjs",
         "tests/**",
@@ -26,7 +28,7 @@ on:
         ".github/workflows/pages.yml",
       ]
   schedule:
-    # Rebuild the bounded calendar daily. Quotes are fetched by the browser.
+    # Rebuild the calendar and daily snapshots at 17:20 Shanghai time.
     - cron: "20 9 * * 1-5"
   workflow_dispatch:
 permissions:
@@ -66,7 +68,31 @@ jobs:
             work/pages-browser/
           retention-days: 30
           if-no-files-found: error
+      - name: Build the public snapshot directory
+        run: |
+          options=()
+          if [[ "$GITHUB_EVENT_NAME" == pull_request || "$GITHUB_REF" != refs/heads/main ]]; then
+            options+=(--metadata-only)
+          fi
+          python -m stock_analysis.snapshots --output work/pages-site/data/v1 "${options[@]}" > work/snapshot-report.json
+      - name: Save the snapshot validation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: work/snapshot-report.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Save the exact snapshot bytes for GitHub Raw
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-data-v1
+          path: work/pages-site/data/v1/
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 1
       - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         with:
           path: work/pages-site
   live-probe:
@@ -98,9 +124,27 @@ jobs:
         if: always()
         with:
           name: pages-live-probe-${{ github.run_id }}-${{ github.run_attempt }}
-          path: work/pages-live/
+          # Keep raw responses and full daily rows on the runner for validation only.
+          path: |
+            work/pages-live/probe.json
+            work/pages-live/python-comparison.json
           retention-days: 30
           if-no-files-found: error
+  publish-raw:
+    needs: deploy
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: pages-data-v1
+          path: work/raw-data
+      - name: Update the GitHub Raw snapshot branch
+        run: bash scripts/mirror_pages_snapshots.sh work/raw-data
   deploy:
     needs: [build, live-probe]
     # Only main can deploy, including manual runs. PRs keep read-only checks.
@@ -144,6 +188,8 @@ jobs:
         if: always()
         with:
           name: pages-deployed-probe-${{ github.run_id }}-${{ github.run_attempt }}
-          path: work/pages-live/
+          path: |
+            work/pages-live/probe.json
+            work/pages-live/python-comparison.json
           retention-days: 30
           if-no-files-found: error

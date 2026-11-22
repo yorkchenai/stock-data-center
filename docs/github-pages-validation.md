@@ -40,7 +40,7 @@
 
 1. build运行离线Python/Node及桌面/手机视口测试，生成相对路径站点，上传pages-review和Pages artifact。
 2. live-probe在GitHub runner的本地HTTP来源测试四个代码的完整历史、各源CORS/JSONP，捕获原始源响应，再由原有Python源适配器独立解析并计算指标，逐日对照OHLCV、成交额和全部指标。额外的Python独立HTTP请求分别记录passed或unverified；连接失败不伪装为通过，若取得不同数值则整体验证失败。该来源不是github.io，报告记录实际origin。
-3. 只有build与live-probe成功后才允许deploy；PR事件不授予Pages/OIDC写权限、不部署。main及本轮经授权的feat/github-pages分支push可部署，便于不合并main进行审查。
+3. 只有build与live-probe成功后才允许deploy；PR事件不授予Pages/OIDC写权限、不部署。合并前清理后，自动push部署分支、手动运行及部署后验收均限制为main；已移除feat/github-pages的临时部署条件。
 4. deploy成功后，deployed-probe必须在真实 `https://yorkchenai.github.io/stock-data-center/` 来源再次执行四代码取数、页面加载和Python对照，并核对build-info.json提交SHA。只有这一层通过才称为实际Pages取数验收完成。若部署后探测失败，工作流失败且保留报告，不声称部署后的行情可靠；部署本身不会自动回滚。
 
 首次远端运行：[44982624994](https://github.com/yorkchenai/stock-data-center/actions/runs/44982624994)。build成功，live-probe浏览器步骤成功；独立Python HTTP请求因远端断开连接失败，原门槛阻止了deploy。未把此次失败写成通过。之后保留独立HTTP结果，同时增加“实际浏览器原始响应 → 原Python源适配器 → 原Python指标”对照，校验数值不再依赖第二次HTTP连接。
@@ -57,15 +57,15 @@
 
 ## Public与实际来源复核补充
 
-用户将仓库公开并启用Actions Pages、允许feat/github-pages环境分支后，44983742806第4次尝试部署成功，deployed-probe在真实 `https://yorkchenai.github.io/stock-data-center/` 来源成功验证四代码，每个1551行，页面加载及原始行情/指标对照通过。该次发布SHA为05e7fdb；后续发布和最终验收SHA以PR #3最新报告与站点build-info.json为准，main仍未合并。
+用户将仓库公开并启用Actions Pages、允许feat/github-pages环境分支后，44983742806第4次尝试部署成功，deployed-probe在真实 `https://yorkchenai.github.io/stock-data-center/` 来源成功验证四代码，每个1551行，页面加载及原始行情/指标对照通过。该次发布SHA为05e7fdb；后续发布和最终验收SHA以PR #3最新报告与站点build-info.json为准，该次预览未合并main。
 
 补充逐代码交互检查复现了切换股票后的日期输入问题：图表异步重绘回调会覆盖尚未提交的显示日期。修复只为日期草稿增加保护，提交、快捷区间或主动操作图表后恢复视窗同步，不触发行情请求。控制器回归测试通过；用真实科创50和茅台历史数据在1280×720连续切换六次的受控响应测试全部通过，三种桌面与手机触摸视口的同一交互检查通过。真实github.io使用同一检查复核日期区间、手单位、全历史、十字光标、缩放和平移，并记录显示操作期间行情请求数。
 
 ## 需要维护者检查的设置
 
-最新管理设置复核：仓库API返回 `visibility=public`、`has_pages=true`，用户截图也确认Pages Source为GitHub Actions。2026-11-22重跑44983742806第3次尝试时，deploy尚未启动runner就被环境规则拒绝：`Branch "feat/github-pages" is not allowed to deploy to github-pages due to environment protection rules.` 该限制后来由用户明确允许审查分支后解除，没有改用其他环境或合并main绕过。Settings → Environments → github-pages的分支规则需允许feat/github-pages进行本轮审查部署；若配置了Required reviewers，需要维护者批准部署任务。审查合并后应恢复只允许main，并移除临时分支触发。工作流只需要contents:read，部署job额外pages:write和id-token:write，不需要PAT、数据库或付费资源。
+最新管理设置复核：仓库API返回 `visibility=public`、`has_pages=true`，用户截图也确认Pages Source为GitHub Actions。2026-11-22重跑44983742806第3次尝试时，deploy尚未启动runner就被环境规则拒绝：`Branch "feat/github-pages" is not allowed to deploy to github-pages due to environment protection rules.` 该限制后来由用户明确允许审查分支后解除，没有改用其他环境或合并main绕过。当前工作流仅允许main部署，已移除临时分支触发；github-pages环境只需允许main，可删除此前手动添加的feat/github-pages规则。若配置了Required reviewers，仍需维护者批准main部署任务。工作流只需要contents:read，部署job额外pages:write和id-token:write，不需要PAT、数据库或付费资源。
 
-维护者需在github-pages的Deployment branches and tags新增Branch规则 `feat/github-pages`，保留main；完成后重跑部署。页面验收脚本现复用同一交互检查，逐代码确认五面板、手单位、全部历史、2021年显示区间不取数，以及十字光标、缩放和平移。该交互检查已通过本地三种桌面视口及手机触摸模拟，真实github.io的结果见PR最终报告。
+不再为开发分支新增部署规则；后续正式部署及真实来源验收以main提交为准。页面验收脚本现复用同一交互检查，逐代码确认五面板、手单位、全部历史、2021年显示区间不取数，以及十字光标、缩放和平移。该交互检查已通过本地三种桌面视口及手机触摸模拟，真实github.io的结果见PR最终报告。
 
 ## 纯浏览器方案不能稳定工作时的免费替代设计
 

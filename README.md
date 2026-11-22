@@ -12,7 +12,7 @@ A 股股票和主要指数的日线数据、技术指标与静态图表分析引
 
 浏览器 `engine.mjs` 对照移植Python原有算法，图表适配层不计算公式。成交量源入口只统一一次单位：东方财富为手；腾讯sh688/sh689原始股数转手，其他受支持股票/指数保持手，成交额万元转元。图表及VOL5/VOL10不再除以100。MACD柱保持 `2×(DIF−DEA)`，RSI/ADX初始化和预热null保持原定义。日历与停牌证据由Python构建，越界拒绝请求，不推测节假日或补造行情。
 
-部署工作流使用pages:write权限尝试自动启用Actions类型Pages。若GitHub因权限或仓库资格拒绝，维护者需在 **Settings → Pages → Source** 选择 **GitHub Actions**。仓库现已确认Public且Pages已启用（Source为GitHub Actions）。若报“Branch feat/github-pages is not allowed”，需要在github-pages环境的Deployment branches and tags中新增该分支，并保留main规则。若github-pages环境限制部署分支，本轮需允许 `feat/github-pages` 以便合并前审查部署；如设置了部署审批，批准相应任务。PR构建只测试、上传产物，部署job仅对main或本轮开发分支push执行。工作流安排工作日UTC09:20重建日历；日历有效范围明确写入calendar.json，最多到当年年底，超出范围提示更新。合并后恢复仅main部署。
+仓库已公开并启用Pages，Source为 **GitHub Actions**。Pages自动部署仅由main分支push触发，手动运行和定时任务也仅允许main部署；PR保留构建、测试和审查产物，不允许部署。部署成功后继续在真实github.io来源验收同一提交。github-pages环境只需允许main；此前为预览手动添加的feat/github-pages规则可在环境设置中移除。工作流安排工作日UTC09:20重建日历；日历有效范围明确写入calendar.json，最多到当年年底，超出范围提示更新。
 
 本地开发验证（仅开发者需要Python和Node；线上访客不需要）：
 

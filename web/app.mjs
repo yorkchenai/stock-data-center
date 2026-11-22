@@ -1,4 +1,21 @@
 import { COLORS, PANELS, dateKey, formatValue, seriesData } from "./data.mjs";
+import { fetchHistory } from "./providers.mjs";
+
+const isPages = document.documentElement?.dataset?.mode === "pages";
+let calendarPromise;
+function loadCalendar() {
+  calendarPromise ||= fetch("./calendar.json", { cache: "no-store" })
+    .then((response) => {
+      if (!response.ok)
+        throw new Error(`无法读取交易日历（HTTP ${response.status}）`);
+      return response.json();
+    })
+    .catch((error) => {
+      calendarPromise = null;
+      throw error;
+    });
+  return calendarPromise;
+}
 
 const LC = window.LightweightCharts;
 const elements = Object.fromEntries(
@@ -30,6 +47,7 @@ const elements = Object.fromEntries(
     "locate-date",
     "daily-values",
     "validation-note",
+    "data-timestamp",
   ].map((id) => [id, document.getElementById(id)]),
 );
 const state = {
@@ -37,6 +55,7 @@ const state = {
   rows: [],
   byDate: new Map(),
   busy: false,
+  displayRangeDraft: false,
 };
 const detailGroups = [
   [
@@ -290,12 +309,17 @@ chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
     state.rows[Math.min(state.rows.length - 1, Math.floor(range.to))];
   if (first && last) {
     elements["visible-range"].textContent = `显示 ${first.date} — ${last.date}`;
-    elements["display-start"].value = first.date;
-    elements["display-end"].value = last.date;
+    // A redraw/range callback can arrive while the user edits either date.
+    // Keep that unsubmitted draft until Apply or an explicit chart action.
+    if (!state.displayRangeDraft) {
+      elements["display-start"].value = first.date;
+      elements["display-end"].value = last.date;
+    }
   }
 });
 
 function setRange(count) {
+  state.displayRangeDraft = false;
   if (!state.rows.length) return;
   if (count === "all") chart.timeScale().fitContent();
   else
@@ -320,9 +344,12 @@ function displayDataset(dataset) {
   const instrument = dataset.instrument;
   const symbol = instrument.market + instrument.code;
   const name =
-    symbol === "sh000688" && instrument.kind === "index"
-      ? "科创50"
-      : instrument.code;
+    typeof dataset.instrument_name === "string" &&
+    dataset.instrument_name.trim()
+      ? dataset.instrument_name.trim()
+      : symbol === "sh000688" && instrument.kind === "index"
+        ? "科创50"
+        : "名称暂不可用";
   elements["instrument-name"].textContent = name;
   elements["instrument-code"].textContent =
     `${symbol} · ${instrument.kind === "index" ? "指数" : "A股股票"}`;
@@ -341,26 +368,36 @@ function displayDataset(dataset) {
     input.min = firstDate;
     input.max = lastDate;
   }
-  elements.symbol.readOnly = !dataset.live_analysis;
-  elements.kind.disabled = !dataset.live_analysis;
-  elements.start.disabled = !dataset.live_analysis;
-  elements.end.disabled = !dataset.live_analysis;
+  const canLoad = isPages || dataset.live_analysis;
+  elements.symbol.readOnly = !canLoad;
+  elements.kind.disabled = !canLoad;
+  elements.start.disabled = !canLoad;
+  elements.end.disabled = !canLoad;
+  elements["data-timestamp"].textContent = dataset.snapshot
+    ? `存档样本 · 构建于 ${dataset.generated_at_utc}；非最新行情`
+    : dataset.fetched_at_utc
+      ? `取数完成 ${dataset.fetched_at_utc}`
+      : "";
   const check = dataset.validation;
   elements["validation-note"].textContent = check
-    ? `已确认停牌 ${check.confirmed_suspension_sessions?.length || 0} 日；未核实缺口 ${check.unverified_missing_sessions?.length ?? check.missing_sessions.length} 日。股票完整性以运行报告为准。`
+    ? `已确认停牌 ${check.confirmed_suspension_sessions?.length || 0} 日；未核实缺口 ${check.unverified_missing_sessions?.length ?? check.missing_sessions.length} 日；停牌数据冲突 ${check.suspension_data_conflicts?.length || 0} 日。未核实缺口包括上市前或范围边界，不能直接认定为源数据缺失。股票完整性仍需核实。`
     : "演示使用仓库已保存的1551条科创50真实日线。指标由现有Python模块计算。";
   showRow(dataset.rows.at(-1));
   setRange("244");
   requestAnimationFrame(positionLegends);
   setStatus(
-    dataset.live_analysis
-      ? "已载入历史。上方可重新获取行情，下方可调整显示区间。"
-      : "离线样本已载入，可在图表上方调整显示区间。获取其他行情请启动 Python 交互服务。",
+    isPages
+      ? dataset.snapshot
+        ? "已展示明确标注日期的存档样本。点击“加载历史行情”向公开行情源取数；调整显示区间只改变视窗。"
+        : `已从公开行情源载入历史。${dataset.attempts?.some((a) => a.status === "failed") ? "东方财富请求失败，已使用腾讯备用源。" : ""}调整显示区间只改变视窗。`
+      : dataset.live_analysis
+        ? "已载入历史。上方可重新获取行情，下方可调整显示区间。"
+        : "离线样本已载入，可在图表上方调整显示区间。获取其他行情请启动 Python 交互服务。",
   );
 }
 
 async function loadDemo() {
-  const response = await fetch("./api/demo");
+  const response = await fetch("./api/demo", { cache: "no-store" });
   if (!response.ok)
     throw new Error(`无法读取演示数据（HTTP ${response.status}）`);
   return response.json();
@@ -381,7 +418,7 @@ async function runLoad(action, message = "正在读取已保存样本，请稍�
     );
   } finally {
     state.busy = false;
-    elements.load.disabled = !state.dataset?.live_analysis;
+    elements.load.disabled = !isPages && !state.dataset?.live_analysis;
     elements.demo.disabled = false;
   }
 }
@@ -396,6 +433,7 @@ function showDateInterval(start, end) {
   }
   const rows = state.rows.filter((row) => row.date >= start && row.date <= end);
   if (!rows.length) throw new Error("所选区间没有交易记录，请调整日期");
+  state.displayRangeDraft = false;
   chart
     .timeScale()
     .setVisibleRange({ from: rows[0].date, to: rows.at(-1).date });
@@ -404,6 +442,16 @@ function showDateInterval(start, end) {
   setStatus("显示区间已调整，继续使用已载入的行情和指标。");
 }
 
+for (const name of ["display-start", "display-end"]) {
+  elements[name].addEventListener("input", () => {
+    state.displayRangeDraft = true;
+  });
+}
+for (const event of ["pointerdown", "wheel"]) {
+  elements.chart.addEventListener(event, () => {
+    state.displayRangeDraft = false;
+  });
+}
 elements["range-form"].addEventListener("submit", (event) => {
   event.preventDefault();
   try {
@@ -427,6 +475,11 @@ elements["query-form"].addEventListener("submit", (event) => {
     };
     if (options.start > options.end)
       throw new Error("开始日期不能晚于结束日期");
+    if (isPages) {
+      const result = await fetchHistory(options, await loadCalendar());
+      displayDataset(result);
+      return;
+    }
     if (!state.dataset?.live_analysis)
       throw new Error("离线样本仅支持已载入历史，请启动Python服务获取其他区间");
     const response = await fetch("./api/analyze", {
@@ -455,6 +508,7 @@ elements["locate-form"].addEventListener("submit", (event) => {
   const index = state.rows.indexOf(row);
   const current = chart.timeScale().getVisibleLogicalRange();
   const width = Math.max(20, current ? current.to - current.from : 120);
+  state.displayRangeDraft = false;
   chart.timeScale().setVisibleLogicalRange({
     from: Math.max(0, index - width / 2),
     to: Math.min(state.rows.length - 1, index + width / 2),
@@ -465,4 +519,5 @@ elements["locate-form"].addEventListener("submit", (event) => {
   showRow(row);
   setStatus(`已定位 ${row.date}，右侧显示该交易日原始指标数值。`);
 });
+if (isPages) elements.demo.textContent = "查看存档样本";
 runLoad(async () => displayDataset(await loadDemo()));

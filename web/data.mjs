@@ -1,4 +1,4 @@
-// Presentation adapters only. Prices, volume and every indicator come from Python.
+// Presentation adapters only. Consume canonical values from either engine.
 export const COLORS = {
   rise: "#cb4551",
   fall: "#168575",

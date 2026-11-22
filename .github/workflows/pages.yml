@@ -1,0 +1,149 @@
+name: Pages build and deployment
+on:
+  pull_request:
+    paths:
+      [
+        "web/**",
+        "stock_analysis/**",
+        "scripts/*pages*",
+        "scripts/calculate_browser_indicators.mjs",
+        "tests/**",
+        "package*.json",
+        "requirements.txt",
+        ".github/workflows/pages.yml",
+      ]
+  push:
+    branches: [main]
+    paths:
+      [
+        "web/**",
+        "stock_analysis/**",
+        "scripts/*pages*",
+        "scripts/calculate_browser_indicators.mjs",
+        "tests/**",
+        "package*.json",
+        "requirements.txt",
+        ".github/workflows/pages.yml",
+      ]
+  schedule:
+    # Rebuild the bounded calendar daily. Quotes are fetched by the browser.
+    - cron: "20 9 * * 1-5"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci --ignore-scripts
+      - run: python -m unittest discover -s tests -v
+      - run: npm test
+      - run: python -m stock_analysis.pages --output work/pages-site
+      - name: Desktop and mobile layout tests
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          npm run test:browser
+      - name: Save reviewable site and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            work/pages-site/
+            work/pages-browser/
+          retention-days: 30
+          if-no-files-found: error
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: work/pages-site
+  live-probe:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci --ignore-scripts
+      - run: python -m stock_analysis.pages --output work/probe-root/stock-data-center
+      - name: Probe live CORS and JSONP from a local HTTP origin
+        run: |
+          python -m http.server 8765 --bind 127.0.0.1 --directory work/probe-root > work/probe-server.log 2>&1 &
+          probe_server_pid=$!
+          trap 'kill "$probe_server_pid"' EXIT
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          PAGES_URL=http://127.0.0.1:8765/stock-data-center/ node scripts/probe_pages_sources.mjs
+      - name: Python raw-response adapter and indicator comparison
+        if: always()
+        run: python -m scripts.verify_pages_live
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pages-live-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: work/pages-live/
+          retention-days: 30
+          if-no-files-found: error
+  deploy:
+    needs: [build, live-probe]
+    # Only main can deploy, including manual runs. PRs keep read-only checks.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/deploy-pages@v4
+        id: deployment
+  deployed-probe:
+    needs: deploy
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci --ignore-scripts
+      - name: Verify the actual GitHub Pages origin
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          PAGES_URL=https://yorkchenai.github.io/stock-data-center/ node scripts/probe_pages_sources.mjs
+      - if: always()
+        run: python -m scripts.verify_pages_live
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pages-deployed-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: work/pages-live/
+          retention-days: 30
+          if-no-files-found: error

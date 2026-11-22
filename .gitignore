@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .venv/
 work/
+node_modules/
 # New runs are reproducible artifacts, retained locally, never overwrite legacy data.
 results/sh*_stock/
 results/sz*_stock/

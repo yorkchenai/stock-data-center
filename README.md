@@ -2,6 +2,34 @@
 
 A 股股票和主要指数的日线数据、技术指标与静态图表分析引擎。
 
+## GitHub Pages 在线版（第三阶段候选）
+
+目标地址：<https://yorkchenai.github.io/stock-data-center/>。实际部署状态以本分支的 **Pages build and deployment** 工作流及其部署后探测为准；本地构建成功不能代表线上取数成功。
+
+在线版复用现有五面板，不需要用户下载仓库或运行Python。输入例如 `000688`、`600519`、`399006`、`sh000001`，选择行情区间并点击“加载历史行情”。页面通过HTTPS CORS直接访问东方财富，失败后尝试腾讯不复权日线；腾讯按两年分段请求，保留整个请求区间。调整显示日期、缩放和拖动只改变已载入视窗。股票/指数识别范围与现有Python入口一致；`000001`请明确sh/sz或类型。
+
+行情数据源没有本项目可承诺的稳定性或限额。失败会明确显示错误及保留数据的日期，不静默使用过期行情。启动时的科创50存档样本标注为“非最新行情”，需要点击加载获取所选区间。没有持久化行情缓存，显式加载使用no-store；页面显示来源、取数时间、行情起止日期及缺口信息。
+
+浏览器 `engine.mjs` 对照移植Python原有算法，图表适配层不计算公式。成交量源入口只统一一次单位：东方财富为手；腾讯sh688/sh689原始股数转手，其他受支持股票/指数保持手，成交额万元转元。图表及VOL5/VOL10不再除以100。MACD柱保持 `2×(DIF−DEA)`，RSI/ADX初始化和预热null保持原定义。日历与停牌证据由Python构建，越界拒绝请求，不推测节假日或补造行情。
+
+仓库已公开并启用Pages，Source为 **GitHub Actions**。Pages自动部署仅由main分支push触发，手动运行和定时任务也仅允许main部署；PR保留构建、测试和审查产物，不允许部署。部署成功后继续在真实github.io来源验收同一提交。github-pages环境只需允许main；此前为预览手动添加的feat/github-pages规则可在环境设置中移除。工作流安排工作日UTC09:20重建日历；日历有效范围明确写入calendar.json，最多到当年年底，超出范围提示更新。
+
+本地开发验证（仅开发者需要Python和Node；线上访客不需要）：
+
+```bash
+python -m pip install -r requirements.txt
+npm ci --ignore-scripts
+python -m unittest discover -s tests -v
+npm test
+python -m stock_analysis.pages --output work/pages-site
+npm run test:browser
+python -m http.server 8765 --bind 127.0.0.1 --directory work/pages-site
+```
+
+浏览器测试使用系统Chromium，可通过 `CHROMIUM_PATH` 指定已安装的Chrome/Chromium。站点使用相对路径，测试覆盖 `/stock-data-center/` 子路径、三种桌面视口和手机触摸视口。工作流上传站点、截图及真实接口探测/逐日数值对照报告，保留30天。
+
+实现依据、精确测试范围、网络限制和免费Actions快照替代设计见 [第三阶段验收记录](docs/github-pages-validation.md)。实际Pages可用性验证失败时，不能声称已支持任意代码在线取数。本阶段保留全部Python后端、CLI和已有数据及PNG。
+
 ## 交互式技术分析界面
 
 从仓库根目录启动本地服务，运行时使用已有 Python 依赖。图表库随仓库保存，启动科创50演示可离线完成，无需 Node 或前端构建步骤。

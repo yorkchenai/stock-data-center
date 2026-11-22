@@ -344,9 +344,12 @@ function displayDataset(dataset) {
   const instrument = dataset.instrument;
   const symbol = instrument.market + instrument.code;
   const name =
-    symbol === "sh000688" && instrument.kind === "index"
-      ? "科创50"
-      : instrument.code;
+    typeof dataset.instrument_name === "string" &&
+    dataset.instrument_name.trim()
+      ? dataset.instrument_name.trim()
+      : symbol === "sh000688" && instrument.kind === "index"
+        ? "科创50"
+        : "名称暂不可用";
   elements["instrument-name"].textContent = name;
   elements["instrument-code"].textContent =
     `${symbol} · ${instrument.kind === "index" ? "指数" : "A股股票"}`;

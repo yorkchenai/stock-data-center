@@ -113,10 +113,20 @@ try {
         { timeout: 180000 },
       );
       summary.ui_status = await page.locator("#status").textContent();
+      summary.instrument_name = await page
+        .locator("#instrument-name")
+        .textContent();
+      summary.name_displayed =
+        Boolean(result.dataset.instrument_name) &&
+        Boolean(summary.instrument_name?.trim()) &&
+        summary.instrument_name !== result.dataset.instrument.code &&
+        summary.instrument_name !== "名称暂不可用";
       summary.ui_passed =
         !(await page.locator("#status").getAttribute("class")).includes(
           "error",
-        ) && (await page.locator(".pane-legend").count()) === 5;
+        ) &&
+        (await page.locator(".pane-legend").count()) === 5 &&
+        summary.name_displayed;
       if (!summary.ui_passed) summary.status = "failed";
       if (summary.ui_passed) {
         try {

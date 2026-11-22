@@ -134,6 +134,7 @@ test("history loading and local display adjustments use separate actions", async
   }));
   const payload = {
     instrument: { code: "000688", market: "sh", kind: "index" },
+    instrument_name: "科创50",
     source: "repository_csv",
     requested_start: rows[0].date,
     requested_end: rows.at(-1).date,
@@ -227,6 +228,7 @@ test("history loading and local display adjustments use separate actions", async
     await flush();
     assert.equal(requests.length, 1);
     assert.equal(requests[0].url, "./api/demo");
+    assert.equal(element("instrument-name").textContent, "科创50");
     assert.match(element("status").textContent, /已载入历史/);
     const legend = element("legends").children[0];
     legend.offsetHeight = 70; // Simulate a wrapped legend after a resize.
@@ -271,12 +273,25 @@ test("history loading and local display adjustments use separate actions", async
       1,
       "out-of-range display must not trigger an implicit fetch",
     );
+    payload.instrument = { code: "600519", market: "sh", kind: "stock" };
+    payload.instrument_name = "贵州茅台";
+    element("symbol").value = "sh600519";
+    element("kind").value = "stock";
     element("query-form").submit();
     await flush();
     assert.equal(requests.length, 2);
     assert.equal(requests[1].method, "POST");
     assert.equal(requests[1].url, "./api/analyze");
-    assert.equal(JSON.parse(requests[1].body).symbol, "sh000688");
+    assert.equal(JSON.parse(requests[1].body).symbol, "sh600519");
+    assert.equal(element("instrument-name").textContent, "贵州茅台");
+    payload.instrument = { code: "399006", market: "sz", kind: "index" };
+    payload.instrument_name = null;
+    element("symbol").value = "sz399006";
+    element("kind").value = "index";
+    element("query-form").submit();
+    await flush();
+    assert.equal(element("instrument-name").textContent, "名称暂不可用");
+    assert.match(element("instrument-code").textContent, /sz399006/);
   } finally {
     names.forEach((name, index) => {
       if (saved[index]) Object.defineProperty(globalThis, name, saved[index]);

@@ -84,6 +84,7 @@ try {
         json: {
           data: {
             code: "000688",
+            name: "科创50",
             market: 1,
             klines: rows.map((r) =>
               [
@@ -135,6 +136,10 @@ try {
     );
     assert.ok(
       requests.some((url) => url.startsWith("https://push2his.eastmoney.com/")),
+    );
+    assert.equal(
+      await page.locator("#instrument-name").textContent(),
+      "科创50",
     );
     const controls = await checkChartControls(page, {
       firstDate: snapshot.rows[0].date,

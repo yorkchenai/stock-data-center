@@ -210,6 +210,62 @@ test("calendar keeps confirmed suspensions separate and rejects index interior g
     /日历/,
   );
 });
+test("Eastmoney names come from matching response metadata without extra requests", async () => {
+  let calls = 0;
+  const options = {
+    symbol: "600519",
+    kind: "auto",
+    start: row.date,
+    end: row.date,
+  };
+  const get = async (name) =>
+    fetchHistory(options, calendar, async () => {
+      calls++;
+      return {
+        data: {
+          code: "600519",
+          market: 1,
+          name,
+          klines: ["2025-01-06,10,11,12,9,234,123456"],
+        },
+      };
+    });
+  assert.equal((await get(" 贵州茅台 ")).instrument_name, "贵州茅台");
+  assert.equal(calls, 1);
+  for (const name of [null, {}, "  "])
+    assert.equal((await get(name)).instrument_name, null);
+});
+
+test("Tencent fallback uses only name metadata for the requested instrument", async () => {
+  let calls = 0;
+  const options = {
+    symbol: "600519",
+    kind: "auto",
+    start: row.date,
+    end: row.date,
+  };
+  const get = async (quote) =>
+    fetchHistory(options, calendar, async (url) => {
+      calls++;
+      if (url.includes("eastmoney")) throw new Error("test offline");
+      return {
+        data: {
+          sh600519: {
+            day: [[row.date, 10, 11, 12, 9, 234, {}, 0, 12]],
+            qt: { sh600519: quote },
+          },
+        },
+      };
+    });
+  assert.equal(
+    (await get(["1", "贵州茅台", "600519"])).instrument_name,
+    "贵州茅台",
+  );
+  assert.equal(calls, 2);
+  assert.equal((await get(["1", "其他标的", "000688"])).instrument_name, null);
+  assert.equal((await get(undefined)).instrument_name, null);
+});
+
 test("failed primary uses validated fallback, never an old snapshot or filled rows", async () => {
   let calls = 0;
   const result = await fetchHistory(

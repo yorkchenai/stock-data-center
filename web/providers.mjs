@@ -122,19 +122,39 @@ export async function fetchHistory(options, calendar, getJSON = requestJSON) {
   const attempts = [];
   for (const source of ["eastmoney", "tencent"]) {
     try {
+      let instrumentName = null;
+      const read = async (url) => {
+        const payload = await getJSON(url);
+        const key = instrument.market + instrument.code;
+        const data = payload?.data;
+        const quote = data?.[key]?.qt?.[key];
+        const name =
+          source === "eastmoney"
+            ? data?.code === instrument.code &&
+              data.market === (instrument.market === "sh" ? 1 : 0)
+              ? data.name
+              : null
+            : Array.isArray(quote) && quote[2] === instrument.code
+              ? quote[1]
+              : null;
+        if (typeof name === "string" && name.trim())
+          instrumentName = name.trim();
+        return payload;
+      };
       const rows =
         source === "eastmoney"
           ? parseEastmoney(
-              await getJSON(eastmoneyURL(instrument, start, end)),
+              await read(eastmoneyURL(instrument, start, end)),
               instrument,
             ).filter((r) => r.date >= start && r.date <= end)
-          : await fetchTencent(instrument, start, end, getJSON);
+          : await fetchTencent(instrument, start, end, read);
       if (!rows.length) throw new Error("请求区间内无行情");
       const validation = auditCalendar(rows, instrument, start, end, calendar);
       attempts.push({ source, status: "success", rows: rows.length });
       return {
         schema_version: 1,
         instrument,
+        instrument_name: instrumentName,
         source,
         requested_start: start,
         requested_end: end,

@@ -59,6 +59,25 @@ function synthetic(code, name, category, start, withBenchmark) {
 const first = synthetic("000001","合成测试 · 混合基金（A 类份额）","mixed","2020-01-02",true);
 const second = synthetic("000002","合成测试 · 短历史债券","bond","2026-03-02",false);
 const files = [first,second].map((fixture)=>({name:fixture.code+".json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(fixture))}));
+function fixtureBundle() {
+  const end=first.rows.at(-1).date;
+  const market=[["399997","合成指数甲"],["932139","合成指数乙"]];
+  const sectors=market.map(([code,name],i)=>({code,name,rank:i+1,quality:"strong",beta:.4,stability:1,
+    holdings:{status:i?"conflict":"unverified"},index_as_of:end,
+    windows:Object.fromEntries([60,120].map((n)=>[n,{count:n,partial_count:n,pearson:.8,partial:.7}]))}));
+  return {schema_version:1,kind:"fund_chart_bundle",fund:first,analysis:{
+    schema_version:1,kind:"fund_sector_analysis",fund_code:first.code,computed_at:"2026-11-20T12:00:00Z",
+    fund_as_of:end,model_as_of:end,sectors,
+  },indices:sectors.map(({code,name},i)=>({
+    schema_version:1,kind:"fund_sector_history",fund_code:first.code,code,name,
+    model_as_of:end,first:first.rows[0].date,last:end,currency:"CNY",basis:"price",volume_unit:i?null:"股",
+    source:{url:"https://example.test/fixture",name:"合成测试",volume_unit_evidence:i?null:"https://example.test/unit"},
+    quality:{internal_gaps:0},rows:first.rows.map((row)=>({date:row.date,close:row.unit_nav*100,
+      open:i?null:row.unit_nav*99,high:i?null:row.unit_nav*102,low:i?null:row.unit_nav*98,
+      MA5:row.unit_nav*100,MA10:row.unit_nav*100,MA20:row.unit_nav*100,MA60:row.unit_nav*100,
+      volume:i?null:100,VOL5:i?null:100,VOL10:i?null:100})),
+  }))};
+}
 const report = {mode:"explicitly labeled synthetic fund test",viewports:[]};
 try {
   for (const [width,height,mobile] of [[1440,900,false],[390,844,true]]) {
@@ -147,11 +166,26 @@ try {
     assert.equal(await value.innerText(),initial);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),true);
     await page.screenshot({path:path.join(output,`funds-detail-${width}.png`),fullPage:true});
+    await page.locator("#detail-import").setInputFiles({name:"test-fund-bundle.json",mimeType:"application/json",
+      buffer:Buffer.from(JSON.stringify(fixtureBundle()))});
+    await page.locator('#sector-chart[data-chart-mode="candles"]').waitFor();
+    assert.equal(await page.locator("#sector-vol label").count(),3);
+    assert.match(await page.locator("#sector-vol").innerText(),/股/);
+    assert.equal(await page.locator('#sector-chart table tr').count()>=3,true);
+    await page.locator("[data-indicator='VOL10']").uncheck();
+    assert.equal(await page.locator("[data-indicator='VOL10']").isChecked(),false);
+    await page.locator("#nav-raw").click();
+    assert.match(await page.locator("#nav-basis").innerText(),/原始单位净值/);
+    await page.locator("[data-index='932139']").click();
+    await page.locator('#sector-chart[data-chart-mode="close"]').waitFor();
+    assert.match(await page.locator("#sector-evidence").innerText(),/持仓资料存在冲突/);
+    assert.match(await page.locator("#sector-volume-note").innerText(),/暂不可用/);
     await page.getByRole("link",{name:"返回基金列表"}).click();
     await page.getByRole("link",{name:second.name}).click();
     assert.equal(await page.locator("[data-metric='sharpe'] strong").innerText(),"—");
     assert.equal(await page.locator("[data-metric='excess'] strong").innerText(),"—");
     assert.match(await page.locator("#holdings-data").innerText(),/暂无/);
+    assert.equal(await page.locator("#sector-tabs button").count(),0);
     await page.getByRole("link",{name:"返回基金列表"}).click();
     await page.reload();
     await page.getByRole("link",{name:first.name}).waitFor();

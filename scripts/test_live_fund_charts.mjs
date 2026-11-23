@@ -75,14 +75,23 @@ try {
     await page.locator("#nav-raw").click();
     assert.match(await page.locator("#nav-basis").textContent(),/原始单位净值/);
     assert.ok(await page.locator("#nav-chart canvas").count()>0);
+    const rawNav=(await page.locator("#nav-hover").textContent()).match(/(\d{4}-\d{2}-\d{2}) · (\d+\.\d+)/);
+    assert.ok(rawNav && Number(rawNav[2])>0);
     await page.locator("#nav-adjusted").click();
     assert.equal(await page.locator("#nav-hover").textContent(),incoming);
     await page.locator('[data-indicator="MA5"]').uncheck();
+    await page.locator("#sector-chart").scrollIntoViewIfNeeded();
     const chart=await page.locator("#sector-chart").boundingBox();
     await page.mouse.move(chart.x+chart.width*.55,chart.y+chart.height*.43);
     await page.waitForTimeout(150);
     const hover=await page.locator("#sector-ohlc").textContent();
     assert.match(hover,/\d{4}-\d{2}-\d{2} · 开/);
+    assert.notEqual(hover.slice(0,10),price.last);
+    const hovered=price.rows.find((row)=>row.date===hover.slice(0,10));
+    const locale=new Intl.NumberFormat("zh-CN",{maximumFractionDigits:2});
+    assert.ok(hovered);
+    const hoverMA5=await page.locator('[data-readout="MA5"]').textContent();
+    assert.equal(hoverMA5,hovered.MA5==null?"—":locale.format(hovered.MA5));
     const before=await page.locator("#sector-chart").getAttribute("data-visible-from");
     await page.mouse.wheel(0,-520);
     await page.waitForTimeout(300);
@@ -116,6 +125,7 @@ try {
     await page.screenshot({path:`${output}/${code}-desktop.png`,fullPage:true});
     assert.deepEqual(errors,[]);
     report.funds[code]={selected:index.code,quality:price.quality,first:price.first,last:price.last,
+      nav:{date:rawNav[1],unit_nav:Number(rawNav[2]),adjusted_readout:incoming},
       mode:chartMode,ohlc:(({date,open,high,low,close})=>({date,open,high,low,close}))(price.rows.at(-1)),
       ma,volume_unit:price.volume_unit,ranked:model.sectors.map((item)=>({
         code:item.code,quality:item.quality,rank:item.rank,beta:item.beta,stability:item.stability,
@@ -130,7 +140,7 @@ try {
         dispatchEvent(new PopStateEvent("popstate"));
       });
       assert.equal(await page.locator("#sector-tabs button").count(),0);
-      await page.locator("#fund-title").getByText(/中欧医疗/).waitFor();
+      await page.waitForFunction(()=>document.getElementById("fund-title").textContent.includes("中欧医疗"));
       await page.locator(chartCanvas).first().waitFor({timeout:300_000});
       assert.equal(await page.locator('[data-index="399997"]').count(),0);
       report.funds[code].switch_cleared=true;

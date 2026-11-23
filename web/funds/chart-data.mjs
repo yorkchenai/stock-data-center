@@ -57,7 +57,7 @@ export function normalizeAssociations(raw, fundCode) {
   }
   const distinct = new Set();
   const sectors = raw.sectors.map((item, i) => {
-    if (!INDEX_CODE.test(item?.code ?? "") || distinct.has(item.code) || item.rank !== i+1
+    if (typeof item?.code !== "string" || !INDEX_CODE.test(item.code) || distinct.has(item.code) || item.rank !== i+1
         || typeof item.name !== "string" || !item.name.trim() || !QUALITY.has(item.quality)
         || !finite(item.beta) || !bounded(item.stability, 0, 1) || !EVIDENCE.has(item.holdings?.status)) {
       throw new Error("关联分析包含无效的指数、排名或持仓证据。");

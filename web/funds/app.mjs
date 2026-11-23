@@ -45,6 +45,7 @@ const navChart = createNavChart($("nav-chart"),$("nav-hover"));
 const sectors = createSectorPanel();
 const bundles = new Map();
 let navMode = "adjusted";
+let navRange = [];
 const loopback = ["127.0.0.1","localhost","[::1]"].includes(location.hostname);
 const url = (code) => new URL(code ? `?fund=${code}` : "funds.html", location.href);
 const localURL = (path) => new URL("/api/funds" + path, location.origin);
@@ -310,7 +311,8 @@ function renderAnalysis(requestedStart, requestedEnd) {
       range = end>latest ? {error:"结束日期超出已载入历史。",rows:[]} : selectWindow(fund,start,end);
     } catch (error) {range={error:error.message,rows:[]};}
   }
-  renderNav(fund,chartStart,chartEnd);
+  navRange=[chartStart,chartEnd];
+  renderNav(fund,...navRange);
   const analysis = analyzePerformance(fund,range);
   const interval = range.start ? `${range.start} 至 ${range.end}` : "—";
   $("range-status").textContent = range.error ?? `统计范围 ${interval} · 已载入净值 ${fund.rows[0].date} 至 ${latest}`;
@@ -494,8 +496,8 @@ $("list-import").addEventListener("change",importFiles);
 $("detail-import").addEventListener("change",importFiles);
 $("back-to-funds").addEventListener("click",navigateLink);
 window.addEventListener("popstate",route);
-$("nav-adjusted").addEventListener("click",()=>{navMode="adjusted";renderAnalysis();});
-$("nav-raw").addEventListener("click",()=>{navMode="raw";renderAnalysis();});
+$("nav-adjusted").addEventListener("click",()=>{navMode="adjusted";renderNav(loaded.get(selectedCode),...navRange);});
+$("nav-raw").addEventListener("click",()=>{navMode="raw";renderNav(loaded.get(selectedCode),...navRange);});
 for (const [id,label] of detailPeriods) {
   const button = tag("button",label,{type:"button","data-period":id});
   button.addEventListener("click",()=>{rangeKey=id;syncButtons();if(id!=="custom") renderAnalysis();});

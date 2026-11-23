@@ -5,7 +5,7 @@
   "methodology": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/20240510102751-000986_cn.pdf",
   "indices": [
     {"code":"000300","name":"沪深300指数","short":"沪深300","role":"market"},
-    {"code":"000905","name":"中证500指数","short":"中证500","role":"market"},
+    {"code":"000905","name":"中证小盘500指数","short":"中证500","role":"market"},
     {"code":"000852","name":"中证1000指数","short":"中证1000","role":"market"},
     {"code":"000986","name":"中证全指能源指数","short":"全指能源","role":"industry","group":"energy"},
     {"code":"000987","name":"中证全指原材料指数","short":"全指材料","role":"industry","group":"materials"},

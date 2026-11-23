@@ -27,6 +27,7 @@ def read_catalog():
     payload = json.loads((ROOT / "research/sector_indices.json").read_text())
     return {item["code"]: {**item, "issuer": payload["issuer"], "calendar":payload["calendar"],
                            "basis":"price", "currency":"CNY",
+                           "known_live_from":"2024-06-01" if item["code"].startswith("932") else None,
                            "definition": ("https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/"
                                           f"indices/detail/files/zh_CN/{item['code']}factsheet.pdf")}
             for item in payload["indices"]}

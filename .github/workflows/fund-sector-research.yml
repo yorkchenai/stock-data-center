@@ -27,10 +27,13 @@ jobs:
         with:
           python-version: "3.11"
       - run: python -m pip install -r requirements.txt
-      - run: python -m scripts.audit_fund_sector_data --output sector-feasibility.json
+      - name: Run the in-memory study and write aggregate results
+        env:
+          OPENBLAS_NUM_THREADS: "1"
+        run: python -m scripts.audit_fund_sector_study --public-probe --output sector-study.json
       - uses: actions/upload-artifact@v4
         with:
-          name: sector-feasibility-${{ github.run_id }}-${{ github.run_attempt }}
-          path: sector-feasibility.json
+          name: sector-study-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sector-study.json
           retention-days: 14
           if-no-files-found: error

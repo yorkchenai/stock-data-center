@@ -44,8 +44,14 @@ function synthetic(code, name, category, start, withBenchmark) {
     }),
   };
   if (withBenchmark) {
-    payload.benchmark={official:true,name:"合成比较基准",source:"界面测试",rows:dates.map((date,i)=>({date,value:1+i*.00026+Math.sin(i/34)*.023}))};
-    payload.risk_free={source:"手算测试假设",annual_rate:.02,effective_from:start,effective_to:end};
+    payload.benchmark={official:true,name:"合成比较基准",source:"界面测试",
+      regimes:[{source:"界面测试",method:"single_index",effective_from:start,
+        components:[{id:"SYN",basis:"price",weight:1}]}],
+      series:[{id:"SYN",source:"界面测试",basis:"price",
+        rows:dates.slice(0,-1).map((date,i)=>({date,value:1+i*.00026+Math.sin(i/34)*.023}))}]};
+    payload.risk_free={name:"合成三个月利率",source:"界面测试",convention:"simple_act_365f",
+      effective_from:start,effective_to:end,max_age_days:3,
+      rows:dates.map((date,i)=>({date,annual_rate:.01+.001*Math.sin(i/35)}))};
     payload.holdings={source:"合成披露数据",period_end:"2026-09-30",disclosed_at:"2026-10-20",allocation:"股票 70% · 债券 20% · 现金 10%"};
   }
   return payload;
@@ -121,6 +127,9 @@ try {
       await page.mouse.move(bound.x+bound.width/2,bound.y+100);
       assert.equal(await page.locator("#core-metrics").innerText(),stats);
     }
+    assert.match(await page.locator("#benchmark-status").innerText(),/基准部分可用/);
+    assert.equal(await page.locator("[data-metric='excess'] strong").innerText(),"—");
+    assert.notEqual(await page.locator("[data-metric='sharpe'] strong").innerText(),"—");
     await page.locator("#benchmark-line").uncheck();
     await page.locator("#benchmark-line").check();
     await page.getByRole("button",{name:"自定义",exact:true}).click();
@@ -128,6 +137,8 @@ try {
     await page.locator("#fund-end").fill("2026-10-20");
     await page.getByRole("button",{name:"应用区间"}).click();
     assert.match(await page.locator("#range-status").innerText(),/2026-09-01 至 2026-10-20/);
+    assert.match(await page.locator("#benchmark-status").innerText(),/基准完整/);
+    assert.match(await page.locator("[data-metric='excess'] strong").innerText(),/个百分点/);
     await page.locator("#fund-start").fill("2026-11-01");
     await page.getByRole("button",{name:"应用区间"}).click();
     assert.match(await page.locator("#range-status").innerText(),/开始日期不能晚于结束日期/);

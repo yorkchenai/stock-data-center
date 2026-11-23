@@ -1,15 +1,19 @@
 """Emit only aggregate comparison diagnostics. Histories stay in memory."""
 from bisect import bisect_right
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import json
-from math import isclose, sqrt
+from math import isclose, isfinite, sqrt
 import statistics
 import subprocess
+from urllib.parse import urlencode
 
-from stock_analysis.data import fetch_daily
+import exchange_calendars as xcals
+import pandas as pd
+
+from stock_analysis.data import fetch_daily, request_json
 from stock_analysis.funds import SHANGHAI, download, load_fund
-from stock_analysis.fund_rates import load_chinabond_rates
+from stock_analysis.fund_rates import load_chinabond_rates, parse_yield_history
 from stock_analysis.symbols import resolve_symbol
 from stock_analysis.validation import audit_calendar
 
@@ -74,11 +78,58 @@ def benchmark_component():
         return {"id":"000300", "error":str(error)}
 
 
-def rate_history(end):
+def official_equity_index(code, end):
     try:
-        return load_chinabond_rates(RATE_START, end, download), None
-    except (OSError, ValueError, TimeoutError) as error:
-        return None, str(error)
+        params = urlencode({"indexCode":code, "startDate":RATE_START.strftime("%Y%m%d"),
+                            "endDate":end.strftime("%Y%m%d")})
+        url = "https://www.csindex.com.cn/csindex-home/perf/index-perf"
+        payload = request_json(f"{url}?{params}")
+        rows = payload["data"]
+        if not rows or any(str(row["indexCode"]) != code or not isfinite(float(row["close"]))
+                           or float(row["close"]) <= 0 for row in rows):
+            raise ValueError("empty or mismatched price series")
+        dates = sorted(pd.to_datetime([str(row["tradeDate"]) for row in rows], format="%Y%m%d").strftime("%Y-%m-%d"))
+        if len(set(dates)) != len(dates):
+            raise ValueError("duplicate CSI dates")
+        calendar = xcals.get_calendar("XSHG", start="2021-09-01", end=end.isoformat())
+        expected = set(calendar.sessions_in_range(RATE_START.isoformat(), end.isoformat()).strftime("%Y-%m-%d"))
+        observed = set(dates)
+        return {"id":code, "basis":"price", "index_name":rows[0]["indexNameCnAll"], "source":"中证指数",
+                "first":dates[0], "last":dates[-1], "observations":len(dates),
+                "missing_sessions":len(expected-observed), "unexpected_dates":len(observed-expected)}
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+        return {"id":code, "error":str(error)}
+
+
+def rate_history(end):
+    hosts = ("yield.chinabond.com.cn", "indices.chinabond.com.cn", "valuation.chinabond.com.cn")
+    paths = ("/cbweb-pbc-web/pbc/historyQuery", "/cbweb-cbrc-web/cbrc/historyQuery")
+    start = end - timedelta(days=12)
+    params = urlencode({"startDate":start.isoformat(), "endDate":end.isoformat(), "gjqx":"0",
+                        "qxId":"ycqx", "locale":"cn_ZH"})
+    candidates = [f"https://{host}{path}" for host in hosts for path in paths]
+
+    def verify(candidate):
+        try:
+            rows = parse_yield_history(download(f"{candidate}?{params}"), start, end)
+            return {"source":candidate, "observations":len(rows)}
+        except (OSError, ValueError, TimeoutError) as error:
+            return {"source":candidate, "error":str(error)}
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        probes = list(executor.map(verify, candidates))
+    for candidate, probe in zip(candidates, probes):
+        if not probe.get("observations"):
+            continue
+
+        def fetch(url):
+            return download(candidate + "?" + url.partition("?")[2])
+
+        try:
+            return load_chinabond_rates(RATE_START, end, fetch), probes
+        except (OSError, ValueError, TimeoutError) as error:
+            probe["history_error"] = str(error)
+    return None, probes
 
 
 def main():
@@ -87,10 +138,12 @@ def main():
         index_pending = executor.submit(benchmark_component)
         funds = list(funds_pending)
         end = date.fromisoformat(max(fund["rows"][-1]["date"] for fund in funds))
-        rates, rate_error = executor.submit(rate_history, end).result()
+        official_pending = [executor.submit(official_equity_index, code, end) for code in ("000300", "H30355")]
+        rates, rate_probes = executor.submit(rate_history, end).result()
         index = index_pending.result()
+        official_indices = [job.result() for job in official_pending]
     report = {"run_at": datetime.now(SHANGHAI).isoformat(), "price_index":index,
-              "rate_error":rate_error, "funds":{}}
+              "official_price_indices":official_indices, "rate_probes":rate_probes, "funds":{}}
     if rates:
         report["rate_history"] = {"name":rates["name"], "first":rates["rows"][0]["date"], "last":rates["effective_to"],
                                   "observations":len(rates["rows"])}

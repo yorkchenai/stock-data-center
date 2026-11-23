@@ -34,7 +34,15 @@
         ]
       }
     ],
-    "disclosed_periods": []
+    "disclosed_periods": [
+      {
+        "start": "2026-07-24",
+        "end": "2026-09-30",
+        "return": -0.0472,
+        "source": "华夏成长 2026 年三季报 §3.2.1（7 月 27 日含当日收益，起点使用 7 月 24 日净值）",
+        "source_url": "https://www.chinaamc.com/front/front/file/preview/85bec64eb1febf7837736ee5bb0a6cea/华夏成长证券投资基金2026年第3季度报告.pdf"
+      }
+    ]
   },
   "000311": {
     "official": true,

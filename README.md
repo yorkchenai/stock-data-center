@@ -34,7 +34,7 @@ python -m http.server 8765 --bind 127.0.0.1 --directory work/pages-site
 
 顶部新增「场外基金」与「场内 ETF」入口。场外列表支持搜索、排序、筛选、自选及列设置。详情包含六个区间指标、累计收益和基准、独立风险及持仓说明。场内 ETF 入口显示尚未接入。
 
-本地个人查询使用现有回环服务 `python -m stock_analysis.web --port 8765`，访问 `http://127.0.0.1:8765/funds.html`。静态 Pages 版支持导入本地净值 JSON。数据缺少基准、总回报或有来源的无风险利率时显示 —。本轮对基金源的联网请求受限，实际联网覆盖尚未验证。个人导入方法、数据许可边界、统计公式和验收见 [场外基金说明](docs/off-market-funds.md)。
+本地个人查询使用现有回环服务 `python -m stock_analysis.web --port 8765`，访问 `http://127.0.0.1:8765/funds.html`。静态 Pages 版支持导入本地净值 JSON。数据缺少基准、总回报或有来源的无风险利率时显示 —。GitHub runner 已验证天天基金目录和三只基金的历史接口。真实 GitHub Pages 来源的常规直连请求受 CORS 限制。个人导入方法、数据许可边界、统计公式和验收见 [场外基金说明](docs/off-market-funds.md)。
 
 ## 交互式技术分析界面
 

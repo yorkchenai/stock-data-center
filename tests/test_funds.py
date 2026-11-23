@@ -66,11 +66,13 @@ class FundProviderTests(unittest.TestCase):
             ["510000", "B", "测试ETF", "指数型", "B1"],
             ["123456", "C", "测试货币", "货币型", "C1"],
             ["654321", "D", "测试海外", "QDII-混合", "D1"],
+            ["234567", "E", "测试债券", "债券型-混合一级", "E1"],
         ]) + ';')
-        self.assertEqual(set(records), {"000001", "123456", "654321"})
+        self.assertEqual(set(records), {"000001", "123456", "654321", "234567"})
         self.assertEqual(records["000001"]["category"], "index")
         self.assertEqual(records["123456"]["category"], "money")
         self.assertEqual(records["654321"]["category"], "qdii")
+        self.assertEqual(records["234567"]["category"], "bond")
 
     def test_disclosed_csv_sorts_nav_and_never_treats_accumulated_as_total_return(self):
         source = StringIO("date,unit_nav,accumulated_nav\n2025-01-06,1.4,3.0\n2025-01-03,1.5,3.1\n")

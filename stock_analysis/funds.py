@@ -51,11 +51,15 @@ def assignment(text, name, optional=False):
 
 
 def category_for(label):
+    label = label.strip().upper()
     for text, category in (
         ("QDII", "qdii"), ("货币", "money"), ("FOF", "fof"),
-        ("指数", "index"), ("股票", "stock"), ("混合", "mixed"), ("债券", "bond"),
+        ("指数", "index"),
     ):
-        if text in label.upper():
+        if text in label:
+            return category
+    for prefix, category in (("股票", "stock"), ("混合", "mixed"), ("债券", "bond")):
+        if label.startswith(prefix):
             return category
     return "other" if label.strip() else "unknown"
 

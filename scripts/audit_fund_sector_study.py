@@ -9,7 +9,7 @@ import pandas as pd
 
 from scripts.audit_fund_sector_data import ROOT, collect, read_catalog, session_index
 from stock_analysis import funds
-from stock_analysis.sector_holdings import holdings_evidence
+from stock_analysis.sector_holdings import holdings_evidence, known_tracking
 from stock_analysis.sector_model import FUND, alignment, rank_associations
 from stock_analysis.sector_signals import technical_series, technical_snapshot
 from stock_analysis.sector_validation import walk_forward
@@ -102,7 +102,13 @@ def evaluate(fund_data,index_data,data_report,start,end,predict=True):
     for code,fund in fund_data.items():
         latest = min(end,fund["rows"][-1]["date"])
         holdings = holdings_evidence(code,reports,classifications,catalog,latest)
-        entry = {"name":fund["name"],"valuation_date":latest,"holdings":holdings}
+        extra_days = [row["date"] for row in fund["rows"] if start<=row["date"]<=end and pd.Timestamp(row["date"]) not in sessions]
+        entry = {"name":fund["name"],"valuation_date":latest,"holdings":holdings,
+                 "off_session_nav":{"count":len(extra_days),"examples":extra_days[:5]},
+                 "known_tracking":known_tracking(fund,catalog)}
+        if fund["category"]=="index":
+            result[code] = {**entry,"status":"use_disclosed_tracking"}
+            continue
         try:
             returns = alignment(fund,index_data,sessions)
         except ValueError as error:

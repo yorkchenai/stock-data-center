@@ -69,6 +69,17 @@ def error_status(exc):
     return {"status":"invalid_data", "reason":str(exc)[:110]}
 
 
+
+def read_with_transient_retry(get):
+    try:
+        return get()
+    except (ValueError, OSError) as exc:
+        retryable_data = str(exc).startswith("数据源缺少字段 fS_code")
+        if not retryable_data and error_status(exc)["status"]!="network_error":
+            raise
+        sleep(2)
+        return get()
+
 def summarize_index(frame, start, end):
     expected = session_index(start, end)
     inner = expected[(expected >= frame.index[0]) & (expected <= frame.index[-1])]
@@ -89,7 +100,7 @@ def collect_indices(start, end):
             report[code] = {**item, "status":"not_requested_after_restriction"}
             continue
         try:
-            frame = csi_history(item, start, end)
+            frame = read_with_transient_retry(lambda:csi_history(item, start, end))
             report[code] = {**item, **summarize_index(frame,start,end)}
             frames[code] = frame
         except (ValueError, KeyError, TypeError, OSError) as exc:
@@ -116,7 +127,8 @@ def collect_funds(start, end):
                 continue
             metadata = catalog.get(code) or {}
             try:
-                fund = funds.parse_history(funds.download(funds.HISTORY_URL.format(code=code)),code,metadata)
+                fund = read_with_transient_retry(lambda:funds.parse_history(
+                    funds.download(funds.HISTORY_URL.format(code=code)),code,metadata))
                 rows = fund["rows"]
                 report[code] = {"status":"ok" if fund["category"] == ("stock" if category == "active_stock" else "mixed")
                                 else "type_mismatch", "category":fund["category"], "name":fund["name"],

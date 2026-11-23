@@ -30,10 +30,19 @@ def fund_levels(fund, sessions):
         raise ValueError("unsupported_fund_frequency_or_type")
     if fund.get("return_basis") not in {"event_reinvested","adjusted_nav"}:
         raise ValueError("unsupported_total_return_basis")
-    rows = [row for row in fund["rows"] if sessions[0] <= pd.Timestamp(row["date"]) <= sessions[-1]]
-    levels = {row["date"]:row["return_index"] if not row.get("return_issue") else None for row in rows}
-    if len(levels) != len(rows):
+    rows = [(pd.Timestamp(row["date"]),row) for row in fund["rows"]]
+    if len({day for day,_ in rows}) != len(rows):
         raise ValueError("Duplicate fund valuation dates")
+    levels, unresolved_between_sessions = {}, set()
+    for day,row in rows:
+        if day < sessions[0] or day > sessions[-1]:
+            continue
+        if day in sessions:
+            levels[day] = row["return_index"] if not row.get("return_issue") else None
+        elif row.get("return_issue") or row["return_index"] is None:
+            unresolved_between_sessions.add(sessions[sessions.searchsorted(day)])
+    for day in unresolved_between_sessions:
+        levels[day] = None
     return session_levels(levels,sessions)
 
 

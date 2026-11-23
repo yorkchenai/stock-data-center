@@ -89,6 +89,19 @@ def make_fold(data, labels, regimes, position, horizon, feature_sets, outputs):
             "observations":len(test),"training_rows":len(train)}
 
 
+
+def explain_fold(returns, position, selection_cutoff, markets, sectors):
+    names = [*markets,*sectors]
+    aligned = returns[[FUND,*names]]
+    train = aligned.iloc[max(0,selection_cutoff-TRAIN_WINDOW+1):selection_cutoff+1].dropna()
+    test = aligned.iloc[position:position+TEST_BLOCK].dropna()
+    if len(train)<120 or test.empty:
+        return None
+    output = pd.DataFrame({"actual":test[FUND]})
+    for method in METHODS:
+        output[method] = fit_model(method,train[names],train[FUND]).predict(test[names])
+    return output
+
 def walk_forward(returns, technical, markets, candidates):
     if not markets or not candidates or len(returns)<MIN_TRAIN+2:
         return {"status":"insufficient_coverage","models":{}}
@@ -100,7 +113,7 @@ def walk_forward(returns, technical, markets, candidates):
     stages = pd.Series(np.where(market_trend>=0,"rising","falling"),index=market_trend.index).where(market_trend.notna())
     positions = pd.Series(np.arange(len(returns)),index=returns.index)
     outputs = {method:{h:[] for h in HORIZONS} for method in METHODS}
-    folds = []
+    folds, explanations = [], []
     # Start relative to the fund's available observations. A young fund with
     # insufficient chronological training history stays unverified.
     available = np.flatnonzero(returns[FUND].notna())
@@ -122,6 +135,9 @@ def walk_forward(returns, technical, markets, candidates):
             if entry:
                 horizons[h] = entry
         if horizons:
+            explained = explain_fold(returns,position,selection_cutoff,markets,codes)
+            if explained is not None:
+                explanations.append(explained)
             folds.append({"selection_through":returns.index[selection_cutoff].date().isoformat(),
                           "selected":codes,"horizons":horizons})
     result = {}
@@ -139,6 +155,11 @@ def walk_forward(returns, technical, markets, candidates):
                            "sector_increment":paired_improvement(predictions,h),"test_blocks":len(blocks),
                            "first":predictions.index[0].date().isoformat(),"last":predictions.index[-1].date().isoformat()}
         result[method] = measures
+    explanatory_oos = {}
+    if explanations:
+        same_day = pd.concat(explanations)
+        explanatory_oos = {"n":len(same_day), "purpose":"contemporaneous_explanation",
+                           "r2":{method:r_squared(same_day.actual,same_day[method]) for method in METHODS}}
     return {"status":"retrospective_assumed_availability" if folds else "insufficient_forward_folds",
-            "models":result,"folds":folds,"signal_delay_sessions":DATA_LAG,
+            "models":result,"folds":folds,"contemporaneous_oos":explanatory_oos,"signal_delay_sessions":DATA_LAG,
             "target_anchor_delay_sessions":TARGET_START_LAG,"training_window_sessions":TRAIN_WINDOW}

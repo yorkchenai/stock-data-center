@@ -26,8 +26,19 @@ try {
     return Promise.all(Object.entries(endpoints).map(async ([name,provider])=>{
       try {
         const response=await fetch(provider,{mode:"cors",credentials:"omit",signal:AbortSignal.timeout(7_000)});
-        await response.body?.cancel();
-        return {name,status:response.ok ? "cors_readable" : "http_error",http_status:response.status};
+        const result = {name,status:response.ok ? "cors_readable" : "http_error",http_status:response.status};
+        if (name === "official_disclosure" && response.ok) {
+          const doc = new DOMParser().parseFromString(await response.text(),"text/html");
+          const isNav = /^\d{4}-\d{2}-\d{2}$/;
+          result.valuation_tables = [...doc.querySelectorAll("table")].flatMap((table)=>{
+            const count = [...table.rows].filter((tr)=>isNav.test(tr.cells[0]?.textContent.trim())).length;
+            if (!count) return [];
+            return [{headers:[...(table.rows[0]?.cells ?? [])].map((c)=>c.textContent.trim()),observations:count}];
+          });
+        } else {
+          await response.body?.cancel();
+        }
+        return result;
       } catch(error) { return {name,status:error.name==="TimeoutError" ? "timeout" : "cors_or_network_error"}; }
     }));
   });

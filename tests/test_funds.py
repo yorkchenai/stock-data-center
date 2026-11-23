@@ -50,6 +50,7 @@ class FundProviderTests(unittest.TestCase):
 
     def test_never_executes_source_script_or_accepts_the_wrong_symbol(self):
         self.assertEqual(assignment('var fS_name = "测试"; alert("external");', "fS_name"), "测试")
+        self.assertEqual(assignment('/*基金名称*/var fS_name = "测试";', "fS_name"), "测试")
         with self.assertRaisesRegex(ValueError, "不是 JSON 常量"):
             assignment('var fS_name = "a" + "b";', "fS_name")
         with self.assertRaisesRegex(ValueError, "不同的基金代码"):

@@ -38,7 +38,7 @@ def assignment(text, name, optional=False):
     """Parse a JSON value from a named JavaScript assignment without executing it."""
     # Keep the semicolon in the consumed tail check so a literal followed by an
     # expression or a function cannot be mistaken for a supported JSON value.
-    match = re.search(r"(?:^|[;\n])\s*(?:var\s+)?" + re.escape(name) + r"\s*=\s*", text)
+    match = re.search(r"(?:^|[;\n]|\*/)\s*(?:(?:var|let|const)\s+)?" + re.escape(name) + r"\s*=\s*", text)
     if not match:
         if optional:
             return None
@@ -136,10 +136,10 @@ def parse_history(text, code, metadata=None, retrieved_at=None):
         raise ValueError("请输入六位场外基金代码。")
     if assignment(text, "fS_code") != code:
         raise ValueError("行情源返回了不同的基金代码。")
-    name = assignment(text, "fS_name")
+    record = metadata or {}
+    name = assignment(text, "fS_name", optional=True) or record.get("name")
     if not isinstance(name, str) or not name.strip() or not is_off_market(name):
         raise ValueError("行情源没有识别到场外基金名称。")
-    record = metadata or {}
     actual_category = record.get("category", "unknown")
     as_of = retrieved_at or datetime.now(timezone.utc)
     latest_allowed = as_of.astimezone(SHANGHAI).date().isoformat()

@@ -51,10 +51,11 @@ def csi_history(item, start, end, get=funds.download):
             or not np.isfinite(frame.close).all() or (frame.close <= 0).any()):
         raise ValueError("invalid_dates_or_prices")
     ohlc = frame[["open","high","low"]]
-    valid = ((ohlc > 0).all(axis=1) & (frame.low <= frame[["open","close"]].min(axis=1))
+    valid = (np.isfinite(ohlc).all(axis=1) & (ohlc > 0).all(axis=1) & (frame.low <= frame[["open","close"]].min(axis=1))
              & (frame.high >= frame[["open","close"]].max(axis=1)))
     frame.loc[~valid,["open","high","low"]] = np.nan
-    frame[["volume","turnover"]] = frame[["volume","turnover"]].where(frame[["volume","turnover"]] >= 0)
+    amount = frame[["volume","turnover"]]
+    frame[amount.columns] = amount.where(np.isfinite(amount) & (amount >= 0))
     return frame
 
 

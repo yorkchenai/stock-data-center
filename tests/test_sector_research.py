@@ -35,6 +35,19 @@ class SectorResearchTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"outside"):
             alignment(fund,{"industry":extra},days)
 
+    def test_valid_weekend_nav_is_not_an_extra_market_session(self):
+        sessions = pd.DatetimeIndex(["2026-06-26", "2026-06-29", "2026-06-30"])
+        fund = {"category":"mixed","valuation_frequency":"daily","return_basis":"adjusted_nav",
+                "rows":[{"date":date,"return_index":level}
+                        for date,level in [("2026-06-26",1),("2026-06-28",1.02),
+                                           ("2026-06-29",1.03),("2026-06-30",1.04)]]}
+        aligned = alignment(fund,{},sessions)
+        self.assertEqual(len(aligned),3)
+        self.assertAlmostEqual(aligned[FUND].iloc[1],.03)
+        fund["rows"][1]["return_issue"] = "unresolved_cash_event"
+        excluded = alignment(fund,{},sessions)
+        self.assertTrue(excluded[FUND].isna().all())
+
     def test_partial_removes_common_market_and_duplicate_exposures(self):
         controls = correlations(self.returns,"c",["m"],120)
         self.assertGreater(controls["pearson"], .3)

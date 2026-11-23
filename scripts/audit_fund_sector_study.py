@@ -71,11 +71,12 @@ def load_local(directory,start,end):
             if not set(extra).issubset(frame.columns):
                 raise ValueError("Supply all of open, high, low or use close-only")
             has_values = frame[extra].notna().any(axis=1)
-            valid = ((frame[extra]>0).all(axis=1) & (frame.low<=frame[["open","close"]].min(axis=1))
+            valid = (np.isfinite(frame[extra]).all(axis=1) & (frame[extra]>0).all(axis=1) & (frame.low<=frame[["open","close"]].min(axis=1))
                      & (frame.high>=frame[["open","close"]].max(axis=1)))
             if (has_values & ~valid).any():
                 raise ValueError("Invalid local OHLC")
-        if meta.get("volume_unit") and ("volume" not in frame or (frame.volume<0).any()):
+        if meta.get("volume_unit") and ("volume" not in frame or not np.isfinite(frame.volume.dropna()).all()
+                                        or (frame.volume<0).any()):
             raise ValueError("Invalid local volume")
         index_data[code] = frame
         report["indices"][code] = {**expected,"status":"ok","count":len(frame),

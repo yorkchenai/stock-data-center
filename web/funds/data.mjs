@@ -1,4 +1,6 @@
 import { validDate } from "../engine.mjs";
+import { normalizeBenchmark } from "./benchmark.mjs";
+import { normalizeRiskFree } from "./risk-free.mjs";
 
 export const FUND_CATEGORIES = {
   stock: "股票型", mixed: "混合型", bond: "债券型", index: "指数 / ETF 联接",
@@ -63,32 +65,8 @@ export function normalizeFund(raw) {
   if (basis !== "unavailable" && !rows.some((row) => row.return_index !== null)) {
     throw new Error("已声明总回报口径，实际缺少有效序列。");
   }
-  let benchmark = null;
-  if (raw.benchmark != null) {
-    if (!optionalText(raw.benchmark.name) || !optionalText(raw.benchmark.source) || raw.benchmark.official !== true) {
-      throw new Error("基准缺少正式业绩比较基准名称或出处。");
-    }
-    const points = raw.benchmark.rows ?? [];
-    let previous = "";
-    if (!Array.isArray(points) || points.length > 24000) throw new Error("基准序列无效。");
-    for (const point of points) {
-      const date = validDate(point?.date);
-      if (date <= previous || date > latestDay || !validNumber(point.value) || point.value <= 0) {
-        throw new Error("基准序列日期或数值无效。");
-      }
-      previous = date;
-    }
-    benchmark = {name: raw.benchmark.name, source: raw.benchmark.source, rows: points};
-  }
-  let riskFree = null;
-  if (raw.risk_free != null) {
-    const rate = raw.risk_free;
-    if (!optionalText(rate.source) || !validNumber(rate.annual_rate) || rate.annual_rate <= -1
-      || validDate(rate.effective_from) > validDate(rate.effective_to)) {
-      throw new Error("无风险利率缺少有效年利率、来源或覆盖区间。");
-    }
-    riskFree = rate;
-  }
+  const benchmark = normalizeBenchmark(raw.benchmark, shanghaiToday());
+  const riskFree = normalizeRiskFree(raw.risk_free, shanghaiToday());
   const category = Object.hasOwn(FUND_CATEGORIES, raw.category) ? raw.category : "unknown";
   const normalFrequency = ["stock", "mixed", "bond", "index", "other"].includes(category) && raw.valuation_frequency === "daily";
   const holdings = raw.holdings;

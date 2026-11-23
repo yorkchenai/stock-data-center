@@ -14,6 +14,7 @@ function status(id, text, error = false) {
   $(id).dataset.state = error ? "error" : "";
 }
 const pct = (v) => (100 * v).toFixed(2) + "%";
+const pp = (v) => (100 * v).toFixed(2) + " 个百分点";
 const decimal = (v) => v.toFixed(2);
 const nav = (v) => v.toFixed(4);
 const shown = (v, format) => v == null ? "—" : format(v);
@@ -34,7 +35,7 @@ const coreDefinitions = [
   ["sharpe","夏普比率",decimal,"以有出处的年化无风险利率换算日利率。"],
   ["volatility","年化波动率",pct,"日收益样本标准差按 252 日年化。"],
   ["sortino","索提诺比率",decimal,"年化目标收益 0%，下行偏差包含全部日收益样本。"],
-  ["excess","超额收益",pct,"基金区间收益减去同起止日的官方比较基准收益。"],
+  ["excess","超额收益",pp,"基金区间收益减去同起止日的官方比较基准收益。"],
 ];
 const charts = createFundCharts();
 const loopback = ["127.0.0.1","localhost","[::1]"].includes(location.hostname);
@@ -270,7 +271,8 @@ function renderIdentity(code,fund) {
   }).format(new Date(fund.source.retrieved_at));
   showFacts($("fund-more"),[["基金成立日期",fund?.inception],["基金规模",fund?.size],["费率",fund?.fee],
     ["基金经理",fund?.fund_manager],["业绩比较基准",fund?.benchmark?.name ?? fund?.reference],
-    ["基准数据来源",fund?.benchmark?.source],["数据获取时间（上海）",sourceTime],
+    ["基准公式",fund?.benchmark?.formula],["基准披露出处",fund?.benchmark?.source],
+    ["基准披露链接",fund?.benchmark?.source_url],["数据获取时间（上海）",sourceTime],
     ["原始数据口径",fund?.source.method],["总回报口径",fund?.return_note ?? (fund?.return_basis==="adjusted_nav" ? "来源提供的复权总回报序列" : "—")]]);
   renderHoldings(fund);
   historyTable(fund);
@@ -313,10 +315,25 @@ function renderAnalysis(requestedStart, requestedEnd) {
     item.append(tag("span",label),tag("strong",shown(value.value,format)),tag("small",value.reason ?? (id.endsWith("Days") ? "自然日" : "")));
     return item;
   }));
-  $("risk-assumptions").textContent = "按 252 个净值观察日年化波动率。索提诺年化目标为 0%。"
-    + (fund?.risk_free ? ` 无风险年利率 ${pct(fund.risk_free.annual_rate)}，来源 ${fund.risk_free.source}。` : " 缺少有出处的无风险利率时不计算夏普。");
-  $("benchmark-status").textContent = analysis.points.benchmark.length
-    ? `基准来源 ${fund.benchmark.source}。两条曲线使用同一净值起点。` : (analysis.metrics.excess.reason ?? "");
+  const risk = fund?.risk_free;
+  const convention = {simple_act_365f:"单利 ACT/365F",effective_act_365f:"复利 ACT/365F",simple_act_360:"单利 ACT/360"};
+  const riskLabel = risk?.rows
+    ? `${risk.name} · ${convention[risk.convention]} · ${risk.effective_from} 至 ${risk.effective_to} · ${risk.source}`
+    : risk ? `年利率 ${pct(risk.annual_rate)} · 复利按 252 日折算 · ${risk.source}` : "缺少有出处的无风险利率时不计算夏普";
+  $("risk-assumptions").textContent = "日收益波动率与日超额收益夏普均按 252 个净值观察日年化。索提诺目标为 0%。" + riskLabel + "。";
+  const comparison = analysis.comparison;
+  const benchmark = fund?.benchmark;
+  const benchmarkStatus = {
+    complete:"基准完整，两条曲线以相同实际日期归零。",
+    partial:"基准部分可用，曲线截止于首个缺口前。",
+    disclosed:"该区间有官方披露的基准收益，日频曲线尚不可用。",
+    unverified:"该区间基准无法核验。",
+  };
+  $("benchmark-status").textContent = comparison
+    ? [benchmarkStatus[comparison.status], comparison.value == null ? null : "基准区间收益 " + pct(comparison.value) + "。",
+      comparison.disclosed ? "区间出处 " + comparison.disclosed.source + "。" : null,
+      comparison.status !== "disclosed" ? comparison.reason : null, benchmark?.source].filter(Boolean).join(" ")
+    : (analysis.metrics.excess.reason ?? "");
   $("fund-line").disabled = !analysis.points.fund.length;
   $("benchmark-line").disabled = !analysis.points.benchmark.length;
   charts.display("fund",analysis.points);

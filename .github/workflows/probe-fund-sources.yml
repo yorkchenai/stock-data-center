@@ -5,6 +5,10 @@ on:
     paths:
       - "stock_analysis/funds.py"
       - "stock_analysis/fund_event_evidence.json"
+      - "stock_analysis/fund_benchmarks.json"
+      - "stock_analysis/fund_rates.py"
+      - "web/funds/*.mjs"
+      - "scripts/probe_fund_comparison.py"
       - "scripts/probe_fund_sources.py"
       - "scripts/probe_fund_browser.mjs"
       - "scripts/probe_fund_script_isolation.mjs"
@@ -39,6 +43,10 @@ jobs:
           export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
           node scripts/probe_fund_browser.mjs > work/fund-probe/browser.json
           cat work/fund-probe/browser.json
+      - name: Cross-check fund comparisons and Sharpe without retaining histories
+        run: |
+          python -m scripts.probe_fund_comparison > work/fund-probe/comparison.json
+          cat work/fund-probe/comparison.json
       - uses: actions/upload-artifact@v4
         with:
           name: fund-source-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}

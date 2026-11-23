@@ -12,6 +12,7 @@ import csv
 import json
 import math
 import re
+import sys
 
 
 CATALOG_URL = "https://fund.eastmoney.com/js/fundcode_search.js"
@@ -228,6 +229,11 @@ def reconcile_cash(text, previous, nav, accumulated, growth, split_seen):
     return (cash, 1.0), None
 
 
+@lru_cache(maxsize=1)
+def official_benchmarks():
+    return json.loads(Path(__file__).with_name("fund_benchmarks.json").read_text(encoding="utf-8"))
+
+
 def parse_history(text, code, metadata=None, retrieved_at=None):
     if not isinstance(code, str) or not CODE.fullmatch(code):
         raise ValueError("请输入六位场外基金代码。")
@@ -319,7 +325,7 @@ def parse_history(text, code, metadata=None, retrieved_at=None):
         "source": {"name": "天天基金 / 东方财富", "url": f"https://fund.eastmoney.com/{code}.html",
                    "method": "确认单位净值及净值序列中的现金分红 / 份额折算",
                    "retrieved_at": as_of.isoformat()},
-        "rows": rows,
+        "rows": rows, "benchmark": official_benchmarks().get(code),
     }
 
 
@@ -347,7 +353,7 @@ def search_funds(term):
 
 
 def parse_disclosed_csv(stream, code, name, source_name, source_url, category="unknown",
-                        manager=None, inception=None, retrieved_at=None):
+                        manager=None, inception=None, retrieved_at=None, daily_nav=False):
     """Import NAV observations obtained from a cited report or authorized export."""
     if not CODE.fullmatch(code) or not name.strip() or not source_name.strip() or not source_url.startswith("https://"):
         raise ValueError("需提供六位基金代码、名称及 HTTPS 披露出处。")
@@ -386,7 +392,18 @@ def parse_disclosed_csv(stream, code, name, source_name, source_url, category="u
         "source": {"name": source_name, "url": source_url, "method": "个人导入披露净值 CSV",
                    "retrieved_at": as_of.isoformat()},
         "rows": sorted(rows, key=lambda row: row["date"]),
+        "valuation_frequency": "daily" if daily_nav else None,
+        "benchmark": official_benchmarks().get(code),
     }
+
+
+def attach_benchmark_data(fund, imported):
+    if imported.get("code") != fund["code"]:
+        raise ValueError("补充基准数据的基金代码不匹配。")
+    current = fund.get("benchmark")
+    if current is None or not isinstance(imported.get("series"), list):
+        raise ValueError("需提供已核验基金的成分点位序列。")
+    return {**fund, "benchmark": {**current, "series": imported["series"]}}
 
 
 def main():
@@ -402,6 +419,9 @@ def main():
     parser.add_argument("--category", default="unknown", choices=["stock", "mixed", "bond", "index", "qdii", "money", "fof", "other", "unknown"])
     parser.add_argument("--manager", help="Disclosed fund management company")
     parser.add_argument("--inception", help="Disclosed share-class inception date")
+    parser.add_argument("--daily-nav", action="store_true", help="Declare CSV as confirmed daily valuations")
+    parser.add_argument("--benchmark-data", type=Path, help="Local authorized benchmark component levels JSON")
+    parser.add_argument("--risk-free-start", type=date.fromisoformat, help="Opt in to local ChinaBond 3-month rates from YYYY-MM-DD")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if not CODE.fullmatch(args.code):
@@ -414,7 +434,7 @@ def main():
                 raise ValueError("本地源文件过大。")
             with args.nav_csv.open(encoding="utf-8-sig", newline="") as stream:
                 data = parse_disclosed_csv(stream, args.code, args.name, args.source_name, args.source_url,
-                                           args.category, args.manager, args.inception)
+                                           args.category, args.manager, args.inception, daily_nav=args.daily_nav)
         elif args.snapshot:
             with args.snapshot.open("rb") as stream:
                 body = stream.read(MAX_RESPONSE + 1)
@@ -425,6 +445,20 @@ def main():
             data = parse_history(body.decode("utf-8-sig"), args.code, metadata, modified_at)
         else:
             data = load_fund(args.code)
+        if args.benchmark_data:
+            if args.benchmark_data.stat().st_size > MAX_RESPONSE:
+                raise ValueError("补充基准数据文件过大。")
+            imported = json.loads(args.benchmark_data.read_text(encoding="utf-8-sig"))
+            if not isinstance(imported, dict):
+                raise ValueError("补充基准数据必须为 JSON 对象。")
+            data = attach_benchmark_data(data, imported)
+        if args.risk_free_start:
+            from .fund_rates import load_chinabond_rates
+            end = date.fromisoformat(data["rows"][-1]["date"])
+            try:
+                data = {**data, "risk_free": load_chinabond_rates(args.risk_free_start, end, download)}
+            except (OSError, ValueError, TimeoutError) as error:
+                print(f"历史无风险利率不可用：{error}", file=sys.stderr)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with args.output.open("x", encoding="utf-8") as stream:
             json.dump(data, stream, ensure_ascii=False, allow_nan=False)

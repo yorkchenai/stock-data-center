@@ -1,0 +1,131 @@
+{
+  "000001": {
+    "official": true,
+    "name": "中证800成长指数收益率×70%＋中债－综合全价（总值）指数收益率×30%",
+    "formula": "中证800成长指数收益率×70%＋中债－综合全价（总值）指数收益率×30%",
+    "source": "华夏基金 2026-06-27 基准变更公告及 2026 年三季报",
+    "source_url": "https://static.cninfo.com.cn/finalpage/2026-06-27/1225391047.PDF",
+    "regimes": [
+      {
+        "effective_from": "2001-12-18",
+        "effective_to": "2026-07-26",
+        "method": "none",
+        "source": "https://static.cninfo.com.cn/finalpage/2026-06-27/1225391047.PDF",
+        "note": "当时的基金合同未设业绩比较基准。"
+      },
+      {
+        "effective_from": "2026-07-27",
+        "method": "unverified",
+        "source": "https://static.cninfo.com.cn/finalpage/2026-06-27/1225391047.PDF",
+        "note": "尚未核实两只成分的完整日频数据及组合计算口径。",
+        "components": [
+          {
+            "id": "H30355",
+            "name": "中证800成长指数",
+            "basis": "price",
+            "weight": 0.7
+          },
+          {
+            "id": "CBA00203",
+            "name": "中债－综合全价（总值）指数",
+            "basis": "full_price",
+            "weight": 0.3
+          }
+        ]
+      }
+    ],
+    "disclosed_periods": []
+  },
+  "000311": {
+    "official": true,
+    "name": "95%×沪深300指数收益率＋1.5%（年收益率，评价时按期间折算）",
+    "formula": "95%×沪深300指数收益率＋1.5%（年收益率，评价时按期间折算）",
+    "source": "景顺长城基金产品资料及 2021 年更新招募说明书",
+    "source_url": "https://www.igwfmc.com/main/jjcp/product/000311/detail.html",
+    "regimes": [
+      {
+        "effective_from": "2021-11-26",
+        "method": "unverified",
+        "source": "https://m.cgbchina.com.cn/noticeNewDetail.gsp?id=2580980",
+        "annual_additive_rate": 0.015,
+        "note": "管理人披露按期间折算。日频组合规则和 1.5% 的精确日计数尚未核实。",
+        "components": [
+          {
+            "id": "000300",
+            "name": "沪深300指数",
+            "basis": "price",
+            "weight": 0.95
+          }
+        ]
+      }
+    ],
+    "disclosed_periods": [
+      {
+        "start": "2025-09-30",
+        "end": "2026-09-30",
+        "return": -0.0432,
+        "source": "景顺长城沪深300指数增强 2026 年三季报 §3.2.1",
+        "source_url": "https://doc.morningstar.com/Document/686600828.msdoc/?clientid=chinateam&key=4ceb1f0a7331680c"
+      },
+      {
+        "start": "2023-09-28",
+        "end": "2026-09-30",
+        "return": 0.2275,
+        "source": "景顺长城沪深300指数增强 2026 年三季报 §3.2.1",
+        "source_url": "https://doc.morningstar.com/Document/686600828.msdoc/?clientid=chinateam&key=4ceb1f0a7331680c"
+      },
+      {
+        "start": "2021-09-30",
+        "end": "2026-09-30",
+        "return": -0.0265,
+        "source": "景顺长城沪深300指数增强 2026 年三季报 §3.2.1",
+        "source_url": "https://doc.morningstar.com/Document/686600828.msdoc/?clientid=chinateam&key=4ceb1f0a7331680c"
+      }
+    ]
+  },
+  "110017": {
+    "official": true,
+    "name": "中债总指数（全价）",
+    "formula": "中债总指数（全价）",
+    "source": "易方达基金 2020 年 12 月基金合同及 2026 年三季报",
+    "source_url": "https://dataclouds.cninfo.com.cn/sjother2/fund/2026/20261027/47a86519db5d2b5d45b254b3a821dc31.pdf",
+    "regimes": [
+      {
+        "effective_from": "2020-12-18",
+        "method": "single_index",
+        "source": "https://cdn.efunds.com.cn/owch/data/notice/20201218/%E6%98%93%E6%96%B9%E8%BE%BE%E5%A2%9E%E5%BC%BA%E5%9B%9E%E6%8A%A5%E5%80%BA%E5%88%B8%E5%9E%8B%E8%AF%81%E5%88%B8%E6%8A%95%E8%B5%84%E5%9F%BA%E9%87%91%E5%9F%BA%E9%87%91%E5%90%88%E5%90%8C.pdf",
+        "components": [
+          {
+            "id": "CBA00303",
+            "name": "中债－总全价（总值）指数",
+            "basis": "full_price",
+            "weight": 1
+          }
+        ]
+      }
+    ],
+    "disclosed_periods": [
+      {
+        "start": "2025-09-30",
+        "end": "2026-09-30",
+        "return": 0.009,
+        "source": "易方达增强回报债券 2026 年三季报 §3.2.1",
+        "source_url": "https://dataclouds.cninfo.com.cn/sjother2/fund/2026/20261027/47a86519db5d2b5d45b254b3a821dc31.pdf"
+      },
+      {
+        "start": "2023-09-28",
+        "end": "2026-09-30",
+        "return": 0.049,
+        "source": "易方达增强回报债券 2026 年三季报 §3.2.1",
+        "source_url": "https://dataclouds.cninfo.com.cn/sjother2/fund/2026/20261027/47a86519db5d2b5d45b254b3a821dc31.pdf"
+      },
+      {
+        "start": "2021-09-30",
+        "end": "2026-09-30",
+        "return": 0.068,
+        "source": "易方达增强回报债券 2026 年三季报 §3.2.1",
+        "source_url": "https://dataclouds.cninfo.com.cn/sjother2/fund/2026/20261027/47a86519db5d2b5d45b254b3a821dc31.pdf"
+      }
+    ]
+  }
+}

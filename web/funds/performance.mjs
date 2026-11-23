@@ -1,5 +1,7 @@
 import { validDate } from "../engine.mjs";
 import { RETURN_ISSUES } from "./data.mjs";
+import { compareBenchmark } from "./benchmark.mjs";
+import { riskFreeReturns } from "./risk-free.mjs";
 
 export const PERIODS = [["1w","近1周"],["1m","近1月"],["3m","近3月"],["6m","近6月"],
   ["1y","近1年"],["3y","近3年"],["5y","近5年"]];
@@ -8,6 +10,11 @@ const DAY = 86_400_000;
 const mean = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
 const result = (value, reason = null) => Number.isFinite(value) ? {value, reason: null} : {value: null, reason};
 const fail = (reason) => result(null, reason);
+function sampleDeviation(values) {
+  const shifted = values.map((value) => value - values[0]);
+  const center = mean(shifted);
+  return Math.sqrt(shifted.reduce((sum, value) => sum + (value - center) ** 2, 0) / (values.length - 1));
+}
 const noBenchmark = "缺少对应的官方业绩基准及可对齐历史。";
 
 export function periodStart(end, key) {
@@ -67,7 +74,7 @@ export function analyzePerformance(fund, window) {
     sharpe:missing, sortino:missing, excess:window.error ? missing : fail(noBenchmark), calmar:missing,
     drawdownDays:missing, recoveryDays:missing};
   const points = {fund:[], benchmark:[], drawdown:[]};
-  if (period.value === null) return {metrics, points};
+  if (period.value === null) return {metrics, points, comparison:null};
 
   const first = rows[0].return_index;
   let peak = first, peakDate = start, worst = 0, worstPeakDate = start, trough = start, recovery = null, worstPeak = first;
@@ -101,24 +108,25 @@ export function analyzePerformance(fund, window) {
     metrics.volatility = metrics.sharpe = metrics.sortino = reason;
   } else {
     const average = mean(returns);
-    const sigma = Math.sqrt(returns.reduce((sum, value) => sum + (value - average) ** 2, 0) / (returns.length - 1));
+    const sigma = sampleDeviation(returns);
     metrics.volatility = result(sigma * Math.sqrt(SESSIONS));
-    const riskCovered = risk && risk.effective_from <= start && risk.effective_to >= end;
-    metrics.sharpe = !riskCovered ? fail("缺少覆盖整个统计区间的有来源无风险利率。")
-      : !sigma ? fail("样本波动率为零。")
-      : result((average - ((1 + risk.annual_rate) ** (1 / SESSIONS) - 1)) / sigma * Math.sqrt(SESSIONS));
+    const aligned = riskFreeReturns(risk, rows, SESSIONS);
+    if (aligned.reason) {
+      metrics.sharpe = fail(aligned.reason);
+    } else {
+      const excess = returns.map((value, i) => value - aligned.values[i]);
+      const excessMean = mean(excess);
+      const excessSigma = sampleDeviation(excess);
+      metrics.sharpe = excessSigma ? result(excessMean / excessSigma * Math.sqrt(SESSIONS))
+        : fail("日超额收益样本波动率为零。");
+    }
     // Explicit target: 0 annual return. Include every day in the lower partial moment.
     const downside = Math.sqrt(mean(returns.map((value) => Math.min(value, 0) ** 2)));
     metrics.sortino = downside ? result(average / downside * Math.sqrt(SESSIONS)) : fail("区间下行波动率为零。");
   }
 
-  const benchmark = new Map((fund.benchmark?.rows ?? []).map((row) => [row.date, row.value]));
-  const base = benchmark.get(start), last = benchmark.get(end);
-  if (base && last) {
-    const benchmarkReturn = last / base - 1;
-    metrics.excess = result(period.value - benchmarkReturn);
-    points.benchmark = rows.filter((row) => benchmark.has(row.date))
-      .map((row) => ({time:row.date, value:benchmark.get(row.date) / base - 1}));
-  }
-  return {metrics, points};
+  const comparison = compareBenchmark(fund.benchmark, rows);
+  metrics.excess = comparison.value == null ? fail(comparison.reason) : result(period.value - comparison.value);
+  points.benchmark = comparison.points;
+  return {metrics, points, comparison};
 }

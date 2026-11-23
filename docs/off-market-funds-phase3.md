@@ -4,11 +4,11 @@
 
 | 基金 | 官方基准和适用日期 | 点位或结果 |
 | --- | --- | --- |
-| 000001 华夏成长 | 原合同无基准。自 2026-07-27 起，中证 800 成长价格指数 `H30355` × 70% ＋ 中债－综合全价（总值）`CBA00203` × 30%。7 月 27 日更新招募说明书规定先算成分日收益、按权重加总、逐日连乘。 | 三季报新基准段为 −4.72%，基金为 −10.93%。复核后，7 月 24 日净值是 7 月 27 日当日收益的前一观察值。近 1、3、5 年均包含无基准时期。 [变更公告](https://static.cninfo.com.cn/finalpage/2026-06-27/1225391047.PDF) · [招募说明书](https://www.chinaamc.com/c/2026-07-27/996946.shtml) · [招募说明书文本](https://m.etf88.com/jjb/2026/0727/9817396.html) |
-| 000311 景顺长城沪深 300 指数增强 A | 沪深 300 价格指数 `000300` 收益 × 95% ＋ 1.5% 年收益率按期间折算。2021 年招募说明书及 2025 年报、2026 年三季报均采用此公式。更早时点未在配置中登记。日频建仓口径和固定项的日计数须有进一步证据。 | 中证指数及项目原行情源均有 5 年以上价格日线。保留管理人披露的精确区间值。 [2021 招募说明书](https://m.cgbchina.com.cn/noticeNewDetail.gsp?id=2580980) · [管理人产品页](https://www.igwfmc.com/main/jjcp/product/000311/detail.html) · [2026 三季报（披露文件）](https://doc.morningstar.com/Document/686600828.msdoc/?clientid=chinateam&key=4ceb1f0a7331680c) |
-| 110017 易方达增强回报债券 A | 中债总指数（全价），即 `CBA00303`，权重 100%。2020-12-18 合同和 2026 三季报一致。更早时点未登记。 | 已录入管理人披露的同区间基准收益。未取得足以确认代码、日历和可使用范围的完整 `CBA00303` 日线。 [2020 合同](https://cdn.efunds.com.cn/owch/data/notice/20201218/易方达增强回报债券型证券投资基金基金合同.pdf) · [三季报](https://dataclouds.cninfo.com.cn/sjother2/fund/2026/20261027/47a86519db5d2b5d45b254b3a821dc31.pdf) · [全价代码核对](https://static.cninfo.com.cn/finalpage/2026-08-22/1225490988.PDF) |
+| 000001 华夏成长 | 原合同无基准。自 2026-07-27 起，中证 800 成长价格指数 `H30355` × 70% ＋ 中债－综合全价（总值）`CBA00203` × 30%。7 月 27 日更新招募说明书规定先算成分日收益、按权重加总、逐日连乘。 | 三季报新基准段为 −4.72%，基金为 −10.93%。复核后，7 月 24 日净值是 7 月 27 日当日收益的前一观察值。近 1、3、5 年均包含无基准时期。 [变更公告](https://static.cninfo.com.cn/finalpage/2026-06-27/1225391047.PDF) · [官方招募说明书](https://www.chinaamc.com/upload/resources/file/2026/07/27/cfd6ed96ab6f464b879ef78b6a454360.pdf) |
+| 000311 景顺长城沪深 300 指数增强 A | 沪深 300 价格指数 `000300` 收益 × 95% ＋ 1.5% 年收益率按期间折算。2013-10-29 合同生效期年报、2021 年招募说明书及 2026 年三季报均采用此公式。查阅的报告中未发现变更。日频建仓口径和固定项的日计数须有进一步证据。 | 中证指数及项目原行情源均有 5 年以上价格日线。保留管理人披露的精确区间值。 [成立年度年报](https://static.cninfo.com.cn/finalpage/2014-03-26/63728329.PDF) · [2021 招募说明书](https://m.cgbchina.com.cn/noticeNewDetail.gsp?id=2580980) · [管理人产品页](https://www.igwfmc.com/main/jjcp/product/000311/detail.html) · [2026 三季报（披露文件）](https://doc.morningstar.com/Document/686600828.msdoc/?clientid=chinateam&key=4ceb1f0a7331680c) |
+| 110017 易方达增强回报债券 A | 中债总指数（全价），即 `CBA00303`，权重 100%。2009 年报、2020-12-18 合同和 2026 三季报一致。配置从最早核实的报告期 2009-01-01 起。2008 年成立首年未核实。 | 已录入管理人披露的同区间基准收益。未取得足以确认代码、日历和可使用范围的完整 `CBA00303` 日线。 [2009 年报](https://epaper.cs.com.cn/zgzqb/html/2010-03/26/nw.D110000zgzqb_20100326_1-D106.htm?div=-1) · [2020 合同](https://cdn.efunds.com.cn/owch/data/notice/20201218/易方达增强回报债券型证券投资基金基金合同.pdf) · [三季报](https://dataclouds.cninfo.com.cn/sjother2/fund/2026/20261027/47a86519db5d2b5d45b254b3a821dc31.pdf) · [全价代码核对](https://static.cninfo.com.cn/finalpage/2026-08-22/1225490988.PDF) |
 
-中证指数官方历史查询对 `000300` 和 `H30355` 均返回 2021-09-28 至 2026-11-20 共 1,246 个交易日，与 XSHG 日历一致。沪深 300 用项目原行情引擎独立核对了交易日期，东方财富及腾讯先后返回同样完整的范围。价格指数和全收益版本独立，债券全价、净价及财富指数也各有定义。数据记录使用实际点位日期，供应商后续更正与数据修订的通知机制尚未独立核实。 [中证指数说明](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000300_Index_Methodology_cn.pdf) · [中证 800 成长事实表](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/H30355factsheet.pdf) · [中债指数查询](https://yield.chinabond.com.cn/cbweb-mn/indices/single_index_query?locale=zh_CN)
+中证指数官方历史查询对 `000300` 和 `H30355` 均返回 2021-09-28 至 2026-11-20 共 1,246 个交易日，与 XSHG 日历一致。沪深 300 用项目原行情引擎独立核对了交易日期，东方财富及腾讯先后返回同样完整的范围。中债－综合全价（总值）返回 2021-09-28 至 2026-11-19 共 1,282 个观察值。价格指数和全收益版本独立，债券全价、净价及财富指数也各有定义。数据记录使用实际点位日期，供应商后续更正与数据修订的通知机制尚未独立核实。 [中证指数说明](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000300_Index_Methodology_cn.pdf) · [中证 800 成长事实表](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/H30355factsheet.pdf) · [中债指数查询](https://yield.chinabond.com.cn/cbweb-mn/indices/single_index_query?locale=zh_CN)
 
 ## 无风险利率与夏普
 
@@ -47,6 +47,8 @@ python -m stock_analysis.funds 110017 --benchmark-data work/110017-benchmark.jso
 | 000001 | — / — / — | — / — / — | 0.379 / 0.516 / 0.046 |
 | 000311 | −4.32% / 22.75% / −2.65% | +7.24 / +7.44 / −0.39 | 0.186 / 0.530 / −0.055 |
 | 110017 | 0.90% / 4.90% / 6.80% | +2.39 / +13.14 / +15.84 | 1.038 / 1.658 / 0.949 |
+
+对照中证官方价格序列，000311 的近 3 年基准披露为 22.75%。先算区间指数收益再加年化固定项得到 21.71%，用自然日单利逐日组合得到 22.81%。两种候选口径均未完整对齐 1、3、5 年的披露值，目前前端仅使用精确同窗披露值。
 
 110017 近 5 年基于实际净值的收益为 22.6431%，管理人表列 22.65%、15.85 个百分点。差异约 0.007 个百分点，记录原始结果。华夏成立后首次基准段用自定义 2026-07-24 至 2026-09-30 得到 −6.21 个百分点。晚于报告期末的统计区间不会沿用已披露的区间收益。
 

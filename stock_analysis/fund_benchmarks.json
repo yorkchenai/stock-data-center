@@ -16,7 +16,7 @@
       {
         "effective_from": "2026-07-27",
         "method": "daily_weighted",
-        "source": "https://www.chinaamc.com/c/2026-07-27/996946.shtml",
+        "source": "https://www.chinaamc.com/upload/resources/file/2026/07/27/cfd6ed96ab6f464b879ef78b6a454360.pdf",
         "components": [
           {
             "id": "H30355",
@@ -47,13 +47,13 @@
     "official": true,
     "name": "95%×沪深300指数收益率＋1.5%（年收益率，评价时按期间折算）",
     "formula": "95%×沪深300指数收益率＋1.5%（年收益率，评价时按期间折算）",
-    "source": "景顺长城基金产品资料及 2021 年更新招募说明书",
+    "source": "景顺长城基金 2013 年报、产品资料及 2026 年三季报",
     "source_url": "https://www.igwfmc.com/main/jjcp/product/000311/detail.html",
     "regimes": [
       {
-        "effective_from": "2021-11-26",
+        "effective_from": "2013-10-29",
         "method": "unverified",
-        "source": "https://m.cgbchina.com.cn/noticeNewDetail.gsp?id=2580980",
+        "source": "https://static.cninfo.com.cn/finalpage/2014-03-26/63728329.PDF",
         "annual_additive_rate": 0.015,
         "note": "管理人披露按期间折算。日频组合规则和 1.5% 的精确日计数尚未核实。",
         "components": [
@@ -94,13 +94,13 @@
     "official": true,
     "name": "中债总指数（全价）",
     "formula": "中债总指数（全价）",
-    "source": "易方达基金 2020 年 12 月基金合同及 2026 年三季报",
+    "source": "易方达基金 2009 年报、2020 年合同及 2026 年三季报",
     "source_url": "https://dataclouds.cninfo.com.cn/sjother2/fund/2026/20261027/47a86519db5d2b5d45b254b3a821dc31.pdf",
     "regimes": [
       {
-        "effective_from": "2020-12-18",
+        "effective_from": "2009-01-01",
         "method": "single_index",
-        "source": "https://cdn.efunds.com.cn/owch/data/notice/20201218/%E6%98%93%E6%96%B9%E8%BE%BE%E5%A2%9E%E5%BC%BA%E5%9B%9E%E6%8A%A5%E5%80%BA%E5%88%B8%E5%9E%8B%E8%AF%81%E5%88%B8%E6%8A%95%E8%B5%84%E5%9F%BA%E9%87%91%E5%9F%BA%E9%87%91%E5%90%88%E5%90%8C.pdf",
+        "source": "https://epaper.cs.com.cn/zgzqb/html/2010-03/26/nw.D110000zgzqb_20100326_1-D106.htm?div=-1",
         "components": [
           {
             "id": "CBA00303",

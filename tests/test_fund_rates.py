@@ -1,8 +1,10 @@
 from datetime import date, datetime, timezone
 import unittest
+from unittest.mock import patch
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
-from stock_analysis.fund_rates import load_chinabond_rates, parse_yield_history
+from stock_analysis.fund_rates import HISTORY_URL, fetch_rate_history, load_chinabond_rates, parse_yield_history
 from stock_analysis.funds import attach_benchmark_data, official_benchmarks
 
 
@@ -46,6 +48,15 @@ class FundRatesTest(unittest.TestCase):
         self.assertEqual(rates["effective_to"], "2024-12-26")
         self.assertEqual(rates["rows"][0]["annual_rate"], .015)
         self.assertEqual(rates["convention"], "simple_act_365f")
+
+    def test_official_mirror_is_used_for_timeout_without_retrying_a_refusal(self):
+        with patch("stock_analysis.funds.download", side_effect=[TimeoutError(), "quote"]) as download:
+            self.assertEqual(fetch_rate_history(HISTORY_URL), "quote")
+            self.assertIn("indices.chinabond.com.cn", download.call_args.args[0])
+        with patch("stock_analysis.funds.download", side_effect=HTTPError(HISTORY_URL, 403, "denied", None, None)) as download:
+            with self.assertRaises(HTTPError):
+                fetch_rate_history(HISTORY_URL)
+            download.assert_called_once()
 
     def test_audited_definitions_and_yearly_periods_are_not_overwritten_by_component_import(self):
         trusted = official_benchmarks()

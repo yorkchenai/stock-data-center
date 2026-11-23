@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 import math
 import re
-from urllib.error import URLError
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -23,8 +23,12 @@ def fetch_rate_history(url):
 
     try:
         return download(url, timeout=15)
-    except (OSError, URLError, TimeoutError):
-        return download(url.replace(PRIMARY_HOST, MIRROR_HOST, 1), timeout=15)
+    except HTTPError as error:
+        if error.code not in {502, 503, 504}:
+            raise
+    except OSError:
+        pass
+    return download(url.replace(PRIMARY_HOST, MIRROR_HOST, 1), timeout=15)
 
 
 def parse_yield_history(html, start, end):

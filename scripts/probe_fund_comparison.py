@@ -6,7 +6,9 @@ import json
 from math import isclose, isfinite, prod, sqrt
 import statistics
 import subprocess
+from urllib.error import HTTPError
 from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import exchange_calendars as xcals
 
@@ -43,6 +45,7 @@ for (const end of [asOf, fund.rows.at(-1).date]) {
 }
 if (fund.code === '000001') {
   for (const start of ['2026-07-24','2026-07-27']) summarize('benchmark change',start,asOf);
+  summarize('post-change latest','2026-07-24',fund.rows.at(-1).date);
 }
 console.log(JSON.stringify(output));
 """
@@ -62,7 +65,8 @@ def independent_sharpe(rows, rates, start, end):
             return None
         accrued = rates["rows"][i]["annual_rate"] * (finish - begin).days / 365
         rows_excess.append(last / base - 1 - accrued)
-    return statistics.mean(rows_excess) / statistics.stdev(rows_excess) * sqrt(252)
+    deviation = statistics.stdev(rows_excess) if len(rows_excess) >= 2 else 0
+    return statistics.mean(rows_excess) / deviation * sqrt(252) if deviation else None
 
 
 def benchmark_component():
@@ -127,27 +131,45 @@ def rate_history(end):
 
 
 def bond_composite_history(end):
-    # The public adapter maps the official comprehensive index by name and
-    # requests full price, all maturities. The issuer's charter fixes the code.
-    import akshare as ak
-
-    try:
-        windows = ak.bond_composite_index_cbond(indicator="全价", period="总值")
-        active = windows[windows.date.between(RATE_START, end)].sort_values("date")
-        if active.empty or active.date.duplicated().any() or any(
-            not isfinite(value) or value <= 0 for value in active.value
-        ):
-            raise ValueError("missing, duplicate or invalid comprehensive bond index levels")
-        source = "中债－综合指数（全价、总值）"
-        report = {"id":"CBA00203","basis":"full_price","source":source,
-                  "first":active.date.iloc[0].isoformat(),"last":active.date.iloc[-1].isoformat(),
-                  "observations":len(active)}
-        imported = {"id":report["id"],"basis":report["basis"],"source":source,
-                    "rows":[{"date":day.isoformat(),"value":value}
-                            for day, value in active.itertuples(index=False, name=None)]}
-        return report, imported
-    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
-        return {"id":"CBA00203", "error":str(error)}, None
+    # Official catalog ID for the comprehensive index, with full price and all maturities.
+    params = urlencode({"indexid":"2c90818811afed8d0111c0c672b31578","qxlxt":"00",
+                        "zslxt":"QJZS","lx":"1","locale":"zh_CN"})
+    errors = []
+    for host in ("yield.chinabond.com.cn", "indices.chinabond.com.cn"):
+        try:
+            url = f"https://{host}/cbweb-mn/indices/singleIndexQuery?{params}"
+            request = Request(url, method="POST", headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"})
+            with urlopen(request,timeout=15) as response:
+                body = response.read(4_000_001)
+            if len(body) > 4_000_000:
+                raise ValueError("ChinaBond response exceeds the limit")
+            data = json.loads(body)["QJZS_00"]
+            if not isinstance(data, dict):
+                raise ValueError("full-price levels not returned")
+            source = "中债－综合指数（全价、总值）"
+            selected = []
+            hours = set()
+            for timestamp, value in data.items():
+                observed = datetime.fromtimestamp(int(timestamp)/1000, SHANGHAI)
+                if RATE_START <= observed.date() <= end:
+                    selected.append({"date":observed.date().isoformat(),"value":float(value)})
+                    hours.add(observed.strftime("%H:%M"))
+            selected.sort(key=lambda row: row["date"])
+            if not selected or len({row["date"] for row in selected}) != len(selected) or any(
+                not isfinite(row["value"]) or row["value"] <= 0 for row in selected
+            ):
+                raise ValueError("missing, duplicate or invalid comprehensive bond index levels")
+            report = {"id":"CBA00203","basis":"full_price","source":source,
+                      "first":selected[0]["date"],"last":selected[-1]["date"],
+                      "observations":len(selected),"timestamp_local_times":sorted(hours)}
+            return report, {"id":report["id"],"basis":report["basis"],"source":source,"rows":selected}
+        except HTTPError as error:
+            if error.code not in {502, 503, 504}:
+                return {"id":"CBA00203","error":str(error)}, None
+            errors.append(f"{host}: {error}")
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            errors.append(f"{host}: {error}")
+    return {"id":"CBA00203","error":" / ".join(errors)}, None
 
 
 def main():
@@ -169,8 +191,9 @@ def main():
         report["rate_history"] = {"name":rates["name"], "first":rates["rows"][0]["date"], "last":rates["effective_to"],
                                   "observations":len(rates["rows"]),"missing_sessions":rates["missing_dates"]}
     for fund in funds:
-        if fund["code"] == "000001" and growth_index[1] and bond_series:
-            fund = attach_benchmark_data(fund, {"code":fund["code"],"series":[growth_index[1],bond_series]})
+        if fund["code"] == "000001":
+            components = [series for series in (growth_index[1], bond_series) if series]
+            fund = attach_benchmark_data(fund, {"code":fund["code"],"series":components})
         result = subprocess.run(
             ["node","--input-type=module","-e",NODE], input=json.dumps({"payload":{**fund,"risk_free":rates},"asOf":AS_OF}),
             text=True, check=True, capture_output=True,
@@ -178,8 +201,11 @@ def main():
         intervals = json.loads(result.stdout)
         for interval in intervals:
             independent = independent_sharpe(fund["rows"], rates, interval["start"], interval["end"])
-            if independent is not None and interval["sharpe"] is not None:
-                if not isclose(independent, interval["sharpe"], rel_tol=1e-11, abs_tol=1e-11):
+            actual = interval["sharpe"]
+            if (independent is None) != (actual is None):
+                raise AssertionError("Python and JS Sharpe availability disagree")
+            if independent is not None:
+                if not isclose(independent, actual, rel_tol=1e-11, abs_tol=1e-11):
                     raise AssertionError("Python and JS Sharpe disagree")
                 interval["sharpe_python_match"] = True
         report["funds"][fund["code"]] = intervals

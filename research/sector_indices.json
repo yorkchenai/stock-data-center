@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "issuer": "China Securities Index Co., Ltd.",
+  "calendar": "XSHG",
+  "methodology": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/20240510102751-000986_cn.pdf",
+  "indices": [
+    {"code":"000300","name":"沪深300指数","short":"沪深300","role":"market"},
+    {"code":"000905","name":"中证500指数","short":"中证500","role":"market"},
+    {"code":"000852","name":"中证1000指数","short":"中证1000","role":"market"},
+    {"code":"000986","name":"中证全指能源指数","short":"全指能源","role":"industry","group":"energy"},
+    {"code":"000987","name":"中证全指原材料指数","short":"全指材料","role":"industry","group":"materials"},
+    {"code":"000988","name":"中证全指工业指数","short":"全指工业","role":"industry","group":"industrials"},
+    {"code":"000989","name":"中证全指可选消费指数","short":"全指可选","role":"industry","group":"discretionary"},
+    {"code":"000990","name":"中证全指主要消费指数","short":"全指消费","role":"industry","group":"staples"},
+    {"code":"000991","name":"中证全指医药卫生指数","short":"全指医药","role":"industry","group":"health"},
+    {"code":"000993","name":"中证全指信息技术指数","short":"全指信息","role":"industry","group":"technology"},
+    {"code":"000994","name":"中证全指通信服务指数","short":"全指通信","role":"industry","group":"communications"},
+    {"code":"000995","name":"中证全指公用事业指数","short":"全指公用","role":"industry","group":"utilities"},
+    {"code":"932075","name":"中证全指金融指数","short":"全指金融","role":"industry","group":"finance"},
+    {"code":"932076","name":"中证全指地产指数","short":"全指地产","role":"industry","group":"real_estate"},
+    {"code":"932112","name":"中证全指有色金属行业指数","short":"有色金属行业","role":"industry","group":"materials"},
+    {"code":"932116","name":"中证全指航空航天与国防行业指数","short":"航空航天国防","role":"industry","group":"industrials"},
+    {"code":"932118","name":"中证全指电力设备行业指数","short":"电力设备行业","role":"industry","group":"industrials"},
+    {"code":"932131","name":"中证全指医疗行业指数","short":"医疗行业","role":"industry","group":"health"},
+    {"code":"932133","name":"中证全指银行行业指数","short":"银行行业","role":"industry","group":"finance"},
+    {"code":"932139","name":"中证全指半导体行业指数","short":"半导体行业","role":"industry","group":"technology"},
+    {"code":"399997","name":"中证白酒指数","short":"中证白酒","role":"theme","group":"staples"},
+    {"code":"399975","name":"中证全指证券公司指数","short":"证券公司","role":"theme","group":"finance"},
+    {"code":"930713","name":"中证人工智能主题指数","short":"CS人工智能","role":"theme","group":"technology"},
+    {"code":"H30535","name":"中证互联网指数","short":"中证互联网","role":"theme","group":"technology"}
+  ]
+}

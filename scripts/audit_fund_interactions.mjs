@@ -53,6 +53,9 @@ try {
       await page.getByRole("link",{name:fund.name,exact:true}).click();
       assert.match(await page.locator("#fund-identity").innerText(),new RegExp(fund.code));
       assert.equal(await page.locator("#fund-nav-date").innerText(),fund.rows.at(-1).date);
+      if (await page.locator("[data-metric='return'] strong").innerText() !== "—") {
+        await page.locator("#returns-chart canvas").first().waitFor();
+      }
       for (const period of ["1m","3m","6m","1y","3y","5y","all"]) {
         const start = performance.now();
         await page.locator('#fund-periods button[data-period="'+period+'"]').click();

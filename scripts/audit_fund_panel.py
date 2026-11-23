@@ -31,6 +31,8 @@ PROFILE_URLS = ("https://fundf10.eastmoney.com/jbgk_{}.html",
                 "https://fund.eastmoney.com/data/xininfo_{}.html")
 RISK = {"sharpe", "volatility", "sortino"}
 PERIODS = ("1m", "3m", "6m", "1y", "3y", "5y", "all")
+METRICS = ("return", "drawdown", "sharpe", "volatility", "sortino", "excess")
+NOT_APPLICABLE = {"insufficient_fund_age","unsupported_type"}
 
 
 class RequestPacer:
@@ -204,9 +206,17 @@ def benchmark_state(data, windows):
 
 def disclosure_check(root, payload, definition):
     """Public report aggregates are evidence, never fed into the engine."""
-    output = run_engine(root,payload,as_of=definition["end"])
     cases = {}
-    for key, official in definition["periods"].items():
+    official_periods = definition.get("periods")
+    if official_periods:
+        # Controlled import tests the same contract for other funds. The live
+        # provider path still retrieves its ordinary, unmodified fund payload.
+        stated = {"official":True,"name":definition.get("formula") or "管理人披露的基准收益",
+                  "source":definition["source"],"disclosed_periods":[
+                      {"start":period["start"],"end":definition["end"],"return":period["benchmark"],
+                       "source":definition["source"]} for period in official_periods.values()]}
+        output = run_engine(root,{**payload,"benchmark":stated},as_of=definition["end"])
+    for key, official in (official_periods or {}).items():
         window = output["windows"][key]
         actual = window["metrics"]["return"]["value"]
         difference = None if actual is None else actual-official["return"]
@@ -218,9 +228,13 @@ def disclosure_check(root, payload, definition):
                       "official_net_value_std":official.get("daily_std"),
                       "system_volatility":window["metrics"]["volatility"]["value"],
                       "excess_against_disclosure":None if not confirmed else actual-official["benchmark"],
+                      "contract_excess":window["metrics"]["excess"]["value"],
+                      "contract_benchmark_status":window["benchmark_status"],
                       "system_sharpe":window["metrics"]["sharpe"]["value"],
                       "system_drawdown":window["metrics"]["drawdown"]["value"]}
     check = {"source":definition["source"],"formula":definition.get("formula"),"windows":cases}
+    if "benchmark_change" in definition:
+        check["benchmark_change"] = definition["benchmark_change"]
     event = definition.get("event")
     if event:
         index = next((i for i, row in enumerate(payload["rows"]) if row["date"]==event["date"]),None)
@@ -234,7 +248,30 @@ def disclosure_check(root, payload, definition):
     return check
 
 
-def run(main_args):
+def coverage(records, version):
+    cohort = [row for row in records if row["group"]!="regression"]
+    summary = {}
+    for horizon in PERIODS:
+        summary[horizon] = {}
+        for metric in METRICS:
+            items = []
+            for row in cohort:
+                version_result = row.get(version,{})
+                item = version_result.get("windows",{}).get(horizon,{}).get("metrics",{}).get(metric)
+                items.append(item or {"status": (row.get("history_error") or version_result.get("error")
+                                                or {"kind":"source_data"})["kind"]})
+            statuses = Counter(item["status"] for item in items)
+            passed = sum(item.get("verification")=="pass" for item in items)
+            checked = passed + sum(item.get("verification")=="mismatch" for item in items)
+            summary[horizon][metric] = {"total":len(items),
+                "applicable":len(items)-sum(statuses[status] for status in NOT_APPLICABLE),
+                "calculated":statuses["calculated"],"independent_pass":passed,
+                "independent_checked":checked,"status_counts":dict(statuses),
+                "unexpected_numeric":sum(item.get("unexpected_numeric_output",False) for item in items)}
+    return summary
+
+
+def run():
     selection = json.loads(PANEL.read_text())
     fixture = [(group,*sample) for group, samples in selection["cohorts"].items() for sample in samples]
     assert len(fixture)==30 and len({item[1] for item in fixture})==30 and all(len(v)==5 for v in selection["cohorts"].values())
@@ -346,6 +383,7 @@ def run(main_args):
                         obj[name]["disclosure_check"] = disclosure_check(path,current,disclosures[code])
                 except (ValueError,TypeError,OSError,subprocess.SubprocessError) as error:
                     obj[name] = {"error":failure(error)}
+    report["coverage"] = {label:coverage(report["funds"],label) for label in ("baseline","current")}
     longest = sorted(browser_candidates,key=lambda item:len(item["rows"]), reverse=True)[:2]
     try:
         report["operational"] = measure_interactions(ROOT,catalog_body,replay_histories,longest)
@@ -358,7 +396,7 @@ def main():
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--output",type=Path,required=True)
     args = parser.parse_args()
-    report = run(args)
+    report = run()
     args.output.write_text(json.dumps(report,ensure_ascii=False,allow_nan=False,indent=2)+"\n",encoding="utf8")
     parsed = sum("history" in row.get("current",{}) for row in report["funds"] if row["group"]!="regression")
     print(f"Fund histories validated: {parsed}/30. Aggregate audit: {args.output}")

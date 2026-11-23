@@ -10,6 +10,15 @@ const optionalText = (value) => typeof value === "string" && value.trim() ? valu
 const validNumber = (value) => typeof value === "number" && Number.isFinite(value);
 const nullablePositive = (v) => v == null || (validNumber(v) && v > 0);
 const VALID_BASIS = new Set(["event_reinvested", "adjusted_nav", "unavailable"]);
+export const RETURN_ISSUES = {
+  missing_event_field: "来源缺少事件字段",
+  unrecognized_event: "事件格式或折算比例无法核验",
+  cash_after_split: "折算后缺少明确分红金额",
+  cash_evidence_missing: "缺少累计净值或披露增长率，无法核验分红",
+  cash_evidence_mismatch: "累计净值差额与披露增长率无法核对",
+  growth_mismatch: "单位净值和事件与披露增长率冲突",
+  invalid_multiplier: "相邻净值无法形成有效的总回报",
+};
 const shanghai = new Intl.DateTimeFormat("sv-SE", {timeZone: "Asia/Shanghai"});
 
 export function shanghaiToday() {
@@ -47,7 +56,8 @@ export function normalizeFund(raw) {
     }
     rows.push({ date, unit_nav: entry.unit_nav, accumulated_nav: entry.accumulated_nav ?? null,
       return_index: entry.return_index ?? null, cash_distribution: entry.cash_distribution ?? null,
-      split_factor: entry.split_factor ?? null });
+      split_factor: entry.split_factor ?? null,
+      return_issue: entry.return_index == null && Object.hasOwn(RETURN_ISSUES, entry.return_issue) ? entry.return_issue : null });
   }
   if (basis !== "unavailable" && !rows.some((row) => row.return_index !== null)) {
     throw new Error("已声明总回报口径，实际缺少有效序列。");

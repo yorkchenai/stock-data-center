@@ -1,4 +1,5 @@
 import { validDate } from "../engine.mjs";
+import { RETURN_ISSUES } from "./data.mjs";
 
 export const PERIODS = [["1w","近1周"],["1m","近1月"],["3m","近3月"],["6m","近6月"],
   ["1y","近1年"],["3y","近3年"],["5y","近5年"]];
@@ -50,7 +51,11 @@ export function periodReturn(fund, key) {
 
 function totalReturn(rows) {
   if (rows.length < 2) return fail("不足两条净值记录。");
-  if (rows.some((row) => row.return_index === null)) return fail("缺少连续的分红再投资总回报序列。");
+  const gap = rows.find((row) => row.return_index === null);
+  if (gap) {
+    const issue = Object.hasOwn(RETURN_ISSUES, gap.return_issue) ? RETURN_ISSUES[gap.return_issue] : null;
+    return fail(issue ? `${gap.date} ${issue}。` : "缺少连续的分红再投资总回报序列。");
+  }
   return result(rows.at(-1).return_index / rows[0].return_index - 1);
 }
 

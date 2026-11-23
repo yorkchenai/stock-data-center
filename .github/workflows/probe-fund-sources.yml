@@ -6,6 +6,7 @@ on:
       - "stock_analysis/funds.py"
       - "scripts/probe_fund_sources.py"
       - "scripts/probe_fund_browser.mjs"
+      - "scripts/probe_fund_script_isolation.mjs"
       - ".github/workflows/probe-fund-sources.yml"
   workflow_dispatch:
 

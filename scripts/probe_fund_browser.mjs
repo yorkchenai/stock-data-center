@@ -1,5 +1,6 @@
 // Request only through normal CORS. No remote scripts are executed.
 import { chromium } from "playwright-core";
+import { probeScriptIsolation } from "./probe_fund_script_isolation.mjs";
 
 const origin = "https://yorkchenai.github.io/stock-data-center/";
 const browser = await chromium.launch({
@@ -43,8 +44,12 @@ try {
     }));
   });
   report.browser_errors=consoleErrors;
+  await page.close();
 } catch(error) {
   report.origin_error=String(error.message).split("\n")[0];
+}
+try {
+  report.isolated_script_probe = await probeScriptIsolation(browser);
 } finally {
   await browser.close();
 }

@@ -1,7 +1,9 @@
 """Personal fund-data retrieval and data-only parsing for the separate funds UI."""
+from concurrent.futures import Future
 from datetime import date, datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from urllib.error import URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from zoneinfo import ZoneInfo
@@ -17,6 +19,31 @@ HISTORY_URL = "https://fund.eastmoney.com/pingzhongdata/{code}.js"
 MAX_RESPONSE = 4_000_000
 CODE = re.compile(r"[0-9]{6}")
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+INFLIGHT = {}
+INFLIGHT_LOCK = Lock()
+
+
+def coalesce(key, operation):
+    """Share an active fetch. Completed histories and errors are not cached."""
+    with INFLIGHT_LOCK:
+        pending = INFLIGHT.get(key)
+        if pending is None:
+            pending = INFLIGHT[key] = Future()
+            leader = True
+        else:
+            leader = False
+    if not leader:
+        return pending.result()
+    try:
+        result = operation()
+        pending.set_result(result)
+        return result
+    except BaseException as error:
+        pending.set_exception(error)
+        raise
+    finally:
+        with INFLIGHT_LOCK:
+            del INFLIGHT[key]
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -97,7 +124,8 @@ def catalog_for_day(day):
 
 
 def current_catalog():
-    return catalog_for_day(datetime.now(SHANGHAI).date())
+    day = datetime.now(SHANGHAI).date()
+    return coalesce(("catalog", day), lambda: catalog_for_day(day))
 
 
 def number(value):
@@ -115,13 +143,20 @@ def positive(value):
     return number(value) and value > 0
 
 
-def nav_event(value):
-    """Return cash per old share and new shares per old share when explicit."""
-    if value == "":
-        return 0.0, 1.0
+def event_text(value):
     if not isinstance(value, str):
         return None
-    content = re.sub(r"\s+", "", value).rstrip("。；;")
+    return re.sub(r"\s+", "", value).rstrip("。；;")
+
+
+def nav_event(value):
+    """Return cash per old share and new shares per old share when explicit."""
+    content = event_text(value)
+    if content is None:
+        return None
+    if content == "":
+        return (0.0, 1.0) if value.strip() == "" else None
+    content = re.sub(r"^(?:分红|拆分|折算)[：:]", "", content)
     cash = re.fullmatch(r"每(?:(\d+(?:\.\d+)?)?)份(?:基金份额)?派现金(\d+(?:\.\d+)?)元", content)
     if cash:
         shares = float(cash[1] or 1)
@@ -133,6 +168,32 @@ def nav_event(value):
         new = float(split[2])
         return (0.0, new / old) if positive(old) and positive(new) else None
     return None
+
+
+def growth_percent(value):
+    if isinstance(value, str) and re.fullmatch(r"[+-]?[0-9]+(?:\.[0-9]+)?%?", value.strip()):
+        value = float(value.strip().rstrip("%"))
+    return value if number(value) else None
+
+
+def reconcile_cash(text, previous, nav, accumulated, growth, split_seen):
+    placeholder = r"(?:分红[：:])?每(?:[1-9][0-9]*)?份(?:基金份额)?派现金元"
+    if text is None:
+        return None, "missing_event_field"
+    if not re.fullmatch(placeholder, text):
+        return None, "unrecognized_event"
+    if split_seen:
+        return None, "cash_after_split"
+    if previous is None or previous["accumulated_nav"] is None or accumulated is None or growth is None:
+        return None, "cash_evidence_missing"
+    previous_nav = previous["unit_nav"]
+    cash = round((accumulated - nav) - (previous["accumulated_nav"] - previous_nav), 6)
+    # The cumulative changes and provider daily return independently constrain
+    # the same ex-date move. Allow normal four-place NAV / two-place % rounding.
+    tolerance = 0.00005 + 0.0001 * (1 + abs(growth / 100) / 2) / previous_nav
+    if cash <= 0 or abs((nav + cash) / previous_nav - 1 - growth / 100) > tolerance:
+        return None, "cash_evidence_mismatch"
+    return (cash, 1.0), None
 
 
 def parse_history(text, code, metadata=None, retrieved_at=None):
@@ -161,9 +222,8 @@ def parse_history(text, code, metadata=None, retrieved_at=None):
                 raise ValueError(f"累计净值日期重复 {day}。")
             accumulated[day] = item[1]
     rows = []
-    previous_nav = None
     index = 1.0
-    ambiguous = 0
+    split_seen = False
     for item in trend:
         if not isinstance(item, dict) or not positive(item.get("y")):
             raise ValueError("单位净值无效。")
@@ -171,27 +231,36 @@ def parse_history(text, code, metadata=None, retrieved_at=None):
         if day > latest_allowed or (rows and day <= rows[-1]["date"]):
             raise ValueError(f"净值日期未来、重复或非递增 {day}。")
         nav = item["y"]
-        event = nav_event(item.get("unitMoney"))
+        value = item.get("unitMoney")
+        event = nav_event(value)
+        label = event_text(value)
+        split_seen |= bool(label and re.search(r"拆分|折算|合并", label)) or bool(event and event[1] != 1.0)
+        growth = growth_percent(item.get("equityReturn"))
+        previous = rows[-1] if rows else None
+        amount_source = "explicit" if event and event[0] else None
+        issue = None
+        if previous and event is None:
+            event, issue = reconcile_cash(label, previous, nav, accumulated.get(day), growth, split_seen)
+            if event:
+                amount_source = "cumulative_nav_reconciled"
         cash, split = event if event else (None, None)
         index_value = None
-        if previous_nav is None:
+        if previous is None:
             index_value = index
         elif event:
+            previous_nav = previous["unit_nav"]
             multiplier = (nav * split + cash) / previous_nav
-            # The source also provides the disclosed daily growth rate. Require
-            # agreement to half a percentage point before applying this rule;
-            # small differences can come from rounded display NAV.
-            growth = item.get("equityReturn")
-            if number(growth) and not math.isclose(multiplier - 1, growth / 100, abs_tol=0.005):
-                ambiguous += 1
+            if growth is not None and not math.isclose(multiplier - 1, growth / 100, rel_tol=0, abs_tol=0.005):
+                issue = "growth_mismatch"
             elif positive(multiplier * index):
                 index *= multiplier
                 index_value = index
-        else:
-            ambiguous += 1
+            else:
+                issue = "invalid_multiplier"
         rows.append({"date": day, "unit_nav": nav, "accumulated_nav": accumulated.get(day),
-                     "return_index": index_value, "cash_distribution": cash, "split_factor": split})
-        previous_nav = nav
+                     "return_index": index_value, "cash_distribution": cash, "split_factor": split,
+                     "cash_distribution_source": amount_source, "return_issue": issue})
+    ambiguous = sum(row["return_issue"] is not None for row in rows)
     inception = record.get("inception")
     if inception and rows[0]["date"] < inception:
         raise ValueError("净值早于基金成立日。")
@@ -214,6 +283,10 @@ def parse_history(text, code, metadata=None, retrieved_at=None):
 def load_fund(code):
     if not isinstance(code, str) or not CODE.fullmatch(code):
         raise ValueError("请输入六位场外基金代码。")
+    return coalesce(("history", code), lambda: fetch_fund(code))
+
+
+def fetch_fund(code):
     meta = {}
     try:
         meta = current_catalog().get(code, {})

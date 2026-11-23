@@ -99,3 +99,22 @@ test("data contract checks namespace, chronology, metadata and search order", ()
   assert.deepEqual(searchCatalog(catalog,"测试").map(({code})=>code),["000001","123456"]);
   assert.equal(searchCatalog(catalog,"000001")[0].code,"000001");
 });
+
+test("reconciled dividend preserves the adjusted path and gap reasons reach the period", () => {
+  const input = fixture();
+  const prices = [1.2, 1.14, 1.16, 1.18];
+  const indices = [1, 1.21/1.2, (1.21/1.2)*(1.16/1.14), (1.21/1.2)*(1.18/1.14)];
+  const rows = input.rows.map((row,i) => ({
+    ...row, unit_nav:prices[i], return_index:indices[i], cash_distribution:i===1 ? .07 : 0,
+  }));
+  const fund = normalizeFund({...input,rows});
+  const stats = analyzePerformance(fund,selectWindow(fund,null,dates.at(-1))).metrics;
+  assert.equal(stats.drawdown.value,0);
+  assert.ok(stats.volatility.value>0);
+  near(stats.return.value,indices.at(-1)-1);
+  rows[1] = {...rows[1],return_index:null,return_issue:"cash_evidence_mismatch"};
+  const broken = normalizeFund({...input,rows});
+  const incomplete = analyzePerformance(broken,selectWindow(broken,null,dates.at(-1))).metrics;
+  assert.equal(incomplete.drawdown.value,null);
+  assert.match(incomplete.return.reason,/2025-01-03.*无法核对/);
+});

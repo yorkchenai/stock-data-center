@@ -5,16 +5,30 @@ import subprocess
 from urllib.error import HTTPError, URLError
 
 from stock_analysis.funds import (HISTORY_URL, assignment, current_catalog, download,
-                                  nav_event, parse_history)
+                                  growth_percent, nav_event, parse_history)
 
 
 VERIFY_BROWSER_CONTRACT = """
 import { readFileSync } from 'node:fs';
 import { normalizeFund } from './web/funds/data.mjs';
-import { PERIODS, periodReturn } from './web/funds/performance.mjs';
+import { analyzePerformance, PERIODS, periodReturn, periodStart, selectWindow } from './web/funds/performance.mjs';
 const fund = normalizeFund(JSON.parse(readFileSync(0, 'utf8')));
-const checks = PERIODS.map(([key]) => [key, periodReturn(fund, key).value !== null]);
-console.log(JSON.stringify(Object.fromEntries(checks)));
+const end = fund.rows.at(-1).date;
+const checks = Object.fromEntries(PERIODS.map(([key]) => {
+  const result = periodReturn(fund, key);
+  return [key,{percent: result.value == null ? null : +(100 * result.value).toFixed(4), reason: result.reason}];
+}));
+const year = analyzePerformance(fund, selectWindow(fund, periodStart(end, '1y'), end)).metrics;
+const referenceEnd = {'000001':'2026-11-20','000311':'2026-09-11','110017':'2024-12-31'}[fund.code];
+const reference = referenceEnd ? Object.fromEntries(PERIODS.map(([key]) => {
+  const range = selectWindow(fund, periodStart(referenceEnd, key), referenceEnd);
+  const result = analyzePerformance(fund, range).metrics.return;
+  return [key,{from:range.start, through:range.end,
+    percent:result.value == null ? null : +(100 * result.value).toFixed(4), reason:result.reason}];
+})) : null;
+console.log(JSON.stringify({periods: checks, recent_year_risk: {
+  drawdown: year.drawdown.value, volatility: year.volatility.value
+}, reference_periods: reference}));
 """
 
 
@@ -46,9 +60,9 @@ def sample(code):
         offset_change = None if previous_total is None or current_total is None else round(
             (current_total - row["unit_nav"]) - (previous_total - prev["unit_nav"]), 6)
         anomalies.append({"date": row["date"], "event": str(value)[:120], "unitMoney_present": "unitMoney" in item,
-                          "source_daily_pct": item.get("equityReturn"), "calculated_daily_pct": estimate_pp,
+                          "source_daily_pct": growth_percent(item.get("equityReturn")), "calculated_daily_pct": estimate_pp,
                           "cumulative_offset_change": offset_change,
-                          "reason": "event_format" if event is None else "growth_mismatch"})
+                          "reason": row["return_issue"]})
     start, end = (date.fromisoformat(rows[i]["date"]) for i in (0, -1))
     cutoff = end.replace(year=end.year - 5, day=28 if end.month == 2 and end.day == 29 else end.day)
     try:
@@ -66,6 +80,7 @@ def sample(code):
         "return_basis": fund["return_basis"], "history_spans_five_years": start <= cutoff,
         "browser_contract_validated": return_checks is not None, "computable_return_periods": return_checks,
         "latest_unit_nav": rows[-1]["unit_nav"], "anomaly_report": anomalies,
+        "reconciled_cash_count": sum(row["cash_distribution_source"] == "cumulative_nav_reconciled" for row in rows),
     }
 
 
@@ -75,7 +90,7 @@ def main():
     except (OSError, ValueError, OverflowError) as error:
         catalog = failure(error)
     result = {"checked_at": datetime.now(timezone.utc).isoformat(), "catalog": catalog,
-              "funds": [sample(code) for code in ("000001", "000311", "110017")]}
+              "funds": [sample(code) for code in ("000001", "000311", "110017", "161725")]}
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 

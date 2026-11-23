@@ -105,3 +105,28 @@
   .fund-chart {height: 250px;}
   .drawdown-chart {height: 150px;}
 }
+
+.sector-panel .panel-heading {margin-bottom: 9px;}
+.sector-panel .panel-heading h2 {margin: 0;}
+.sector-panel p:empty {display: none;}
+.sector-tabs {margin: 9px 0;}
+.sector-tabs button {max-width: 100%; overflow-wrap: anywhere; text-align: left;}
+.sector-metrics {
+  padding: 9px 12px; border-left: 2px solid #63a39d; background: #f3f8f7;
+  font-size: 14px; line-height: 1.5; font-variant-numeric: tabular-nums;
+}
+.sector-chart {height: 430px; margin-top: 8px;}
+.sector-chart.with-volume {height: 510px;}
+#sector-range {margin-top: 9px;}
+#sector-ohlc {font-variant-numeric: tabular-nums;}
+.indicator-toggles {display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 6px 0;}
+.indicator-toggles:empty {display: none;}
+.indicator-toggles label {display: inline-flex; align-items: center; gap: 4px; font-size: 13px;}
+.indicator-toggles output {min-width: 38px; font-variant-numeric: tabular-nums; font-weight: 650;}
+#nav-gaps {color: var(--muted);}
+#nav-gaps ul {max-height: 150px; overflow: auto;}
+@media (max-width: 620px) {
+  .sector-chart {height: 335px;}
+  .sector-chart.with-volume {height: 410px;}
+  .sector-metrics {font-size: 13px;}
+}

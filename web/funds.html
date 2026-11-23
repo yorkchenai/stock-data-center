@@ -27,7 +27,7 @@
           <h1 id="fund-list-title">场外基金</h1>
           <p>搜索基金，比较确认净值与分红再投资收益。</p>
         </div>
-        <label class="file-control">导入净值 JSON<input id="list-import" type="file" accept=".json,application/json" multiple></label>
+        <label class="file-control">导入净值 / 图表包<input id="list-import" type="file" accept=".json,application/json" multiple></label>
       </div>
       <p id="data-mode" class="fund-note"></p>
       <div class="fund-panel search-panel">
@@ -72,7 +72,7 @@
         </div>
         <div class="fund-nav-value"><span>最新确认单位净值</span><strong id="fund-nav">—</strong><span id="fund-nav-date">—</span></div>
         <div class="fund-source"><span id="fund-source">来源 —</span><span id="fund-freshness">状态 —</span></div>
-        <label class="file-control">导入该基金 JSON<input id="detail-import" type="file" accept=".json,application/json"></label>
+        <label class="file-control">导入该基金数据<input id="detail-import" type="file" accept=".json,application/json"></label>
       </div>
       <p id="detail-status" class="fund-status" role="status"></p>
       <div class="range-block">
@@ -85,6 +85,19 @@
         <p id="range-status" class="fund-note" role="status"></p>
       </div>
       <section id="core-metrics" class="metrics-grid" aria-label="六个核心指标"></section>
+      <section class="fund-panel" aria-labelledby="nav-chart-title">
+        <div class="panel-heading">
+          <h2 id="nav-chart-title">基金历史净值</h2>
+          <div class="fund-controls" role="group" aria-label="净值口径">
+            <button type="button" id="nav-adjusted" aria-pressed="true">复权净值</button>
+            <button type="button" id="nav-raw" aria-pressed="false">原始单位净值</button>
+          </div>
+        </div>
+        <div id="nav-chart" class="fund-chart" role="img" aria-label="基金历史净值折线图"></div>
+        <p id="nav-hover" class="fund-note chart-description"></p>
+        <p id="nav-basis" class="fund-note"></p>
+        <details id="nav-gaps" hidden><summary>复权数据缺口</summary><ul id="nav-gap-list" class="fund-note"></ul></details>
+      </section>
       <section class="fund-panel chart-panel" aria-labelledby="returns-title">
         <div class="panel-heading"><h2 id="returns-title">累计收益</h2><span id="fund-visible-range" class="fund-note"></span></div>
         <div class="fund-chart-legend">
@@ -95,6 +108,33 @@
         <p id="hover-values" class="fund-note chart-description" aria-live="off"></p>
         <p id="benchmark-status" class="fund-note"></p>
         <a class="fund-note" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">图表由 TradingView Lightweight Charts™ 提供</a>
+      </section>
+      <section class="fund-panel sector-panel" aria-labelledby="sector-title">
+        <div class="panel-heading">
+          <h2 id="sector-title">强关联板块指数分析</h2>
+          <button type="button" id="sector-refresh" hidden>更新关联</button>
+        </div>
+        <div id="sector-tabs" class="fund-controls sector-tabs" role="group" aria-label="关联板块"></div>
+        <p id="sector-analysis-meta" class="fund-note"></p>
+        <p id="sector-status" class="fund-status" role="status"></p>
+        <p id="sector-metrics" class="sector-metrics"></p>
+        <p id="sector-evidence" class="fund-note"></p>
+        <div id="sector-display" hidden>
+          <p id="sector-index-meta" class="fund-note"></p>
+          <div id="sector-periods" class="fund-controls" role="group" aria-label="指数显示区间"></div>
+          <form id="sector-range" class="fund-controls" hidden>
+            <label>开始日期<input id="sector-from" type="date" required></label>
+            <label>结束日期<input id="sector-to" type="date" required></label>
+            <button type="submit">应用区间</button>
+          </form>
+          <p id="sector-range-status" class="fund-note" role="status"></p>
+          <p id="sector-ohlc" class="fund-note chart-description"></p>
+          <div id="sector-ma" class="indicator-toggles" role="group" aria-label="移动均线"></div>
+          <div id="sector-vol" class="indicator-toggles" role="group" aria-label="成交量与均量"></div>
+          <div id="sector-chart" class="fund-chart sector-chart" role="img" aria-label="板块价格与成交量技术图"></div>
+          <p id="sector-history-note" class="fund-note"></p>
+          <p id="sector-volume-note" class="fund-note"></p>
+        </div>
       </section>
       <section class="fund-panel chart-panel" aria-labelledby="risk-title">
         <h2 id="risk-title">风险分析</h2>

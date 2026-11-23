@@ -13,6 +13,7 @@ from threading import Lock
 import pandas as pd
 
 from .funds import CODE, load_fund, search_funds
+from .fund_charts import sector_analysis, sector_history
 from .indicators import calculate_indicators
 from .pipeline import ANALYSIS_LAYERS, run_analysis
 from .symbols import resolve_symbol
@@ -122,6 +123,8 @@ class ChartHandler(SimpleHTTPRequestHandler):
             if action == "search":
                 term = parse_qs(request.query).get("q", [""])[0]
                 payload = {"funds": search_funds(term)}
+            elif not request.query and len(parts := action.split("/")) in (2, 3) and CODE.fullmatch(parts[0]) and parts[1] == "sectors":
+                payload = sector_analysis(parts[0]) if len(parts) == 2 else sector_history(parts[0], parts[2])
             elif CODE.fullmatch(action) and not request.query:
                 payload = load_fund(action)
             else:

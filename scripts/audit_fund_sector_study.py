@@ -9,6 +9,7 @@ import pandas as pd
 
 from scripts.audit_fund_sector_data import ROOT, collect, read_catalog, session_index
 from stock_analysis import funds
+from stock_analysis.fund_charts import available_indices
 from stock_analysis.sector_holdings import holdings_evidence, known_tracking
 from stock_analysis.sector_model import FUND, alignment, rank_associations
 from stock_analysis.sector_signals import technical_series, technical_snapshot
@@ -21,16 +22,6 @@ def report_inputs():
         return [], {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     return payload["reports"],payload["classifications"]
-
-
-def safe_index_set(histories,catalog,sessions):
-    recent = sessions[-150:]
-    controls, candidates = [], []
-    for code,item in catalog.items():
-        frame = histories.get(code)
-        if frame is not None and frame.reindex(recent).close.notna().sum()>=120:
-            (controls if item["role"]=="market" else candidates).append(code)
-    return controls,candidates
 
 
 def load_local(directory,start,end):
@@ -95,7 +86,7 @@ def evaluate(fund_data,index_data,data_report,start,end,predict=True):
     # bound. Keep the source coverage audit unchanged so gaps remain visible.
     index_data = {code:frame.loc[catalog[code].get("known_live_from") or start:end]
                   for code,frame in index_data.items()}
-    markets, candidates = safe_index_set(index_data,catalog,sessions)
+    markets, candidates = available_indices(index_data,catalog,sessions)
     units = {code:data_report["indices"][code].get("volume_unit") for code in index_data}
     technique = {code:technical_series(frame,sessions,units[code]) for code,frame in index_data.items()}
     reports, classifications = report_inputs()

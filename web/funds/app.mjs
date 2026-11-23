@@ -1,6 +1,9 @@
 import { FUND_CATEGORIES, FUND_CODE, MAX_FILE_BYTES, fundFreshness, normalizeFund, searchCatalog, shanghaiToday } from "./data.mjs";
 import { PERIODS, analyzePerformance, periodReturn, periodStart, selectWindow } from "./performance.mjs";
 import { createFundCharts } from "./charts.mjs";
+import { BUNDLE_BYTES, normalizeChartFile } from "./chart-data.mjs";
+import { createNavChart } from "./nav-chart.mjs";
+import { createSectorPanel } from "./sector-panel.mjs";
 
 const $ = (id) => document.getElementById(id);
 function tag(name, text, attrs = {}) {
@@ -38,6 +41,10 @@ const coreDefinitions = [
   ["excess","超额收益",pp,"基金区间收益减去同起止日的官方比较基准收益。"],
 ];
 const charts = createFundCharts();
+const navChart = createNavChart($("nav-chart"),$("nav-hover"));
+const sectors = createSectorPanel();
+const bundles = new Map();
+let navMode = "adjusted";
 const loopback = ["127.0.0.1","localhost","[::1]"].includes(location.hostname);
 const url = (code) => new URL(code ? `?fund=${code}` : "funds.html", location.href);
 const localURL = (path) => new URL("/api/funds" + path, location.origin);
@@ -293,13 +300,17 @@ function renderAnalysis(requestedStart, requestedEnd) {
   const fund = loaded.get(selectedCode);
   const latest = fund?.rows.at(-1).date;
   let range = {error:noData,rows:[]};
+  let chartStart, chartEnd;
   if (fund) {
     const start = requestedStart ?? (rangeKey==="all" ? null : rangeKey==="custom" ? $("fund-start").value : periodStart(latest,rangeKey));
     const end = requestedEnd ?? (rangeKey==="custom" ? $("fund-end").value : latest);
+    chartStart=start;
+    chartEnd=end;
     try {
       range = end>latest ? {error:"结束日期超出已载入历史。",rows:[]} : selectWindow(fund,start,end);
     } catch (error) {range={error:error.message,rows:[]};}
   }
+  renderNav(fund,chartStart,chartEnd);
   const analysis = analyzePerformance(fund,range);
   const interval = range.start ? `${range.start} 至 ${range.end}` : "—";
   $("range-status").textContent = range.error ?? `统计范围 ${interval} · 已载入净值 ${fund.rows[0].date} 至 ${latest}`;
@@ -346,6 +357,30 @@ function renderAnalysis(requestedStart, requestedEnd) {
   charts.showLine("fund",$("fund-line").checked);
   charts.showLine("benchmark",$("benchmark-line").checked);
 }
+function renderNav(fund,start,end) {
+  const adjusted=navMode==="adjusted";
+  $("nav-adjusted").setAttribute("aria-pressed",String(adjusted));
+  $("nav-raw").setAttribute("aria-pressed",String(!adjusted));
+  $("nav-gaps").hidden=true;
+  $("nav-gap-list").replaceChildren();
+  try {
+    const {gaps,anchors}=navChart.display(fund,navMode,start,end);
+    const provenance=fund ? ` · 最新确认 ${fund.rows.at(-1).date} · ${fund.source.name}` : "";
+    const basis=adjusted
+      ? (anchors.length ? `分段复权，每段以 ${anchors[0]}${anchors.length>1?` 等 ${anchors.length} 个锚点`:""}的单位净值为起点，按总回报指数比例换算。`
+        : "所选区间暂无可核验的复权净值。")
+      : "基金确认的原始单位净值。";
+    $("nav-basis").textContent=basis+provenance;
+    $("nav-gaps").hidden=!adjusted||!gaps.length;
+    if (!$("nav-gaps").hidden) {
+      $("nav-gaps").querySelector("summary").textContent=`${gaps.length} 个复权净值缺口`;
+      $("nav-gap-list").replaceChildren(...gaps.map(({date,reason})=>tag("li",`${date} · ${reason}`)));
+    }
+  } catch (error) {
+    navChart.clear();
+    $("nav-basis").textContent=error.message;
+  }
+}
 function syncButtons() {
   for (const b of $("fund-periods").children) b.setAttribute("aria-pressed",String(b.dataset.period===rangeKey));
   $("fund-range").hidden = rangeKey!=="custom";
@@ -362,6 +397,9 @@ async function route() {
   selectedCode = FUND_CODE.test(code ?? "") ? code : null;
   $("fund-list").hidden = Boolean(selectedCode);
   $("fund-detail").hidden = !selectedCode;
+  sectors.clear();
+  navChart.clear();
+  navMode="adjusted";
   if (!selectedCode) {
     if (code) status("list-status","基金详情需要六位场外基金代码。",true);
     renderList();
@@ -370,22 +408,22 @@ async function route() {
   const current = selectedCode;
   rangeKey = "1y";
   historyLimit = 60;
-  if (loaded.has(current) && periodReturn(loaded.get(current),"1y").value===null) rangeKey="all";
   syncButtons();
   renderIdentity(current,loaded.get(current));
   renderAnalysis();
   status("detail-status",loaded.has(current) ? "" : noData);
   window.scrollTo(0,0);
+  if (loaded.has(current) || !local) void sectors.start(current,local,bundles.get(current));
   if (local && !loaded.has(current)) {
     status("detail-status",`正在载入 ${current} 的确认净值…`);
     try {
       const fund = await loadFund(current);
       if (version!==routeNumber) return;
-      rangeKey = periodReturn(fund,"1y").value===null ? "all" : "1y";
       status("detail-status","");
       syncButtons();
       renderIdentity(current,fund);
       renderAnalysis();
+      void sectors.start(current,local,bundles.get(current));
     } catch (error) {if (version===routeNumber) status("detail-status",error.message,true);}
   }
 }
@@ -398,10 +436,14 @@ async function importFiles(event) {
   const failures = [];
   for (const file of files) {
     try {
-      if (file.size>MAX_FILE_BYTES) throw new Error("文件超出 4 MB。");
-      const dataset = normalizeFund(JSON.parse(await file.text()));
+      if (file.size>BUNDLE_BYTES) throw new Error("图表包超出 16 MB。");
+      const raw = JSON.parse(await file.text());
+      if (raw.kind!=="fund_chart_bundle" && file.size>MAX_FILE_BYTES) throw new Error("净值文件超出 4 MB。");
+      const {fund:dataset,bundle}=normalizeChartFile(raw);
       if (mode==="detail-status" && dataset.code!==selectedCode) throw new Error("文件基金代码与当前详情不一致。");
       recordFund(dataset);
+      if (bundle) bundles.set(dataset.code,bundle);
+      else bundles.delete(dataset.code);
       addFund(catalog.get(dataset.code));
       loadedNames.push(dataset.code);
     } catch (error) {failures.push(`${file.name} · ${error.message}`);}
@@ -452,6 +494,8 @@ $("list-import").addEventListener("change",importFiles);
 $("detail-import").addEventListener("change",importFiles);
 $("back-to-funds").addEventListener("click",navigateLink);
 window.addEventListener("popstate",route);
+$("nav-adjusted").addEventListener("click",()=>{navMode="adjusted";renderAnalysis();});
+$("nav-raw").addEventListener("click",()=>{navMode="raw";renderAnalysis();});
 for (const [id,label] of detailPeriods) {
   const button = tag("button",label,{type:"button","data-period":id});
   button.addEventListener("click",()=>{rangeKey=id;syncButtons();if(id!=="custom") renderAnalysis();});
@@ -469,5 +513,5 @@ if (loopback) {
   try {local=(await readApi("/status")).local===true;}
   catch {local=false;}
 }
-$("data-mode").textContent = local ? "本地模式可请求确认净值，也可导入 JSON。" : "静态页面使用本地 JSON。净值文件只在浏览器处理。";
+$("data-mode").textContent = local ? "本地模式可自动加载基金净值与相关板块，也可导入数据包。" : "静态页面支持导入经许可的净值 JSON 或基金图表包。文件只在浏览器处理。";
 await route();

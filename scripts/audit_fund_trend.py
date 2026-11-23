@@ -63,10 +63,12 @@ def chart_case(code, levels, paths, metrics, rows, trades, output):
     fig, axes = plt.subplots(4,1,figsize=(13,15),layout="constrained",height_ratios=[1,1,1.2,1])
     colors = dict(zip(("A","B","C","D","E"),("black","#2365a7","#14795f","#b07327","#815f9a")))
     for label,path in paths.items():
-        monthly = path.groupby(path.index.to_period("M")).tail(1)
+        ends = path.groupby(path.index.to_period("M")).tail(1).index
+        monthly = path.loc[path.index[:1].union(ends)]
         drawdown = drawdown_metrics(path.value)[0].loc[monthly.index]
-        axes[0].plot(monthly.index,monthly.value, label=label,color=colors[label])
-        axes[1].plot(drawdown.index,drawdown.mul(100),color=colors[label])
+        style = "--" if label=="C" else "-"
+        axes[0].plot(monthly.index,monthly.value,label=label,color=colors[label],linestyle=style)
+        axes[1].plot(drawdown.index,drawdown.mul(100),color=colors[label],linestyle=style)
     axes[0].set(title="Cumulative value (month-end samples, initial capital = 1)",ylabel="Value")
     axes[0].legend(ncols=5)
     axes[1].set(title="Drawdown (month-end samples of daily drawdown)",ylabel="%")
@@ -156,10 +158,14 @@ def run_study(fund_data, index_data, data_report, start, end, charts=None):
         eligible_holdings = [{key:item[key] for key in ("period_end","disclosed_on","source","evidence_level")}
                              for item in holdings["reports"] if code in item["share_codes"]
                              and item["disclosed_on"]<latest]
+        first_source = pd.Timestamp(fund["rows"][0]["date"])
+        before_observations = levels.loc[OOS_START:].index < first_source
+        test_levels = levels.loc[max(OOS_START,dateonly(first_source)):]
         report[code] = {"status":"research_backtest","name":fund["name"],"start":dateonly(valid.index[0]),
                         "end":dateonly(valid.index[-1]),"non_session_nav":sum(
                             start<=row["date"]<=latest and pd.Timestamp(row["date"]) not in sessions for row in fund["rows"]),
-                        "missing_oos_levels":int(levels.loc[OOS_START:].isna().sum()),"rows":len(valid),
+                        "missing_oos_levels":int(test_levels.isna().sum()),
+                        "pre_observation_oos_sessions":int(before_observations.sum()),"rows":len(valid),
                         "holdings_disclosures":eligible_holdings,"holdings_used_in_signals":False,
                         "main":results,"regimes":regime_summaries(paths,trades,phased),
                         "cost_sensitivity":costs,"signal_sensitivity":variations,"other_chains":other,

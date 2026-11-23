@@ -1,11 +1,12 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
 from scripts.audit_fund_sector_data import session_index
 from stock_analysis.fund_trend import (DOWN, NEUTRAL, PRIMARY, UP, Confirmation, bars_from_history,
-                                       combine, complete_periods, decisions, joint_target, known_state,
+                                       combine, complete_periods, decisions, historical_selector, joint_target, known_state,
                                        trend_series)
 from stock_analysis.fund_trend_backtest import (Execution, drawdown_metrics, historical_phases,
                                                 order_schedule, run_strategies, segments, simulation)
@@ -66,6 +67,19 @@ class TrendResearchTests(unittest.TestCase):
         altered = decisions(shifted,{"x":state},days,days[-1],PRIMARY,select)
         self.assertEqual([r for r in research if r["known_through"]<days[-20]],
                          [r for r in altered if r["known_through"]<days[-20]])
+
+    def test_association_reestimation_receives_only_the_visible_training_prefix(self):
+        days = pd.bdate_range("2023-01-03",periods=650)
+        data = pd.DataFrame({"__fund__":.01,"market":.02,"sector":.03},index=days)
+        select = historical_selector(data,["market"],["sector"])
+        with patch("stock_analysis.fund_trend.rank_associations",
+                   return_value={"ranked":[{"code":"sector","score":.3}]}) as mocked:
+            self.assertEqual(select(days[590]),[{"code":"sector","score":.3}])
+            horizon = mocked.call_args.args[0]
+            self.assertEqual(horizon.index[-1],days[590])
+            self.assertEqual(len(horizon),504)
+            select(days[590])
+            self.assertEqual(mocked.call_count,1)
 
     def test_orders_mark_same_day_returns_before_the_fill_and_do_not_rebalance(self):
         days = pd.bdate_range("2026-01-05",periods=10)

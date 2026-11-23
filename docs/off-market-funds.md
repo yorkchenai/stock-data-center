@@ -73,3 +73,5 @@ python -m stock_analysis.funds 000001 \
 - 已在 GitHub runner 读取基金目录及三只基金的确认净值。每只基金的分红、折算与各周期可计算状态以诊断摘要为准。未对全市场逐只验证。官方基准、无风险利率、持仓和费用仅在输入具有可靠来源时显示。GitHub Pages 静态入口使用本地导入，本轮无生产部署。
 
 事件修复、真实股份披露交叉核验和隔离脚本实验见 [第二阶段验收](off-market-funds-phase2.md)。
+
+多基金通用性验证见[第四阶段验收](off-market-funds-phase4.md)。

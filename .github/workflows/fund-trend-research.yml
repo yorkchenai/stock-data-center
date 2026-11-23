@@ -1,0 +1,44 @@
+name: Fund trend and drawdown research
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/fund-trend-research.yml"
+      - "scripts/audit_fund_trend.py"
+      - "stock_analysis/fund_trend*.py"
+      - "research/fund_sector_panel.json"
+      - "research/sector_indices.json"
+      - "tests/test_fund_trend.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fund-trend-research-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  research:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      OPENBLAS_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -r requirements.txt
+      - name: Audit the original fund and sector panel and run the fixed scenarios
+        run: |
+          python -m scripts.audit_fund_trend --public-probe --start 2021-01-04 --end 2026-11-23 --output work/trend/outcomes.json --charts work/trend/charts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fund-trend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            work/trend/outcomes.json
+            work/trend/charts/*-trend.png
+          retention-days: 14
+          if-no-files-found: error

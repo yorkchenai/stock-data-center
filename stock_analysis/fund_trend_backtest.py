@@ -39,13 +39,14 @@ def segments(levels,start=OOS_START):
             if len(index)>=MIN_SEGMENT]
 
 
-def order_schedule(sessions, decisions, strategy, execution, monthly_days):
+def order_schedule(sessions, decisions, strategy, execution, monthly_days, calendar=None):
     orders = {}
     first, last = sessions[0], sessions[-1]
     def enact(day,target,signal=None):
         idx = sessions.searchsorted(day)
         if idx<len(sessions):
             orders[idx] = (float(target),signal)
+    calendar = sessions if calendar is None else calendar
     if strategy=="A":
         enact(first,1)
     elif strategy=="E":
@@ -59,9 +60,10 @@ def order_schedule(sessions, decisions, strategy, execution, monthly_days):
         previous = None
         if earlier:
             carried = earlier[-1]
-            if execution.order_delay<len(sessions):
+            due = calendar.searchsorted(carried["decision"])+execution.order_delay
+            if due<len(calendar):
                 previous = carried["targets"][strategy]
-                enact(sessions[execution.order_delay],previous,carried["decision"])
+                enact(max(first,calendar[due]),previous,carried["decision"])
         for row in decisions:
             day = row["decision"]
             target = row["targets"][strategy]
@@ -226,7 +228,7 @@ def run_strategies(levels, calendar, decisions, execution, monthly_days, restric
     phases = historical_phases(levels)
     paths, outcomes, trades = {}, {}, {}
     for name in STRATEGIES:
-        orders = order_schedule(levels.index,decisions,name,execution,monthly_days)
+        orders = order_schedule(levels.index,decisions,name,execution,monthly_days,calendar)
         path,record,fees = simulation(levels,calendar,orders,execution,restrictions)
         paths[name],trades[name] = path,record
         outcomes[name] = metrics(path,record,fees,phases)

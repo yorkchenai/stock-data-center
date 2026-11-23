@@ -108,7 +108,7 @@ def known_state(table, cutoff, sampling):
 def combine(rows, weighting):
     if not rows:
         return None, []
-    weights = np.array([max(.001,r["score"]) if weighting=="weighted" else 1.0 for r in rows])
+    weights = np.array([max(.001,r["score"]) if weighting=="weighted" else 1.0 for r in rows],dtype=float)
     weights /= weights.sum()
     total_by_state = {state:sum(weight for row,weight in zip(rows,weights) if row["state"]==state)
                       for state in (UP,DOWN)}

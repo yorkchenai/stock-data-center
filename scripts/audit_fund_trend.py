@@ -49,7 +49,9 @@ def summarize_cases(levels, trades, metrics, decisions):
                           "fund_next_10_sessions":rebound,"first_addition_after_trough":clean_record(entry) if entry else None,
                           "decision_sectors":last_decision["sectors"] if last_decision else [],
                           "fund_movement_trough_to_entry":float(levels.loc[entry["date"]]/levels.loc[trough]-1) if entry else None}
-    return {"buy_hold_drawdown":worst,"strategies":rows}
+    latest = next((row for row in reversed(decisions) if row["decision"]<=levels.index[-1]),None)
+    return {"buy_hold_drawdown":worst,"strategies":rows,
+            "latest_signal":{**clean_record(latest)} if latest else None}
 
 
 def chart_case(code, levels, paths, metrics, rows, trades, output):
@@ -83,6 +85,10 @@ def chart_case(code, levels, paths, metrics, rows, trades, output):
     for side,marker in (("sell","v"),("buy","^")):
         times = [row["date"] for row in trades["C"] if row["side"]==side and row["date"]>=last_year]
         twin.scatter(times,risk.reindex(times),marker=marker,s=32,label=side)
+    if signals:
+        latest_sectors = ", ".join(f"{row['code']}={row['state']}" for row in signals[-1]["sectors"])
+        if latest_sectors:
+            axes[2].text(.01,.95,latest_sectors,transform=axes[2].transAxes,va="top",fontsize=8)
     twin.set(ylim=(-.15,1.15),ylabel="Exposure / state")
     twin.legend(ncols=5,loc="lower left",fontsize=8)
     axes[2].set(title="Recent year: weekly fund samples, trend states and executed trades",ylabel="Normalized fund value")

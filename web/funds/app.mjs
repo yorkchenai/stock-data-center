@@ -226,7 +226,13 @@ function renderSearch(results, term) {
 }
 
 function showFacts(target, fields) {
-  target.replaceChildren(...fields.flatMap(([name,value])=>[tag("dt",name),tag("dd",value ?? "—")]));
+  target.replaceChildren(...fields.flatMap(([name,value,sourceUrl])=>{
+    const description = tag("dd",value ?? "—");
+    if (typeof sourceUrl === "string" && URL.canParse(sourceUrl) && new URL(sourceUrl).protocol === "https:") {
+      description.append(" ",tag("a","查看来源",{href:sourceUrl,target:"_blank",rel:"noopener noreferrer"}));
+    }
+    return [tag("dt",name),description];
+  }));
 }
 function renderHoldings(fund) {
   const target = $("holdings-data");
@@ -271,8 +277,7 @@ function renderIdentity(code,fund) {
   }).format(new Date(fund.source.retrieved_at));
   showFacts($("fund-more"),[["基金成立日期",fund?.inception],["基金规模",fund?.size],["费率",fund?.fee],
     ["基金经理",fund?.fund_manager],["业绩比较基准",fund?.benchmark?.name ?? fund?.reference],
-    ["基准公式",fund?.benchmark?.formula],["基准披露出处",fund?.benchmark?.source],
-    ["基准披露链接",fund?.benchmark?.source_url],["数据获取时间（上海）",sourceTime],
+    ["基准公式",fund?.benchmark?.formula],["基准披露出处",fund?.benchmark?.source,fund?.benchmark?.source_url],["数据获取时间（上海）",sourceTime],
     ["原始数据口径",fund?.source.method],["总回报口径",fund?.return_note ?? (fund?.return_basis==="adjusted_nav" ? "来源提供的复权总回报序列" : "—")]]);
   renderHoldings(fund);
   historyTable(fund);
@@ -332,7 +337,7 @@ function renderAnalysis(requestedStart, requestedEnd) {
   $("benchmark-status").textContent = comparison
     ? [benchmarkStatus[comparison.status], comparison.value == null ? null : "基准区间收益 " + pct(comparison.value) + "。",
       comparison.disclosed ? "区间出处 " + comparison.disclosed.source + "。" : null,
-      comparison.status !== "disclosed" ? comparison.reason : null, benchmark?.source].filter(Boolean).join(" ")
+      comparison.status !== "disclosed" ? comparison.reason : null, benchmark?.series_source ?? benchmark?.source].filter(Boolean).join(" ")
     : (analysis.metrics.excess.reason ?? "");
   $("fund-line").disabled = !analysis.points.fund.length;
   $("benchmark-line").disabled = !analysis.points.benchmark.length;

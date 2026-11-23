@@ -401,9 +401,20 @@ def attach_benchmark_data(fund, imported):
     if imported.get("code") != fund["code"]:
         raise ValueError("补充基准数据的基金代码不匹配。")
     current = fund.get("benchmark")
-    if current is None or not isinstance(imported.get("series"), list):
-        raise ValueError("需提供已核验基金的成分点位序列。")
-    return {**fund, "benchmark": {**current, "series": imported["series"]}}
+    series = imported.get("series")
+    levels = imported.get("official_levels")
+    if current is None or (series is None and levels is None) or (series is not None and levels is not None):
+        raise ValueError("需为已核验的基金提供成分点位或管理人发布的基准点位。")
+    if series is not None:
+        if not isinstance(series, list):
+            raise ValueError("成分点位必须为序列。")
+        data = {"series": series}
+    else:
+        if not isinstance(levels, dict) or not isinstance(levels.get("rows"), list) or not levels.get("source"):
+            raise ValueError("管理人基准点位缺少数据或来源。")
+        data = {"official_levels": True, "rows": levels["rows"], "series_source": levels["source"],
+                "series_source_url": levels.get("source_url"), "retrieved_at": levels.get("retrieved_at")}
+    return {**fund, "benchmark": {**current, **data}}
 
 
 def main():
@@ -421,7 +432,9 @@ def main():
     parser.add_argument("--inception", help="Disclosed share-class inception date")
     parser.add_argument("--daily-nav", action="store_true", help="Declare CSV as confirmed daily valuations")
     parser.add_argument("--benchmark-data", type=Path, help="Local authorized benchmark component levels JSON")
-    parser.add_argument("--risk-free-start", type=date.fromisoformat, help="Opt in to local ChinaBond 3-month rates from YYYY-MM-DD")
+    rates = parser.add_mutually_exclusive_group()
+    rates.add_argument("--risk-free-start", type=date.fromisoformat, help="Opt in to local ChinaBond 3-month rates from YYYY-MM-DD")
+    rates.add_argument("--risk-free-data", type=Path, help="Local authorized historical rate JSON")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if not CODE.fullmatch(args.code):
@@ -452,6 +465,13 @@ def main():
             if not isinstance(imported, dict):
                 raise ValueError("补充基准数据必须为 JSON 对象。")
             data = attach_benchmark_data(data, imported)
+        if args.risk_free_data:
+            if args.risk_free_data.stat().st_size > MAX_RESPONSE:
+                raise ValueError("补充利率数据文件过大。")
+            rate_data = json.loads(args.risk_free_data.read_text(encoding="utf-8-sig"))
+            if not isinstance(rate_data, dict) or not isinstance(rate_data.get("rows"), list):
+                raise ValueError("补充利率数据必须包含历史观察序列。")
+            data = {**data, "risk_free": rate_data}
         if args.risk_free_start:
             from .fund_rates import load_chinabond_rates
             end = date.fromisoformat(data["rows"][-1]["date"])

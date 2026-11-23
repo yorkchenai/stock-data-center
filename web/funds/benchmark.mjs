@@ -86,13 +86,14 @@ export function normalizeBenchmark(raw, latestDay) {
 function alignComponents(benchmark, rows) {
   const start = rows[0].date, end = rows.at(-1).date;
   const dates = new Set(rows.map(({date}) => date));
-  const activeIds = new Set(benchmark.regimes.filter((regime) => regime.effective_from <= end
-    && (regime.effective_to == null || regime.effective_to > start)).flatMap((regime) =>
-    (regime.components ?? []).map(({id}) => id)));
-  const members = [...benchmark.seriesById].filter(([id]) => activeIds.has(id));
-  for (const [, series] of members) {
-    for (const {date} of series.rows) if (date >= start && date <= end) dates.add(date);
-    for (const date of series.calendar?.sessions ?? []) if (date >= start && date <= end) dates.add(date);
+  const members = [...benchmark.seriesById].filter(([id]) => benchmark.regimes.some(({components}) =>
+    components?.some((component) => component.id === id)));
+  for (const [id, series] of members) {
+    const windows = benchmark.regimes.filter(({components}) => components?.some((component) => component.id === id));
+    const included = (date) => date >= start && date <= end && windows.some(({effective_from, effective_to}) =>
+      date >= effective_from && (effective_to == null || date <= effective_to));
+    for (const {date} of series.rows) if (included(date)) dates.add(date);
+    for (const date of series.calendar?.sessions ?? []) if (included(date)) dates.add(date);
   }
   const timeline = [...dates].sort();
   const levels = new Map();
@@ -162,6 +163,12 @@ export function compareBenchmark(benchmark, rows) {
     values = new Map();
     if (base) {
       for (const {date} of rows) {
+        const defined = !benchmark.regimes.length || date === start || benchmark.regimes.some((item) =>
+          item.method !== "none" && item.effective_from <= date && (item.effective_to == null || date <= item.effective_to));
+        if (!defined) {
+          reason = date + " 缺少适用的官方基准定义。";
+          break;
+        }
         if (!levels.has(date)) {
           reason = "官方基准序列缺少 " + date + "。";
           break;

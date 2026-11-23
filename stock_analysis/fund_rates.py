@@ -6,9 +6,10 @@ import re
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
+import exchange_calendars as xcals
 import pandas as pd
 
-HISTORY_URL = "https://yield.chinabond.com.cn/cbweb-pbc-web/pbc/historyQuery"
+HISTORY_URL = "https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/historyQuery"
 SOURCE_URL = "https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/showHistory?locale=cn_ZH&mark=1"
 CURVE = "中债国债收益率曲线"
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -49,11 +50,15 @@ def load_chinabond_rates(start, end, fetch_html, retrieved_at=None):
     while first <= end:
         last = min(first + timedelta(days=359), end)
         query = urlencode({"startDate": first.isoformat(), "endDate": last.isoformat(), "gjqx": "0",
-                           "qxId": "ycqx", "locale": "cn_ZH"})
+                           "qxId": "hzsylqx", "locale": "cn_ZH", "mark": "1"})
         rows.extend(parse_yield_history(fetch_html(f"{HISTORY_URL}?{query}"), first, last))
         first = last + timedelta(days=1)
     if not rows or rows[-1]["date"] < start.isoformat():
         raise ValueError("查询区间内没有可用的 3 个月国债收益率。")
+    last_date = rows[-1]["date"]
+    calendar = xcals.get_calendar("XSHG", start=start.isoformat(), end=end.isoformat())
+    expected = set(calendar.sessions_in_range(start.isoformat(), last_date).strftime("%Y-%m-%d"))
+    missing = sorted(expected - {row["date"] for row in rows})
     return {
         "name": "中债国债收益率曲线（到期，3 个月）",
         "source": "中央国债登记结算有限责任公司 / 中债收益率曲线",
@@ -62,7 +67,11 @@ def load_chinabond_rates(start, end, fetch_html, retrieved_at=None):
         "quote_basis": "人民币 3 个月国债到期收益率，年化百分比转为小数",
         "convention": "simple_act_365f",
         "effective_from": start.isoformat(),
-        "effective_to": rows[-1]["date"],
+        "effective_to": last_date,
+        "data_date": last_date,
+        "status": "partial" if missing or last_date < end.isoformat() else "complete",
+        "calendar_check": "XSHG trading sessions (minimum required quote dates)",
+        "missing_dates": missing,
         "max_age_days": 10,
         "rows": rows,
     }

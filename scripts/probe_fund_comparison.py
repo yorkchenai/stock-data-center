@@ -1,19 +1,18 @@
 """Emit only aggregate comparison diagnostics. Histories stay in memory."""
 from bisect import bisect_right
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 import json
-from math import isclose, isfinite, sqrt
+from math import isclose, isfinite, prod, sqrt
 import statistics
 import subprocess
 from urllib.parse import urlencode
 
 import exchange_calendars as xcals
-import pandas as pd
 
 from stock_analysis.data import fetch_daily, request_json
 from stock_analysis.funds import SHANGHAI, download, load_fund
-from stock_analysis.fund_rates import load_chinabond_rates, parse_yield_history
+from stock_analysis.fund_rates import load_chinabond_rates
 from stock_analysis.symbols import resolve_symbol
 from stock_analysis.validation import audit_calendar
 
@@ -49,7 +48,8 @@ console.log(JSON.stringify(output));
 
 
 def independent_sharpe(rows, rates, start, end):
-    if not rates or not rates["effective_from"] <= start <= end <= rates["effective_to"]:
+    if (not rates or not rates["effective_from"] <= start <= end <= rates["effective_to"]
+            or any(start <= day <= end for day in rates["missing_dates"])):
         return None
     dates = [row["date"] for row in rates["rows"]]
     navs = [(date.fromisoformat(row["date"]), row["return_index"])
@@ -88,50 +88,56 @@ def official_equity_index(code, end):
         if not rows or any(str(row["indexCode"]) != code or not isfinite(float(row["close"]))
                            or float(row["close"]) <= 0 for row in rows):
             raise ValueError("empty or mismatched price series")
-        dates = sorted(pd.to_datetime([str(row["tradeDate"]) for row in rows], format="%Y%m%d").strftime("%Y-%m-%d"))
+        levels = sorted((datetime.strptime(str(row["tradeDate"]), "%Y%m%d").date(), float(row["close"])) for row in rows)
+        dates = [day.isoformat() for day, value in levels]
         if len(set(dates)) != len(dates):
             raise ValueError("duplicate CSI dates")
         calendar = xcals.get_calendar("XSHG", start="2021-09-01", end=end.isoformat())
         expected = set(calendar.sessions_in_range(RATE_START.isoformat(), end.isoformat()).strftime("%Y-%m-%d"))
         observed = set(dates)
-        return {"id":code, "basis":"price", "index_name":rows[0]["indexNameCnAll"], "source":"中证指数",
-                "first":dates[0], "last":dates[-1], "observations":len(dates),
-                "missing_sessions":len(expected-observed), "unexpected_dates":len(observed-expected)}
+        report = {"id":code, "basis":"price", "index_name":rows[0]["indexNameCnAll"], "source":"中证指数",
+                  "first":dates[0], "last":dates[-1], "observations":len(dates),
+                  "missing_sessions":len(expected-observed), "unexpected_dates":len(observed-expected)}
+        if code == "000300" and not (expected-observed or observed-expected):
+            report["fund_000311_method_check"] = []
+            for anchor, disclosed in [("2025-09-30", -.0432), ("2023-09-28", .2275), ("2021-09-30", -.0265)]:
+                selected = [(day, value) for day, value in levels if anchor <= day.isoformat() <= AS_OF]
+                fraction = (selected[-1][0] - selected[0][0]).days / 365
+                raw = selected[-1][1] / selected[0][1] - 1
+                daily = prod(1 + .95 * (close / previous - 1) + .015 * (finish - start).days / 365
+                             for (start, previous), (finish, close) in zip(selected, selected[1:])) - 1
+                report["fund_000311_method_check"].append({"start":anchor, "end":AS_OF, "published":disclosed,
+                    "price_only":raw, "period_weighted_simple_spread":.95 * raw + .015 * fraction,
+                    "daily_weighted_simple_spread":daily})
+        return report
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         return {"id":code, "error":str(error)}
 
 
 def rate_history(end):
-    hosts = ("yield.chinabond.com.cn", "indices.chinabond.com.cn", "valuation.chinabond.com.cn")
-    paths = ("/cbweb-pbc-web/pbc/historyQuery", "/cbweb-cbrc-web/cbrc/historyQuery")
-    start = end - timedelta(days=12)
-    candidates = [f"https://{host}{path}" for host in hosts for path in paths]
+    try:
+        return load_chinabond_rates(RATE_START, end, download), None
+    except (OSError, ValueError, TimeoutError) as error:
+        return None, str(error)
 
-    def fetch(candidate, query):
-        if "/cbrc/" in candidate:
-            query = query.replace("qxId=ycqx", "qxId=hzsylqx") + "&mark=1"
-        return download(candidate + "?" + query)
 
-    def verify(candidate):
-        params = urlencode({"startDate":start.isoformat(), "endDate":end.isoformat(), "gjqx":"0",
-                            "qxId":"ycqx", "locale":"cn_ZH"})
-        try:
-            rows = parse_yield_history(fetch(candidate, params), start, end)
-            return {"source":candidate, "observations":len(rows)}
-        except (OSError, ValueError, TimeoutError) as error:
-            return {"source":candidate, "error":str(error)}
+def bond_composite_history(end):
+    # The public adapter maps the official comprehensive index by name and
+    # requests full price, all maturities. The issuer's charter fixes the code.
+    import akshare as ak
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        probes = list(executor.map(verify, candidates))
-    for candidate, probe in zip(candidates, probes):
-        if not probe.get("observations"):
-            continue
-
-        try:
-            return load_chinabond_rates(RATE_START, end, lambda url: fetch(candidate, url.partition("?")[2])), probes
-        except (OSError, ValueError, TimeoutError) as error:
-            probe["history_error"] = str(error)
-    return None, probes
+    try:
+        windows = ak.bond_composite_index_cbond(indicator="全价", period="总值")
+        active = windows[windows.date.between(RATE_START, end)].sort_values("date")
+        if active.empty or active.date.duplicated().any() or any(
+            not isfinite(value) or value <= 0 for value in active.value
+        ):
+            raise ValueError("missing, duplicate or invalid comprehensive bond index levels")
+        return {"id":"CBA00203","basis":"full_price","source":"中债－综合指数（全价、总值）",
+                "first":active.date.iloc[0].isoformat(),"last":active.date.iloc[-1].isoformat(),
+                "observations":len(active)}
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+        return {"id":"CBA00203", "error":str(error)}
 
 
 def main():
@@ -141,14 +147,16 @@ def main():
         funds = list(funds_pending)
         end = date.fromisoformat(max(fund["rows"][-1]["date"] for fund in funds))
         official_pending = [executor.submit(official_equity_index, code, end) for code in ("000300", "H30355")]
-        rates, rate_probes = executor.submit(rate_history, end).result()
+        bond_pending = executor.submit(bond_composite_history, end)
+        rates, rate_error = executor.submit(rate_history, end).result()
         index = index_pending.result()
         official_indices = [job.result() for job in official_pending]
-    report = {"run_at": datetime.now(SHANGHAI).isoformat(), "price_index":index,
-              "official_price_indices":official_indices, "rate_probes":rate_probes, "funds":{}}
+        bond = bond_pending.result()
+    report = {"run_at":datetime.now(SHANGHAI).isoformat(),"price_index":index,"official_price_indices":official_indices,
+              "bond_index":bond,"rate_error":rate_error,"funds":{}}
     if rates:
         report["rate_history"] = {"name":rates["name"], "first":rates["rows"][0]["date"], "last":rates["effective_to"],
-                                  "observations":len(rates["rows"])}
+                                  "observations":len(rates["rows"]),"missing_sessions":rates["missing_dates"]}
     for fund in funds:
         result = subprocess.run(
             ["node","--input-type=module","-e",NODE], input=json.dumps({"payload":{**fund,"risk_free":rates},"asOf":AS_OF}),

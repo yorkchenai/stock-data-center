@@ -27,7 +27,12 @@ export function normalizeRiskFree(raw, latestDay) {
     }
     previous = date;
   }
-  return raw;
+  const missing = raw.missing_dates ?? [];
+  if (!Array.isArray(missing) || missing.some((date, i) => validDate(date) < raw.effective_from
+    || date > raw.effective_to || (i > 0 && date <= missing[i-1]))) {
+    throw new Error("无风险利率缺口日期无效。");
+  }
+  return {...raw, missing_dates:missing};
 }
 
 export function riskFreeReturns(risk, rows, sessions) {
@@ -37,6 +42,8 @@ export function riskFreeReturns(risk, rows, sessions) {
   if (risk.convention === "effective_trading_252") {
     return {values:Array(rows.length - 1).fill(Math.expm1(Math.log1p(risk.annual_rate) / sessions))};
   }
+  const missing = risk.missing_dates.find((date) => rows[0].date <= date && date <= rows.at(-1).date);
+  if (missing) return {reason:missing + " 缺少日历要求的历史无风险利率观察值。"};
   const basis = conventions.get(risk.convention);
   const values = [];
   let pointer = -1;

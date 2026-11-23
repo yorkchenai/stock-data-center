@@ -106,6 +106,7 @@ test("insufficient rate coverage, outdated quotes and invalid date order are dis
   assert.match(riskFreeReturns(normalizeRiskFree({...history,effective_from:dates[1]},end),rows,252).reason,/覆盖/);
   assert.match(riskFreeReturns(normalizeRiskFree({...history,rows:history.rows.slice(1)},end),rows,252).reason,/2025-01-02/);
   assert.match(riskFreeReturns(normalizeRiskFree({...history,rows:history.rows.slice(0,1)},end),rows,252).reason,/过期/);
+  assert.match(riskFreeReturns(normalizeRiskFree({...history,missing_dates:[dates[1]]},end),rows,252).reason,/日历要求/);
   assert.throws(()=>normalizeRiskFree({...history,rows:[...history.rows].reverse()},end),/日期/);
 });
 

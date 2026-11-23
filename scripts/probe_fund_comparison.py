@@ -11,8 +11,8 @@ from urllib.parse import urlencode
 import exchange_calendars as xcals
 
 from stock_analysis.data import fetch_daily, request_json
-from stock_analysis.funds import SHANGHAI, download, load_fund
-from stock_analysis.fund_rates import load_chinabond_rates
+from stock_analysis.funds import SHANGHAI, attach_benchmark_data, load_fund
+from stock_analysis.fund_rates import fetch_rate_history, load_chinabond_rates
 from stock_analysis.symbols import resolve_symbol
 from stock_analysis.validation import audit_calendar
 
@@ -33,6 +33,7 @@ function summarize(label, date, end) {
     label, start:window.start, end:window.end, observations:window.rows.length,
     fund_return:stats.metrics.return.value, excess:stats.metrics.excess.value,
     benchmark:stats.comparison?.value ?? null, benchmark_status:stats.comparison?.status,
+    benchmark_points:stats.points.benchmark.length,
     benchmark_reason:stats.comparison?.reason, sharpe:stats.metrics.sharpe.value,
     sharpe_reason:stats.metrics.sharpe.reason,
   });
@@ -109,14 +110,18 @@ def official_equity_index(code, end):
                 report["fund_000311_method_check"].append({"start":anchor, "end":AS_OF, "published":disclosed,
                     "price_only":raw, "period_weighted_simple_spread":.95 * raw + .015 * fraction,
                     "daily_weighted_simple_spread":daily})
-        return report
+        imported = {"id":code,"basis":"price","source":"中证指数",
+                    "rows":[{"date":day.isoformat(),"value":value} for day, value in levels],
+                    "calendar":{"from":RATE_START.isoformat(),"to":end.isoformat(),
+                                "source":"XSHG","sessions":sorted(expected)}}
+        return report, imported
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
-        return {"id":code, "error":str(error)}
+        return {"id":code, "error":str(error)}, None
 
 
 def rate_history(end):
     try:
-        return load_chinabond_rates(RATE_START, end, download), None
+        return load_chinabond_rates(RATE_START, end, fetch_rate_history), None
     except (OSError, ValueError, TimeoutError) as error:
         return None, str(error)
 
@@ -133,11 +138,16 @@ def bond_composite_history(end):
             not isfinite(value) or value <= 0 for value in active.value
         ):
             raise ValueError("missing, duplicate or invalid comprehensive bond index levels")
-        return {"id":"CBA00203","basis":"full_price","source":"中债－综合指数（全价、总值）",
-                "first":active.date.iloc[0].isoformat(),"last":active.date.iloc[-1].isoformat(),
-                "observations":len(active)}
+        source = "中债－综合指数（全价、总值）"
+        report = {"id":"CBA00203","basis":"full_price","source":source,
+                  "first":active.date.iloc[0].isoformat(),"last":active.date.iloc[-1].isoformat(),
+                  "observations":len(active)}
+        imported = {"id":report["id"],"basis":report["basis"],"source":source,
+                    "rows":[{"date":day.isoformat(),"value":value}
+                            for day, value in active.itertuples(index=False, name=None)]}
+        return report, imported
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
-        return {"id":"CBA00203", "error":str(error)}
+        return {"id":"CBA00203", "error":str(error)}, None
 
 
 def main():
@@ -150,14 +160,17 @@ def main():
         bond_pending = executor.submit(bond_composite_history, end)
         rates, rate_error = executor.submit(rate_history, end).result()
         index = index_pending.result()
-        official_indices = [job.result() for job in official_pending]
-        bond = bond_pending.result()
-    report = {"run_at":datetime.now(SHANGHAI).isoformat(),"price_index":index,"official_price_indices":official_indices,
+        broad_index, growth_index = (job.result() for job in official_pending)
+        bond, bond_series = bond_pending.result()
+    report = {"run_at":datetime.now(SHANGHAI).isoformat(),"price_index":index,
+              "official_price_indices":[broad_index[0],growth_index[0]],
               "bond_index":bond,"rate_error":rate_error,"funds":{}}
     if rates:
         report["rate_history"] = {"name":rates["name"], "first":rates["rows"][0]["date"], "last":rates["effective_to"],
                                   "observations":len(rates["rows"]),"missing_sessions":rates["missing_dates"]}
     for fund in funds:
+        if fund["code"] == "000001" and growth_index[1] and bond_series:
+            fund = attach_benchmark_data(fund, {"code":fund["code"],"series":[growth_index[1],bond_series]})
         result = subprocess.run(
             ["node","--input-type=module","-e",NODE], input=json.dumps({"payload":{**fund,"risk_free":rates},"asOf":AS_OF}),
             text=True, check=True, capture_output=True,

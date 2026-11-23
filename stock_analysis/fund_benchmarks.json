@@ -3,7 +3,7 @@
     "official": true,
     "name": "中证800成长指数收益率×70%＋中债－综合全价（总值）指数收益率×30%",
     "formula": "中证800成长指数收益率×70%＋中债－综合全价（总值）指数收益率×30%",
-    "source": "华夏基金 2026-06-27 基准变更公告及 2026 年三季报",
+    "source": "华夏基金基准变更公告及 2026-07-27 更新招募说明书",
     "source_url": "https://static.cninfo.com.cn/finalpage/2026-06-27/1225391047.PDF",
     "regimes": [
       {
@@ -15,9 +15,8 @@
       },
       {
         "effective_from": "2026-07-27",
-        "method": "unverified",
-        "source": "https://static.cninfo.com.cn/finalpage/2026-06-27/1225391047.PDF",
-        "note": "尚未核实两只成分的完整日频数据及组合计算口径。",
+        "method": "daily_weighted",
+        "source": "https://www.chinaamc.com/c/2026-07-27/996946.shtml",
         "components": [
           {
             "id": "H30355",

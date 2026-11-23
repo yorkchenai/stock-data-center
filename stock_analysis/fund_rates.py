@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 import math
 import re
+from urllib.error import URLError
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -12,7 +13,18 @@ import pandas as pd
 HISTORY_URL = "https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/historyQuery"
 SOURCE_URL = "https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/showHistory?locale=cn_ZH&mark=1"
 CURVE = "中债国债收益率曲线"
+PRIMARY_HOST = "yield.chinabond.com.cn"
+MIRROR_HOST = "indices.chinabond.com.cn"
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def fetch_rate_history(url):
+    from .funds import download
+
+    try:
+        return download(url, timeout=15)
+    except (OSError, URLError, TimeoutError):
+        return download(url.replace(PRIMARY_HOST, MIRROR_HOST, 1), timeout=15)
 
 
 def parse_yield_history(html, start, end):

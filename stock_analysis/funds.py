@@ -55,10 +55,10 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def download(url):
+def download(url, timeout=8):
     opener = build_opener(NoRedirect())
     request = Request(url, headers={"Accept": "application/javascript, text/plain, */*"})
-    with opener.open(request, timeout=8) as response:
+    with opener.open(request, timeout=timeout) as response:
         body = response.read(MAX_RESPONSE + 1)
     if len(body) > MAX_RESPONSE:
         raise ValueError("基金数据源响应超出限制。")
@@ -473,10 +473,10 @@ def main():
                 raise ValueError("补充利率数据必须包含历史观察序列。")
             data = {**data, "risk_free": rate_data}
         if args.risk_free_start:
-            from .fund_rates import load_chinabond_rates
+            from .fund_rates import fetch_rate_history, load_chinabond_rates
             end = date.fromisoformat(data["rows"][-1]["date"])
             try:
-                data = {**data, "risk_free": load_chinabond_rates(args.risk_free_start, end, download)}
+                data = {**data, "risk_free": load_chinabond_rates(args.risk_free_start, end, fetch_rate_history)}
             except (OSError, ValueError, TimeoutError) as error:
                 print(f"历史无风险利率不可用：{error}", file=sys.stderr)
         args.output.parent.mkdir(parents=True, exist_ok=True)

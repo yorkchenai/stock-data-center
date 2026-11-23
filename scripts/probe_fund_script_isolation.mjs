@@ -89,7 +89,30 @@ export async function probeScriptIsolation(browser) {
       for (const code of ["000001","000311","110017"]) sequence.push(await one(code));
       const failures=[await one("000000",2000),await one("999999",250)];
       const parallel=await Promise.all(["110017","000001"].map((code)=>one(code)));
+      const sharedScope = await new Promise(resolve => {
+        const frame = document.createElement("iframe");
+        frame.setAttribute("sandbox", "allow-scripts");
+        frame.hidden = true;
+        function finish(value) {
+          clearTimeout(timer);
+          window.removeEventListener("message", receive);
+          frame.remove();
+          resolve(value);
+        }
+        function receive(event) {
+          if (event.source === frame.contentWindow && event.origin === "null" && event.data?.control === "shared") {
+            finish(event.data.retained_previous_history === true);
+          }
+        }
+        const timer = setTimeout(() => finish(null), 1500);
+        window.addEventListener("message", receive);
+        frame.srcdoc = `<script nonce="isolated-probe">window.fS_code="000001"; window.Data_netWorthTrend=["000001"]<\/script>
+          <script nonce="isolated-probe">window.fS_code="000311";
+          parent.postMessage({control:"shared",retained_previous_history:window.Data_netWorthTrend?.[0]!==window.fS_code},"*");<\/script>`;
+        document.body.append(frame);
+      });
       return {sequence,parallel,controlled_failures:failures,
+        controlled_shared_scope_retained_old_data:sharedScope,
         parent_untouched:document.getElementById("sentinel").textContent==="untouched"
           && typeof window.fS_code==="undefined" && typeof window.Data_netWorthTrend==="undefined",
         frames_remaining:document.querySelectorAll("iframe").length};

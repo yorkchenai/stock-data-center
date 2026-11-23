@@ -49,7 +49,12 @@ def sample(code):
     rows = fund["rows"]
     provider_rows = assignment(text, "Data_netWorthTrend")
     anomalies = []
+    verified_events = []
     for i, row in enumerate(rows):
+        if row["event_evidence"] is not None:
+            verified_events.append({"date": row["date"], "source": row["event_evidence"],
+                                    "cash_per_share": row["cash_distribution"], "shares_per_old_share": row["split_factor"],
+                                    "status": row["return_issue"] or "validated"})
         if row["return_index"] is not None or not i:
             continue
         item, prev = provider_rows[i], rows[i - 1]
@@ -81,6 +86,7 @@ def sample(code):
         "browser_contract_validated": return_checks is not None, "computable_return_periods": return_checks,
         "latest_unit_nav": rows[-1]["unit_nav"], "anomaly_report": anomalies,
         "reconciled_cash_count": sum(row["cash_distribution_source"] == "cumulative_nav_reconciled" for row in rows),
+        "disclosure_events": verified_events,
     }
 
 

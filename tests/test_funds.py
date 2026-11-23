@@ -88,6 +88,32 @@ class FundProviderTests(unittest.TestCase):
         self.assertEqual(data["rows"][1]["return_index"], 1.0)
         self.assertEqual(data["rows"][2]["return_issue"], "cash_after_split")
 
+    def test_precise_disclosure_wins_over_rounded_cumulative_offset(self):
+        rows = [
+            {"x": epoch("2023-01-11"), "y": .997, "unitMoney": ""},
+            {"x": epoch("2023-01-12"), "y": .997, "unitMoney": "分红：每10份派现金元", "equityReturn": .18},
+        ]
+        first = parse_history(history(rows, accumulated=[3.56, 3.562]), "000001", retrieved_at=self.retrieval)["rows"][1]
+        self.assertEqual(first["cash_distribution"], .0018)
+        self.assertEqual(first["cash_distribution_source"], "fund_disclosure")
+        self.assertAlmostEqual(first["return_index"], (.997 + .0018) / .997)
+        rows[1]["equityReturn"] = -1
+        invalid = parse_history(history(rows), "000001", retrieved_at=self.retrieval)["rows"][1]
+        self.assertEqual(invalid["return_issue"], "disclosed_event_growth_mismatch")
+        self.assertIsNone(invalid["return_index"])
+
+    def test_disclosed_split_requires_the_exact_share_class_and_date(self):
+        rows = [
+            {"x": epoch("2020-12-14"), "y": 1.2637, "unitMoney": ""},
+            {"x": epoch("2020-12-15"), "y": 1.2569, "unitMoney": "拆分：每份基金份额折算份", "equityReturn": 0},
+        ]
+        matched = parse_history(history(rows, "161725"), "161725", retrieved_at=self.retrieval)["rows"][1]
+        self.assertAlmostEqual(matched["split_factor"], 1.005444122)
+        self.assertAlmostEqual(matched["return_index"], 1.0, places=4)
+        other = parse_history(history(rows), "000001", retrieved_at=self.retrieval)["rows"][1]
+        self.assertIsNone(other["return_index"])
+        self.assertEqual(other["return_issue"], "unrecognized_event")
+
     def test_never_executes_source_script_or_accepts_the_wrong_symbol(self):
         self.assertEqual(assignment('var fS_name = "测试"; alert("external");', "fS_name"), "测试")
         self.assertEqual(assignment('/*基金名称*/var fS_name = "测试";', "fS_name"), "测试")

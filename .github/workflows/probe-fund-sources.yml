@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "stock_analysis/funds.py"
+      - "stock_analysis/fund_event_evidence.json"
       - "scripts/probe_fund_sources.py"
       - "scripts/probe_fund_browser.mjs"
       - "scripts/probe_fund_script_isolation.mjs"

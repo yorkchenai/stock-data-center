@@ -16,6 +16,7 @@ export const RETURN_ISSUES = {
   cash_after_split: "折算后缺少明确分红金额",
   cash_evidence_missing: "缺少累计净值或披露增长率，无法核验分红",
   cash_evidence_mismatch: "累计净值差额与披露增长率无法核对",
+  disclosed_event_growth_mismatch: "官方事件与该日净值或披露增长率无法对账",
   growth_mismatch: "单位净值和事件与披露增长率冲突",
   invalid_multiplier: "相邻净值无法形成有效的总回报",
 };

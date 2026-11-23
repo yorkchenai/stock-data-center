@@ -19,6 +19,9 @@ HISTORY_URL = "https://fund.eastmoney.com/pingzhongdata/{code}.js"
 MAX_RESPONSE = 4_000_000
 CODE = re.compile(r"[0-9]{6}")
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+CASH_PLACEHOLDER = re.compile(r"(?:分红[：:])?每(?:[1-9][0-9]*)?份(?:基金份额)?派现金元")
+SPLIT_PLACEHOLDER = re.compile(r"(?:拆分[：:]|折算[：:])?每(?:[1-9][0-9]*)?份(?:基金份额)?折算(?:为)?份")
+NAV_ROUNDING_UNIT = 0.0001
 INFLIGHT = {}
 INFLIGHT_LOCK = Lock()
 
@@ -176,11 +179,42 @@ def growth_percent(value):
     return value if number(value) else None
 
 
+def agrees_at_nav_precision(adjusted_nav, previous_nav, growth):
+    # Use a four-place NAV / two-place % guard even if a historical NAV is coarser.
+    tolerance = 0.00005 + NAV_ROUNDING_UNIT * (1 + abs(growth / 100) / 2) / previous_nav
+    return abs(adjusted_nav / previous_nav - 1 - growth / 100) <= tolerance
+
+
+@lru_cache(maxsize=1)
+def event_evidence():
+    path = Path(__file__).with_name("fund_event_evidence.json")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if document.get("schema_version") != 1:
+        raise ValueError("基金事件证据版本不受支持。")
+    return document["events"]
+
+
+def disclosed_event(code, day, label):
+    if not label:
+        return None
+    evidence = event_evidence().get(code, {}).get(day)
+    if evidence is None:
+        return None
+    if CASH_PLACEHOLDER.fullmatch(label):
+        amount = evidence.get("cash_per_share")
+        if positive(amount):
+            return (amount, 1.0), evidence["source"]
+    if SPLIT_PLACEHOLDER.fullmatch(label):
+        factor = evidence.get("shares_per_old_share")
+        if positive(factor):
+            return (0.0, factor), evidence["source"]
+    return None
+
+
 def reconcile_cash(text, previous, nav, accumulated, growth, split_seen):
-    placeholder = r"(?:分红[：:])?每(?:[1-9][0-9]*)?份(?:基金份额)?派现金元"
     if text is None:
         return None, "missing_event_field"
-    if not re.fullmatch(placeholder, text):
+    if not CASH_PLACEHOLDER.fullmatch(text):
         return None, "unrecognized_event"
     if split_seen:
         return None, "cash_after_split"
@@ -188,10 +222,8 @@ def reconcile_cash(text, previous, nav, accumulated, growth, split_seen):
         return None, "cash_evidence_missing"
     previous_nav = previous["unit_nav"]
     cash = round((accumulated - nav) - (previous["accumulated_nav"] - previous_nav), 6)
-    # The cumulative changes and provider daily return independently constrain
-    # the same ex-date move. Allow normal four-place NAV / two-place % rounding.
-    tolerance = 0.00005 + 0.0001 * (1 + abs(growth / 100) / 2) / previous_nav
-    if cash <= 0 or abs((nav + cash) / previous_nav - 1 - growth / 100) > tolerance:
+    # Four rounded NAV values can move the offset by two last-place units.
+    if cash <= 2 * NAV_ROUNDING_UNIT or not agrees_at_nav_precision(nav + cash, previous_nav, growth):
         return None, "cash_evidence_mismatch"
     return (cash, 1.0), None
 
@@ -239,10 +271,20 @@ def parse_history(text, code, metadata=None, retrieved_at=None):
         previous = rows[-1] if rows else None
         amount_source = "explicit" if event and event[0] else None
         issue = None
+        evidence_url = None
         if previous and event is None:
-            event, issue = reconcile_cash(label, previous, nav, accumulated.get(day), growth, split_seen)
-            if event:
-                amount_source = "cumulative_nav_reconciled"
+            disclosure = disclosed_event(code, day, label)
+            if disclosure:
+                (cash, split), evidence_url = disclosure
+                if growth is not None and agrees_at_nav_precision(nav * split + cash, previous["unit_nav"], growth):
+                    event = (cash, split)
+                    amount_source = "fund_disclosure" if cash else None
+                else:
+                    issue = "disclosed_event_growth_mismatch"
+            else:
+                event, issue = reconcile_cash(label, previous, nav, accumulated.get(day), growth, split_seen)
+                if event:
+                    amount_source = "cumulative_nav_reconciled"
         cash, split = event if event else (None, None)
         index_value = None
         if previous is None:
@@ -259,7 +301,8 @@ def parse_history(text, code, metadata=None, retrieved_at=None):
                 issue = "invalid_multiplier"
         rows.append({"date": day, "unit_nav": nav, "accumulated_nav": accumulated.get(day),
                      "return_index": index_value, "cash_distribution": cash, "split_factor": split,
-                     "cash_distribution_source": amount_source, "return_issue": issue})
+                     "cash_distribution_source": amount_source, "return_issue": issue,
+                     "event_evidence": evidence_url})
     ambiguous = sum(row["return_issue"] is not None for row in rows)
     inception = record.get("inception")
     if inception and rows[0]["date"] < inception:

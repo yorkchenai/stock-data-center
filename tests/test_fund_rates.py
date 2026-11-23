@@ -9,7 +9,7 @@ from stock_analysis.funds import attach_benchmark_data, official_benchmarks
 def yield_table(*rows):
     body = "".join(f"<tr><td>{curve}</td><td>{day}</td><td>{value}</td></tr>"
                    for curve, day, value in rows)
-    return f"<table><tr><th>曲线名称</th><th>日期</th><th>3月</th></tr>{body}</table>"
+    return f"<table><tr><td>曲线名称</td><td>日期</td><td>3&nbsp;月</td></tr>{body}</table>"
 
 
 class FundRatesTest(unittest.TestCase):

@@ -2,6 +2,7 @@
 from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 import math
+import re
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -15,7 +16,9 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 def parse_yield_history(html, start, end):
     """Read only the 3-month sovereign curve, in decimal annual units."""
-    tables = pd.read_html(StringIO(html), match="曲线名称")
+    tables = pd.read_html(StringIO(html), match="曲线名称", header=0)
+    for table in tables:
+        table.columns = [re.sub(r"\s+", "", str(column)) for column in table.columns]
     matching = [table for table in tables if {"曲线名称", "日期", "3月"}.issubset(table.columns)]
     if len(matching) != 1:
         raise ValueError("中债历史收益率表列名无法核对。")
@@ -49,8 +52,8 @@ def load_chinabond_rates(start, end, fetch_html, retrieved_at=None):
                            "qxId": "ycqx", "locale": "cn_ZH"})
         rows.extend(parse_yield_history(fetch_html(f"{HISTORY_URL}?{query}"), first, last))
         first = last + timedelta(days=1)
-    if not rows:
-        raise ValueError("中债未返回可用的 3 个月国债收益率。")
+    if not rows or rows[-1]["date"] < start.isoformat():
+        raise ValueError("查询区间内没有可用的 3 个月国债收益率。")
     return {
         "name": "中债国债收益率曲线（到期，3 个月）",
         "source": "中央国债登记结算有限责任公司 / 中债收益率曲线",

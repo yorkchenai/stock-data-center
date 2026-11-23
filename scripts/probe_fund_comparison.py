@@ -105,13 +105,18 @@ def rate_history(end):
     hosts = ("yield.chinabond.com.cn", "indices.chinabond.com.cn", "valuation.chinabond.com.cn")
     paths = ("/cbweb-pbc-web/pbc/historyQuery", "/cbweb-cbrc-web/cbrc/historyQuery")
     start = end - timedelta(days=12)
-    params = urlencode({"startDate":start.isoformat(), "endDate":end.isoformat(), "gjqx":"0",
-                        "qxId":"ycqx", "locale":"cn_ZH"})
     candidates = [f"https://{host}{path}" for host in hosts for path in paths]
 
+    def fetch(candidate, query):
+        if "/cbrc/" in candidate:
+            query = query.replace("qxId=ycqx", "qxId=hzsylqx") + "&mark=1"
+        return download(candidate + "?" + query)
+
     def verify(candidate):
+        params = urlencode({"startDate":start.isoformat(), "endDate":end.isoformat(), "gjqx":"0",
+                            "qxId":"ycqx", "locale":"cn_ZH"})
         try:
-            rows = parse_yield_history(download(f"{candidate}?{params}"), start, end)
+            rows = parse_yield_history(fetch(candidate, params), start, end)
             return {"source":candidate, "observations":len(rows)}
         except (OSError, ValueError, TimeoutError) as error:
             return {"source":candidate, "error":str(error)}
@@ -122,11 +127,8 @@ def rate_history(end):
         if not probe.get("observations"):
             continue
 
-        def fetch(url):
-            return download(candidate + "?" + url.partition("?")[2])
-
         try:
-            return load_chinabond_rates(RATE_START, end, fetch), probes
+            return load_chinabond_rates(RATE_START, end, lambda url: fetch(candidate, url.partition("?")[2])), probes
         except (OSError, ValueError, TimeoutError) as error:
             probe["history_error"] = str(error)
     return None, probes

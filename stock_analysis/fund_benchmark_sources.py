@@ -1,4 +1,5 @@
 """Read benchmark candidates from public fund profiles. Never upgrades trust."""
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from http.client import HTTPException
@@ -37,25 +38,28 @@ class Candidate:
 def profile_labels(document):
     # Both profiles use key/value cells. Keep exact labels to avoid treating
     # a style classification, a tracking index, or a peer index as a benchmark.
-    fields = {}
+    fields = defaultdict(list)
     for row in document.select("tr"):
         cells = row.find_all(("th", "td"), recursive=False)
         for label, cell in zip(cells, cells[1:]):
             key = re.sub(r"\s+", "", label.get_text().strip()).rstrip("：:")
-            if key and key not in fields:
+            if key:
                 value = " ".join(cell.stripped_strings).strip()
                 if value:
-                    fields[key] = value
+                    fields[key].append(value)
     return fields
 
 
 def parse_profile(source, code, body, retrieved_at):
     url = PROFILES[source].format(code)
     document = BeautifulSoup(body, "html.parser")
-    fields = profile_labels(document)
+    labels = profile_labels(document)
+    fields = {key: values[0] for key, values in labels.items()}
     codes = set()
     found_primary_identity = False
-    for key in ("基金代码", "基金主代码", "交易代码", "基金前端代码", "基金后端代码", "基金代码(前端)", "基金代码(后端)"):
+    identity_fields = ("基金代码",) if "基金代码" in fields else (
+        "基金主代码", "交易代码", "基金前端代码", "基金后端代码", "基金代码(前端)", "基金代码(后端)")
+    for key in identity_fields:
         if key in fields:
             codes.update(re.findall(r"(?<!\d)\d{6}(?!\d)", fields[key]))
             found_primary_identity = True
@@ -69,7 +73,8 @@ def parse_profile(source, code, body, retrieved_at):
     if code not in codes:
         return Candidate(source, code, url, "identity_unverified", retrieved_at,
                          http_status=200, reason="profile share code missing or different")
-    formulas = [value for key, value in fields.items() if key in BENCHMARK_LABELS and value not in EMPTY_FIELDS]
+    formulas = [value for key, values in labels.items() if key in BENCHMARK_LABELS
+                for value in values if value not in EMPTY_FIELDS]
     status = "found" if formulas else "field_missing"
     if len(set(formulas)) > 1:
         return Candidate(source, code, url, "field_conflict", retrieved_at, http_status=200,

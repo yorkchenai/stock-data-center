@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "funds": {
+    "024808": {
+      "share_codes": [
+        "024808"
+      ],
+      "share_source_url": "https://www.chinaamc.com/c/2025-07-22/10000459833.shtml",
+      "regimes": [
+        {
+          "effective_from": "2025-07-22",
+          "effective_to": "2026-07-26",
+          "verification": "official_verified",
+          "formula": "65%×沪深300指数收益率＋10%×恒生指数收益率＋25%×中债综合财富指数收益率",
+          "source_url": "https://www.chinaamc.com/c/2025-07-22/10000459833.shtml"
+        },
+        {
+          "effective_from": "2026-07-27",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "中证800成长指数收益率×70%＋中证港股通综合指数（人民币）收益率×10%＋中债-综合财富（总值）指数收益率×20%",
+          "source_url": "https://static.cninfo.com.cn/finalpage/2026-06-27/1225391047.PDF",
+          "announced_on": "2026-06-27",
+          "change_confirmed": true,
+          "method": "daily_weighted",
+          "method_source_url": "https://www.chinaamc.com/upload/resources/file/2026/07/27/a7f2d2d30c274636b19abe19310b8867.pdf",
+          "method_published_on": "2026-07-27"
+        }
+      ]
+    },
+    "003095": {
+      "share_codes": [
+        "003095"
+      ],
+      "share_source_url": "https://www.zofund.com/2026/wsnotice/20261027/ebc7404b0b5b47b8a35e82b4fc5607f6.pdf",
+      "regimes": [
+        {
+          "effective_from": "2026-07-01",
+          "effective_to": "2026-09-20",
+          "verification": "official_verified",
+          "formula": "65%×中证医药卫生指数收益率＋35%×中证综合债券指数收益率",
+          "source_url": "https://www.zofund.com/2026/wsnotice/20261027/ebc7404b0b5b47b8a35e82b4fc5607f6.pdf",
+          "start_basis": "verified_report_window",
+          "announced_on": "2026-10-27"
+        },
+        {
+          "effective_from": "2026-09-21",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "中证医药卫生指数收益率×90%＋中证综合债指数收益率×10%",
+          "source_url": "https://www.zofund.com/2026/wsnotice/20261027/ebc7404b0b5b47b8a35e82b4fc5607f6.pdf",
+          "announced_on": "2026-08-22",
+          "change_confirmed": true
+        }
+      ]
+    },
+    "006751": {
+      "share_codes": [
+        "006751"
+      ],
+      "share_source_url": "https://www.fullgoal.com.cn/wbs-file/fund_report/20260202/CN_50100000_006751_FA010080_20260008_006751_20260202_090000_01.pdf",
+      "regimes": [
+        {
+          "effective_from": "2026-02-02",
+          "effective_to": "2026-07-26",
+          "verification": "official_verified",
+          "formula": "中证互联网指数收益率×80%＋中证全债指数收益率×20%",
+          "source_url": "https://www.fullgoal.com.cn/wbs-file/fund_report/20260202/CN_50100000_006751_FA010080_20260008_006751_20260202_090000_01.pdf",
+          "start_basis": "verified_document_window",
+          "announced_on": "2026-02-02"
+        },
+        {
+          "effective_from": "2026-07-27",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "中证互联网指数收益率×65%＋恒生科技指数收益率×20%＋中债-国债总财富（1-3年）指数收益率×15%",
+          "source_url": "https://paper.cnstock.com/html/2026-06/27/content_2236123.htm",
+          "announced_on": "2026-06-27",
+          "change_confirmed": true,
+          "method": "daily_weighted",
+          "method_source_url": "https://www.fullgoal.com.cn/noticedetails/107041/index.html",
+          "method_published_on": "2026-07-27",
+          "component_adjustments": [
+            {
+              "id": "HSTECH",
+              "method": "valuation_fx",
+              "from_currency": "HKD",
+              "to_currency": "CNY"
+            }
+          ]
+        }
+      ]
+    },
+    "519674": {
+      "share_codes": [
+        "519674"
+      ],
+      "share_source_url": "https://static.cninfo.com.cn/finalpage/2025-02-11/1222507748.PDF",
+      "regimes": [
+        {
+          "effective_from": "2025-02-11",
+          "effective_to": "2026-11-29",
+          "verification": "official_verified",
+          "formula": "中证500指数收益率×75%＋上证国债指数收益率×25%",
+          "source_url": "https://static.cninfo.com.cn/finalpage/2025-02-11/1222507748.PDF",
+          "start_basis": "verified_document_window",
+          "announced_on": "2025-02-11"
+        },
+        {
+          "effective_from": "2026-11-30",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "中国战略新兴产业成份指数收益率×90%＋上证国债指数收益率×5%＋活期存款基准利率×5%",
+          "source_url": "https://hongdianfund.com/FundAnnouncement/Detail/519674/0000000000001snv2g",
+          "announced_on": "2026-10-31",
+          "change_confirmed": true
+        }
+      ]
+    },
+    "006289": {
+      "share_codes": [
+        "006289"
+      ],
+      "share_source_url": "https://fund.chinaamc.com/upload/resources/file/2026/04/22/36370c879c9949faad7893b26b457415.pdf",
+      "regimes": [
+        {
+          "effective_from": "2026-01-01",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "沪深300指数收益率×X＋上证国债指数收益率×(1-X)",
+          "source_url": "https://fund.chinaamc.com/upload/resources/file/2026/04/22/36370c879c9949faad7893b26b457415.pdf",
+          "start_basis": "verified_report_window",
+          "announced_on": "2026-04-22"
+        }
+      ]
+    },
+    "006290": {
+      "share_codes": [
+        "006290"
+      ],
+      "share_source_url": "https://www.nffund.com/nfwebApi/DownLoader.java?fileName=%E5%8D%97%E6%96%B9%E5%85%BB%E8%80%81%E7%9B%AE%E6%A0%87%E6%97%A5%E6%9C%9F2035%E4%B8%89%E5%B9%B4%E6%8C%81%E6%9C%89%E6%9C%9F%E6%B7%B7%E5%90%88%E5%9E%8B%E5%9F%BA%E9%87%91%E4%B8%AD%E5%9F%BA%E9%87%91%EF%BC%88FOF%EF%BC%892025%E5%B9%B4%E4%B8%AD%E6%9C%9F%E6%8A%A5%E5%91%8A&filePath=%2Fmain%2Ffiles%2F2025%2F08%2F29%2F741936793413.pdf&utf8=1",
+      "regimes": [
+        {
+          "effective_from": "2025-01-01",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "沪深300指数收益率×X＋上证国债指数收益率×(100%-X)",
+          "source_url": "https://www.nffund.com/nfwebApi/DownLoader.java?fileName=%E5%8D%97%E6%96%B9%E5%85%BB%E8%80%81%E7%9B%AE%E6%A0%87%E6%97%A5%E6%9C%9F2035%E4%B8%89%E5%B9%B4%E6%8C%81%E6%9C%89%E6%9C%9F%E6%B7%B7%E5%90%88%E5%9E%8B%E5%9F%BA%E9%87%91%E4%B8%AD%E5%9F%BA%E9%87%91%EF%BC%88FOF%EF%BC%892025%E5%B9%B4%E4%B8%AD%E6%9C%9F%E6%8A%A5%E5%91%8A&filePath=%2Fmain%2Ffiles%2F2025%2F08%2F29%2F741936793413.pdf&utf8=1",
+          "start_basis": "verified_report_window",
+          "announced_on": "2025-08-29"
+        }
+      ]
+    },
+    "161129": {
+      "share_codes": [
+        "161129"
+      ],
+      "share_source_url": "https://www.hongdianfund.com/FundAnnouncement/Detail/161129/0000000000001sxd9v",
+      "regimes": [
+        {
+          "effective_from": "2026-11-17",
+          "effective_to": "2026-11-29",
+          "verification": "official_verified",
+          "formula": "标普高盛原油商品指数（S&P GSCI Crude Oil Index ER）收益率",
+          "source_url": "https://www.hongdianfund.com/FundAnnouncement/Detail/161129/0000000000001sxd9v",
+          "start_basis": "verified_document_window",
+          "announced_on": "2026-11-17"
+        },
+        {
+          "effective_from": "2026-11-30",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "标普高盛原油多月份期货合约55/30/15 1M/2M/3M（美元）ER指数（S&P GSCI Crude Oil Multiple Contract 55/30/15 1M/2M/3M (USD) ER Index）收益率×95%＋人民币活期存款基准利率×5%",
+          "source_url": "https://www.hongdianfund.com/FundAnnouncement/Detail/161129/0000000000001sxd9v",
+          "announced_on": "2026-11-17",
+          "change_confirmed": true,
+          "announcement_observed_on": "2026-10-31",
+          "announcement_url": "https://www.cfi.net.cn/p20261030005694.html"
+        }
+      ]
+    }
+  }
+}

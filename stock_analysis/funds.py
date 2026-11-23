@@ -235,6 +235,12 @@ def official_benchmarks():
     return json.loads(Path(__file__).with_name("fund_benchmarks.json").read_text(encoding="utf-8"))
 
 
+def fund_benchmark(code, as_of):
+    from .fund_benchmark_identification import benchmark_definition
+
+    return official_benchmarks().get(code) or benchmark_definition(code, as_of)
+
+
 def parse_history(text, code, metadata=None, retrieved_at=None):
     if not isinstance(code, str) or not CODE.fullmatch(code):
         raise ValueError("请输入六位场外基金代码。")
@@ -326,7 +332,7 @@ def parse_history(text, code, metadata=None, retrieved_at=None):
         "source": {"name": "天天基金 / 东方财富", "url": f"https://fund.eastmoney.com/{code}.html",
                    "method": "确认单位净值及净值序列中的现金分红 / 份额折算",
                    "retrieved_at": as_of.isoformat()},
-        "rows": rows, "benchmark": official_benchmarks().get(code),
+        "rows": rows, "benchmark": fund_benchmark(code, latest_allowed),
     }
 
 
@@ -394,7 +400,7 @@ def parse_disclosed_csv(stream, code, name, source_name, source_url, category="u
                    "retrieved_at": as_of.isoformat()},
         "rows": sorted(rows, key=lambda row: row["date"]),
         "valuation_frequency": "daily" if daily_nav else None,
-        "benchmark": official_benchmarks().get(code),
+        "benchmark": fund_benchmark(code, last_day),
     }
 
 

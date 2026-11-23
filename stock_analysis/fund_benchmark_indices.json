@@ -1,0 +1,149 @@
+[
+  {
+    "id": "000300",
+    "aliases": [
+      "沪深300指数"
+    ],
+    "basis": "price",
+    "currency": "CNY",
+    "source_url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000300factsheet.pdf"
+  },
+  {
+    "id": "000905",
+    "aliases": [
+      "中证500指数"
+    ],
+    "basis": "price",
+    "currency": "CNY",
+    "source_url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000905factsheet.pdf"
+  },
+  {
+    "id": "000852",
+    "aliases": [
+      "中证1000指数"
+    ],
+    "basis": "price",
+    "currency": "CNY",
+    "source_url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000852factsheet.pdf"
+  },
+  {
+    "id": "000510",
+    "aliases": [
+      "中证A500指数"
+    ],
+    "basis": "price",
+    "currency": "CNY",
+    "source_url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000510factsheet.pdf"
+  },
+  {
+    "id": "000933",
+    "aliases": [
+      "中证医药卫生指数"
+    ],
+    "basis": "price",
+    "currency": "CNY",
+    "source_url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000933factsheet.pdf"
+  },
+  {
+    "id": "H30355",
+    "aliases": [
+      "中证800成长指数"
+    ],
+    "basis": "price",
+    "currency": "CNY",
+    "source_url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/H30355factsheet.pdf"
+  },
+  {
+    "id": "000964",
+    "aliases": [
+      "中证新兴产业指数"
+    ],
+    "basis": "price",
+    "currency": "CNY",
+    "source_url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000964factsheet.pdf"
+  },
+  {
+    "id": "399997",
+    "aliases": [
+      "中证白酒指数"
+    ],
+    "basis": "price",
+    "currency": "CNY",
+    "source_url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/399997factsheet.pdf"
+  },
+  {
+    "id": "399975",
+    "aliases": [
+      "中证全指证券公司指数"
+    ],
+    "basis": "price",
+    "currency": "CNY",
+    "source_url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/399975factsheet.pdf"
+  },
+  {
+    "id": "930933",
+    "aliases": [
+      "中证港股通综合指数"
+    ],
+    "basis": "price",
+    "currency": "CNY",
+    "source_url": "https://www.chinaamc.com/upload/resources/file/2026/07/27/a7f2d2d30c274636b19abe19310b8867.pdf"
+  },
+  {
+    "id": "930930",
+    "aliases": [
+      "中证港股通综合指数"
+    ],
+    "basis": "price",
+    "currency": "HKD",
+    "source_url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/930930factsheet.pdf"
+  },
+  {
+    "id": "CBA00201",
+    "aliases": [
+      "中债-综合财富(总值)指数",
+      "中债综合财富指数"
+    ],
+    "basis": "total_return",
+    "currency": "CNY",
+    "source_url": "https://paper.cnstock.com/html/2026-10/31/content_2284998.htm"
+  },
+  {
+    "id": "CBA00203",
+    "aliases": [
+      "中债综合指数(全价)",
+      "中债综合全价指数",
+      "中债-综合全价(总值)指数"
+    ],
+    "basis": "full_price",
+    "currency": "CNY",
+    "source_url": "https://paper.cnstock.com/html/2026-10/31/content_2284998.htm"
+  },
+  {
+    "id": "H30535",
+    "aliases": [
+      "中证互联网指数"
+    ],
+    "basis": "price",
+    "currency": "CNY",
+    "source_url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/H30535factsheet.pdf"
+  },
+  {
+    "id": "HSTECH",
+    "aliases": [
+      "恒生科技指数"
+    ],
+    "basis": "price",
+    "currency": "HKD",
+    "source_url": "https://www.hsi.com.hk/zh-hk/indexes/all-indexes/index-details/?seriesCode=hstech"
+  },
+  {
+    "id": "CBA00621",
+    "aliases": [
+      "中债-国债总财富(1-3年)指数"
+    ],
+    "basis": "total_return",
+    "currency": "CNY",
+    "source_url": "https://www.fullgoal.com.cn/noticedetails/107041/index.html"
+  }
+]

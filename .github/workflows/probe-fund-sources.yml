@@ -1,0 +1,45 @@
+name: Fund source diagnostics
+
+on:
+  pull_request:
+    paths:
+      - "stock_analysis/funds.py"
+      - "scripts/probe_fund_sources.py"
+      - "scripts/probe_fund_browser.mjs"
+      - ".github/workflows/probe-fund-sources.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci --ignore-scripts
+      - name: Probe fund adapters without retaining NAV rows
+        run: |
+          mkdir -p work/fund-probe
+          python -m scripts.probe_fund_sources > work/fund-probe/python.json
+          cat work/fund-probe/python.json
+      - name: Probe direct browser endpoints from the published project origin
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          node scripts/probe_fund_browser.mjs > work/fund-probe/browser.json
+          cat work/fund-probe/browser.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fund-source-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: work/fund-probe/
+          retention-days: 14
+          if-no-files-found: error

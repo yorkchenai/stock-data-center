@@ -5,7 +5,7 @@ on:
     paths:
       - ".github/workflows/fund-generalization.yml"
       - "scripts/audit_fund_*"
-      - "tests/fixtures/fund_generalization_panel.json"
+      - "tests/fixtures/fund_generalization*.json"
       - "stock_analysis/fund*.py"
       - "web/funds/*.mjs"
   workflow_dispatch:

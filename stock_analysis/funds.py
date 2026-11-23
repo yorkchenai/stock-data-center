@@ -84,7 +84,8 @@ def assignment(text, name, optional=False):
 def category_for(label):
     label = label.strip().upper()
     for text, category in (
-        ("QDII", "qdii"), ("货币", "money"), ("FOF", "fof"),
+        ("QDII", "qdii"), ("海外股票", "qdii"), ("海外债券", "qdii"),
+        ("货币", "money"), ("FOF", "fof"),
         ("指数", "index"),
     ):
         if text in label:

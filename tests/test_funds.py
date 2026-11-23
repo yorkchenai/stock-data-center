@@ -30,6 +30,22 @@ class FundProviderTests(unittest.TestCase):
             {"x": epoch("2025-01-06"), "y": .75, "unitMoney": "拆分：每份折算2份", "equityReturn": 3.45},
         ]
 
+    def test_overseas_index_share_classes_do_not_enable_mainland_daily_risk(self):
+        samples = [
+            ("270042", "广发纳斯达克100ETF联接人民币(QDII)A", "指数型-海外股票", "qdii"),
+            ("050025", "博时标普500ETF联接A", "指数型-海外股票", "qdii"),
+            ("999011", "合成海外债券ETF联接C", "指数型-海外债券", "qdii"),
+            ("003376", "广发中债7-10年国开债指数A", "指数型-固收", "index"),
+            ("005827", "易方达蓝筹精选混合", "混合型-偏股", "mixed"),
+        ]
+        source = "var r=" + json.dumps([[code,"",name,label,""] for code,name,label,_ in samples]) + ";"
+        catalog = parse_catalog(source)
+        for code, name, _, category in samples:
+            with self.subTest(code=code):
+                self.assertEqual(catalog[code]["category"], category)
+                data = parse_history(history(self.rows, code, name), code, catalog[code], self.retrieval)
+                self.assertEqual(data["valuation_frequency"], None if category == "qdii" else "daily")
+
     def test_cash_and_split_do_not_create_artificial_nav_losses(self):
         data = parse_history(history(self.rows), "000001", {"category": "mixed"}, self.retrieval)
         rows = data["rows"]

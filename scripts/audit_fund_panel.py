@@ -2,7 +2,7 @@
 from argparse import ArgumentParser
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from io import BytesIO
 import importlib.util
 import json
@@ -20,12 +20,15 @@ from urllib.error import HTTPError, URLError
 from bs4 import BeautifulSoup
 
 from stock_analysis import funds
+from scripts.audit_fund_interactions import measure_interactions
 from stock_analysis.fund_rates import fetch_rate_history, load_chinabond_rates
 
 ROOT = Path(__file__).resolve().parents[1]
 PANEL = ROOT / "tests/fixtures/fund_generalization_panel.json"
 BRIDGE = ROOT / "scripts/audit_fund_window.mjs"
-PROFILE_URL = "https://fundf10.eastmoney.com/jbgk_{}.html"
+DISCLOSURES = ROOT / "tests/fixtures/fund_generalization_disclosures.json"
+PROFILE_URLS = ("https://fundf10.eastmoney.com/jbgk_{}.html",
+                "https://fund.eastmoney.com/data/xininfo_{}.html")
 RISK = {"sharpe", "volatility", "sortino"}
 PERIODS = ("1m", "3m", "6m", "1y", "3y", "5y", "all")
 
@@ -52,7 +55,7 @@ def failure(error):
     return {"kind":kind,"reason":message[:180]}
 
 
-def catalog_profile(html, code):
+def catalog_profile(html, code, source):
     soup = BeautifulSoup(html, "html.parser")
     fields = {}
     for row in soup.select("tr"):
@@ -63,11 +66,12 @@ def catalog_profile(html, code):
     identities = re.findall(r"(?<!\d)\d{6}(?!\d)", fields.get("基金代码", ""))
     if code not in identities:
         return {"status":"unverified_identity"}
-    inception = next((re.search(r"\d{4}-\d{2}-\d{2}", v) for k, v in fields.items() if k.startswith("成立日期")), None)
-    return {"status":"matched","inception":inception[0] if inception else None,
+    inception = next((re.search(r"(\d{4})[年-](\d{2})[月-](\d{2})", v) for k, v in fields.items()
+                      if k.startswith("成立日期")), None)
+    return {"status":"matched","inception":"-".join(inception.groups()) if inception else None,
             "manager":fields.get("基金管理人"),"type":fields.get("基金类型"),
             "candidate_benchmark":fields.get("业绩比较基准"),"tracking":fields.get("跟踪标的"),
-            "source":PROFILE_URL.format(code)}
+            "source":source}
 
 
 def run_engine(root, data, as_of=None):
@@ -123,13 +127,15 @@ def independent(rows, rates, start, end, daily):
     return output
 
 
-def classify_window(result, data, rates, inception):
+def classify_window(result, data, rates, inception, group):
     for key, window in result["windows"].items():
         window["sources"] = {"nav":data["source"]["name"],"risk":rates and rates["name"],
                              "benchmark":data.get("benchmark") and data["benchmark"]["source"]}
         start,end = window.get("start"),window.get("end")
         target = window["requested_start"]
-        short = bool(target and inception and inception > target and (date.fromisoformat(inception)-date.fromisoformat(target)).days > 7)
+        short = bool(target and inception and inception > target)
+        event = next((row["return_issue"] for row in data["rows"] if start and start <= row["date"] <= end
+                      and row["return_issue"]), None)
         if key != "all" and target and not start and not inception:
             window["history_applicability"] = "unknown"
         verification = independent(data["rows"],rates,start,end,result["normal_frequency"]) if start and end else {}
@@ -137,8 +143,10 @@ def classify_window(result, data, rates, inception):
             value, reason = item["value"], item.get("reason") or ""
             if short:
                 status = "insufficient_fund_age"
-            elif metric in RISK and data["category"] in {"qdii","fof","money"}:
+            elif metric in RISK and (group == "special" or data["category"] in {"qdii","fof","money"}):
                 status = "unsupported_type"
+                if value is not None:
+                    item["unexpected_numeric_output"] = True
             elif value is not None:
                 status = "calculated"
             elif window["error"] or "不足两条" in reason or "相隔超过" in reason or "起点附近" in reason:
@@ -149,7 +157,7 @@ def classify_window(result, data, rates, inception):
                 status = "risk_free_missing"
             elif "为零" in reason:
                 status = "undefined_metric"
-            elif "分红" in reason or "折算" in reason or "总回报" in reason or "净值增长率" in reason or "相邻净值" in reason:
+            elif event or "总回报" in reason:
                 status = "event_unverified"
             else:
                 status = "source_data"
@@ -194,6 +202,38 @@ def benchmark_state(data, windows):
     return "B_missing_history_or_verified_method"
 
 
+def disclosure_check(root, payload, definition):
+    """Public report aggregates are evidence, never fed into the engine."""
+    output = run_engine(root,payload,as_of=definition["end"])
+    cases = {}
+    for key, official in definition["periods"].items():
+        window = output["windows"][key]
+        actual = window["metrics"]["return"]["value"]
+        difference = None if actual is None else actual-official["return"]
+        confirmed = (window.get("end")==definition["end"] and window.get("start")==official["start"]
+                     and difference is not None and abs(difference)<=.0002)
+        cases[key] = {"start":window.get("start"),"end":window.get("end"),
+                      "official":official,"system_return":actual,"difference":difference,
+                      "matches":confirmed,"reason":window["metrics"]["return"]["reason"],
+                      "official_net_value_std":official.get("daily_std"),
+                      "system_volatility":window["metrics"]["volatility"]["value"],
+                      "excess_against_disclosure":None if not confirmed else actual-official["benchmark"],
+                      "system_sharpe":window["metrics"]["sharpe"]["value"],
+                      "system_drawdown":window["metrics"]["drawdown"]["value"]}
+    check = {"source":definition["source"],"formula":definition.get("formula"),"windows":cases}
+    event = definition.get("event")
+    if event:
+        index = next((i for i, row in enumerate(payload["rows"]) if row["date"]==event["date"]),None)
+        if index is not None and index > 0:
+            previous,current = payload["rows"][index-1:index+1]
+            actual = current[event["field"]]
+            check["event"] = {**event,"actual":actual,"matches":actual is not None and isclose(actual,event["expected"],abs_tol=1e-6),
+                              "nav_only_return":current["unit_nav"]/previous["unit_nav"]-1,
+                              "adjusted_return":(current["return_index"]/previous["return_index"]-1
+                                                 if current["return_index"] and previous["return_index"] else None)}
+    return check
+
+
 def run(main_args):
     selection = json.loads(PANEL.read_text())
     fixture = [(group,*sample) for group, samples in selection["cohorts"].items() for sample in samples]
@@ -202,10 +242,24 @@ def run(main_args):
     clock = datetime.now(funds.SHANGHAI)
     request = RequestPacer()
     try:
-        catalog = funds.parse_catalog(request(funds.CATALOG_URL))
+        catalog_body = request(funds.CATALOG_URL)
+        catalog = funds.parse_catalog(catalog_body)
         catalog_error = None
     except (ValueError,OSError) as error:
-        catalog, catalog_error = {}, failure(error)
+        catalog_body, catalog, catalog_error = None, {}, failure(error)
+    catalog_labels = {item[0]:item[3] for item in funds.assignment(catalog_body,"r")
+                      if isinstance(item,list) and len(item)>=5} if catalog_body else {}
+    profile_route, preflight = None, []
+    for endpoint in PROFILE_URLS:
+        url = endpoint.format(fixture[0][1])
+        try:
+            probe = catalog_profile(request(url),fixture[0][1],url)
+        except (ValueError,OSError) as error:
+            probe = failure(error)
+        preflight.append({"url":url,"result":probe})
+        if probe.get("status") == "matched":
+            profile_route = endpoint
+            break
     begin = monotonic()
 
     def capture(sample):
@@ -218,16 +272,19 @@ def run(main_args):
         except (ValueError,OSError) as error:
             info["history_error"] = failure(error)
         info["history_ms"] = round((monotonic()-t0)*1000,2)
-        try:
-            info["profile"] = catalog_profile(request(PROFILE_URL.format(code)),code)
-        except (ValueError,OSError) as error:
-            info["profile"] = failure(error)
+        info["profile"] = {"status":"provider_unavailable"}
+        if profile_route:
+            url = profile_route.format(code)
+            try:
+                info["profile"] = catalog_profile(request(url),code,url)
+            except (ValueError,OSError) as error:
+                info["profile"] = failure(error)
         return info
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         captured = list(executor.map(capture,fixture))
     batch_seconds = round(monotonic()-begin,2)
-    as_of = clock.date()-timedelta(days=0)
+    as_of = clock.date()
     valuation_dates = []
     for incoming in captured:
         if "history" in incoming:
@@ -244,8 +301,11 @@ def run(main_args):
     except (OSError,ValueError) as error:
         rates, rate_summary = None, failure(error)
     report = {"baseline":selection["baseline"],"at":clock.isoformat(),"catalog_count":len(catalog),
-              "catalog_error":catalog_error,"rate":rate_summary,"batch_seconds":batch_seconds,"funds":[]}
+              "catalog_error":catalog_error,"profile_preflight":preflight,"rate":rate_summary,"batch_seconds":batch_seconds,"funds":[]}
 
+    disclosures = json.loads(DISCLOSURES.read_text())
+    replay_histories = {}
+    browser_candidates = []
     with TemporaryDirectory() as temp:
         baseline = Path(temp)
         archive = subprocess.check_output(["git","archive",selection["baseline"],"stock_analysis","web"],cwd=ROOT)
@@ -254,28 +314,43 @@ def run(main_args):
         spec = importlib.util.spec_from_file_location("stock_analysis.pinned_funds",baseline/"stock_analysis/funds.py")
         pinned = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(pinned)
+        catalogs = {"baseline":pinned.parse_catalog(catalog_body) if catalog_body else {}, "current":catalog}
 
         for (group,code,label,reason), incoming in zip(fixture,captured):
             profile = incoming["profile"]
-            metadata = catalog.get(code,{})
+            confirmed_start = selection["confirmed_share_starts"].get(code)
+            inception = confirmed_start[0] if confirmed_start else profile.get("inception")
             obj = {"code":code,"group":group,"selection_name":label,"selection_reason":reason,
-                   "catalog":metadata or None,"profile":profile,"history_request_ms":incoming["history_ms"]}
+                   "catalog_label":catalog_labels.get(code),"confirmed_share_start":confirmed_start,
+                   "catalog":catalog.get(code),"profile":profile,"history_request_ms":incoming["history_ms"]}
             report["funds"].append(obj)
             if "history_error" in incoming:
                 obj["history_error"] = incoming["history_error"]
                 continue
             for name, path, adapter in (("baseline",baseline,pinned),("current",ROOT,funds)):
                 try:
+                    metadata = catalogs[name].get(code,{})
                     payload = adapter.parse_history(incoming["history"],code,metadata,incoming["retrieved_at"])
                     obj[name] = {"history":describe_history(adapter.assignment(incoming["history"],"Data_netWorthTrend"),payload),
                                  "name":payload["name"],"category":payload["category"]}
                     current = {**payload,"risk_free":rates}
                     result = run_engine(path,current)
-                    obj[name].update(classify_window(result,payload,rates,profile.get("inception")))
+                    obj[name].update(classify_window(result,payload,rates,inception,group))
                     obj[name]["benchmark_state"] = benchmark_state(payload,obj[name]["windows"])
                     obj[name]["as_received_sharpe_possible"] = bool(payload.get("risk_free"))
+                    if name == "current":
+                        replay_histories[code] = incoming["history"]
+                        if result["normal_frequency"] and group != "regression":
+                            browser_candidates.append(payload)
+                    if code in disclosures:
+                        obj[name]["disclosure_check"] = disclosure_check(path,current,disclosures[code])
                 except (ValueError,TypeError,OSError,subprocess.SubprocessError) as error:
                     obj[name] = {"error":failure(error)}
+    longest = sorted(browser_candidates,key=lambda item:len(item["rows"]), reverse=True)[:2]
+    try:
+        report["operational"] = measure_interactions(ROOT,catalog_body,replay_histories,longest)
+    except (RuntimeError, AssertionError, subprocess.SubprocessError, OSError) as error:
+        report["operational"] = {"status":"failed", "error":str(error)[:850]}
     return report
 
 

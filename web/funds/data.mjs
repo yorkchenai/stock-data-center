@@ -1,0 +1,120 @@
+import { validDate } from "../engine.mjs";
+
+export const FUND_CATEGORIES = {
+  stock: "股票型", mixed: "混合型", bond: "债券型", index: "指数 / ETF 联接",
+  qdii: "QDII", money: "货币型", fof: "FOF", other: "其他", unknown: "未确认",
+};
+export const FUND_CODE = /^\d{6}$/;
+export const MAX_FILE_BYTES = 4_000_000;
+const optionalText = (value) => typeof value === "string" && value.trim() ? value.trim() : null;
+const validNumber = (value) => typeof value === "number" && Number.isFinite(value);
+const nullablePositive = (v) => v == null || (validNumber(v) && v > 0);
+const VALID_BASIS = new Set(["event_reinvested", "adjusted_nav", "unavailable"]);
+const shanghai = new Intl.DateTimeFormat("sv-SE", {timeZone: "Asia/Shanghai"});
+
+export function shanghaiToday() {
+  return shanghai.format(new Date());
+}
+
+export function normalizeFund(raw) {
+  if (raw?.schema_version !== 1 || raw?.kind !== "off_market_fund"
+    || !FUND_CODE.test(raw.code ?? "") || typeof raw.code !== "string" || !optionalText(raw.name)) {
+    throw new Error("须提供 v1 场外基金数据和六位基金代码。");
+  }
+  const source = raw.source;
+  if (!optionalText(source?.name) || !optionalText(source?.method)
+    || !optionalText(source?.retrieved_at) || !Number.isFinite(Date.parse(source.retrieved_at))) {
+    throw new Error("数据缺少来源、获取时间或净值口径。");
+  }
+  const latestTimestamp = Date.parse(source.retrieved_at);
+  const retrievalDay = shanghai.format(new Date(latestTimestamp));
+  const latestDay = [retrievalDay, shanghaiToday()].sort()[0];
+  if (!Array.isArray(raw.rows) || !raw.rows.length || raw.rows.length > 24000) {
+    throw new Error("未找到有效的历史确认净值。");
+  }
+  const inception = raw.inception ? validDate(raw.inception) : null;
+  const basis = raw.return_basis ?? "unavailable";
+  if (!VALID_BASIS.has(basis)) throw new Error("不支持的总回报口径。");
+  const rows = [];
+  for (const entry of raw.rows) {
+    const date = validDate(entry?.date);
+    if (date > latestDay || (inception && date < inception) || (rows.length && date <= rows.at(-1).date)
+      || !validNumber(entry.unit_nav) || entry.unit_nav <= 0 || !nullablePositive(entry.accumulated_nav)
+      || !nullablePositive(entry.return_index) || !nullablePositive(entry.split_factor)
+      || (entry.cash_distribution != null && (!validNumber(entry.cash_distribution) || entry.cash_distribution < 0))
+      || (basis === "unavailable" && entry.return_index != null)) {
+      throw new Error(`净值记录无效、重复或越界 ${date}。`);
+    }
+    rows.push({ date, unit_nav: entry.unit_nav, accumulated_nav: entry.accumulated_nav ?? null,
+      return_index: entry.return_index ?? null, cash_distribution: entry.cash_distribution ?? null,
+      split_factor: entry.split_factor ?? null });
+  }
+  if (basis !== "unavailable" && !rows.some((row) => row.return_index !== null)) {
+    throw new Error("已声明总回报口径，实际缺少有效序列。");
+  }
+  let benchmark = null;
+  if (raw.benchmark != null) {
+    if (!optionalText(raw.benchmark.name) || !optionalText(raw.benchmark.source) || raw.benchmark.official !== true) {
+      throw new Error("基准缺少正式业绩比较基准名称或出处。");
+    }
+    const points = raw.benchmark.rows ?? [];
+    let previous = "";
+    if (!Array.isArray(points) || points.length > 24000) throw new Error("基准序列无效。");
+    for (const point of points) {
+      const date = validDate(point?.date);
+      if (date <= previous || date > latestDay || !validNumber(point.value) || point.value <= 0) {
+        throw new Error("基准序列日期或数值无效。");
+      }
+      previous = date;
+    }
+    benchmark = {name: raw.benchmark.name, source: raw.benchmark.source, rows: points};
+  }
+  let riskFree = null;
+  if (raw.risk_free != null) {
+    const rate = raw.risk_free;
+    if (!optionalText(rate.source) || !validNumber(rate.annual_rate) || rate.annual_rate <= -1
+      || validDate(rate.effective_from) > validDate(rate.effective_to)) {
+      throw new Error("无风险利率缺少有效年利率、来源或覆盖区间。");
+    }
+    riskFree = rate;
+  }
+  const category = Object.hasOwn(FUND_CATEGORIES, raw.category) ? raw.category : "unknown";
+  const normalFrequency = ["stock", "mixed", "bond", "index", "other"].includes(category) && raw.valuation_frequency === "daily";
+  const holdings = raw.holdings;
+  let disclosedHoldings = null;
+  if (optionalText(holdings?.source)) {
+    try {
+      if (validDate(holdings.period_end) <= validDate(holdings.disclosed_at) && holdings.disclosed_at <= latestDay) {
+        disclosedHoldings = holdings;
+      }
+    } catch { /* Ignore unsupported optional disclosures. */ }
+  }
+  const relatedKinds = ["official_tracking", "official_benchmark", "holdings_derived"];
+  const related = Array.isArray(raw.related) ? raw.related.filter((item) =>
+    relatedKinds.includes(item?.kind) && optionalText(item.name) && optionalText(item.source),
+  ).slice(0, 20) : [];
+  return { code: raw.code, name: raw.name.trim(), category, inception,
+    manager: optionalText(raw.manager), fund_manager: optionalText(raw.fund_manager),
+    size: optionalText(raw.size), fee: optionalText(raw.fee), reference: optionalText(raw.reference),
+    holdings: disclosedHoldings, related, benchmark, risk_free: riskFree, rows, return_basis: basis,
+    return_note: optionalText(raw.return_note), source,
+    normalFrequency, mode: raw.synthetic === true ? "synthetic" : "reported",
+  };
+}
+
+export function fundFreshness(fund, today = shanghaiToday()) {
+  if (fund.mode === "synthetic") return "测试数据";
+  if (!fund.normalFrequency) return "更新频率未按日核验";
+  const latest = fund.rows.at(-1).date;
+  const elapsed = (Date.parse(today) - Date.parse(latest)) / 86_400_000;
+  if (elapsed > 7) return "净值日期已超过 7 天";
+  return "已确认披露 · 最新性待核";
+}
+
+export function searchCatalog(catalog, query) {
+  const term = query.trim().toLowerCase();
+  if (!term) return [];
+  return [...catalog.values()].filter((record) =>
+    [record.code, record.name, record.alias].some((value) => String(value ?? "").toLowerCase().includes(term)),
+  ).sort((a, b) => Number(b.code === term) - Number(a.code === term) || a.code.localeCompare(b.code)).slice(0, 16);
+}

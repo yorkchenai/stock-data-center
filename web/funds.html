@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>行情研究室 · 场外基金</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./sections.css">
+  <link rel="stylesheet" href="./funds/funds.css">
+  <script src="./vendor/lightweight-charts-5.2.0.js" defer></script>
+  <script src="./funds/app.mjs" type="module"></script>
+</head>
+<body>
+  <header class="app-header section-header">
+    <a class="brand" href="./">行情研究室<span>STOCK DATA CENTER</span></a>
+    <nav class="section-nav" aria-label="标的类别">
+      <a href="./">股票 / 指数</a>
+      <a href="./funds.html" aria-current="page">场外基金</a>
+      <a href="./etf.html">场内 ETF</a>
+    </nav>
+  </header>
+  <main class="fund-main">
+    <section id="fund-list" aria-labelledby="fund-list-title">
+      <div class="fund-heading">
+        <div>
+          <h1 id="fund-list-title">场外基金</h1>
+          <p>搜索基金，比较确认净值与分红再投资收益。</p>
+        </div>
+        <label class="file-control">导入净值 JSON<input id="list-import" type="file" accept=".json,application/json" multiple></label>
+      </div>
+      <p id="data-mode" class="fund-note"></p>
+      <div class="fund-panel search-panel">
+        <form id="fund-search">
+          <label for="search-term">基金名称或代码</label>
+          <div class="fund-controls">
+            <input id="search-term" type="search" maxlength="64" autocomplete="off" placeholder="如 华夏成长、000001" required>
+            <button class="primary" type="submit">搜索</button>
+          </div>
+        </form>
+        <div id="search-result"></div>
+      </div>
+      <p id="list-status" class="fund-status" role="status"></p>
+      <section class="fund-panel list-panel" aria-label="基金列表">
+        <div class="fund-table-toolbar">
+          <div class="fund-controls" role="group" aria-label="基金列表范围">
+            <button id="show-all" aria-pressed="true">全部基金</button>
+            <button id="show-favorites" aria-pressed="false">自选基金</button>
+          </div>
+          <label>基金类型<select id="type-filter"><option value="">全部类型</option></select></label>
+          <details class="column-settings">
+            <summary>列设置</summary>
+            <div id="column-options"></div>
+          </details>
+        </div>
+        <div class="fund-table-scroll" tabindex="0" aria-label="基金指标表，可横向滚动">
+          <table id="fund-table">
+            <caption class="visually-hidden">所添加基金的历史收益及确认净值</caption>
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+      <p class="fund-note">收益周期截至各基金最后一笔确认净值。周按自然日、月和年按公历回推，取目标日期当日或之前最近一笔有效记录作为基准。历史覆盖不足显示 —。</p>
+    </section>
+    <section id="fund-detail" aria-labelledby="fund-title" hidden>
+      <a class="back-link" href="./funds.html" id="back-to-funds">← 返回基金列表</a>
+      <div class="fund-panel fund-identity">
+        <div>
+          <h1 id="fund-title">基金详情</h1>
+          <p id="fund-identity"></p>
+        </div>
+        <div class="fund-nav-value"><span>最新确认单位净值</span><strong id="fund-nav">—</strong><span id="fund-nav-date">—</span></div>
+        <div class="fund-source"><span id="fund-source">来源 —</span><span id="fund-freshness">状态 —</span></div>
+        <label class="file-control">导入该基金 JSON<input id="detail-import" type="file" accept=".json,application/json"></label>
+      </div>
+      <p id="detail-status" class="fund-status" role="status"></p>
+      <div class="range-block">
+        <div id="fund-periods" class="fund-controls" role="group" aria-label="统计分析区间"></div>
+        <form id="fund-range" class="fund-controls" hidden>
+          <label>开始日期<input type="date" id="fund-start" required></label>
+          <label>结束日期<input type="date" id="fund-end" required></label>
+          <button class="primary">应用区间</button>
+        </form>
+        <p id="range-status" class="fund-note" role="status"></p>
+      </div>
+      <section id="core-metrics" class="metrics-grid" aria-label="六个核心指标"></section>
+      <section class="fund-panel chart-panel" aria-labelledby="returns-title">
+        <div class="panel-heading"><h2 id="returns-title">累计收益</h2><span id="fund-visible-range" class="fund-note"></span></div>
+        <div class="fund-chart-legend">
+          <label><input type="checkbox" id="fund-line" checked><i class="line-fund"></i>基金总回报</label>
+          <label><input type="checkbox" id="benchmark-line" checked><i class="line-benchmark"></i><span id="benchmark-label">业绩比较基准</span></label>
+        </div>
+        <div id="returns-chart" class="fund-chart" role="img" aria-label="基金和基准累计收益曲线"></div>
+        <p id="hover-values" class="fund-note chart-description" aria-live="off"></p>
+        <p id="benchmark-status" class="fund-note"></p>
+        <a class="fund-note" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">图表由 TradingView Lightweight Charts™ 提供</a>
+      </section>
+      <section class="fund-panel chart-panel" aria-labelledby="risk-title">
+        <h2 id="risk-title">风险分析</h2>
+        <div id="risk-metrics" class="risk-grid"></div>
+        <div id="drawdown-chart" class="fund-chart drawdown-chart" role="img" aria-label="区间历史回撤曲线"></div>
+        <p id="drawdown-values" class="fund-note chart-description"></p>
+        <p id="risk-assumptions" class="fund-note"></p>
+      </section>
+      <section class="fund-panel" aria-labelledby="holdings-title">
+        <h2 id="holdings-title">持仓与投资风格</h2>
+        <div id="holdings-data"></div>
+        <p id="related-data" class="fund-note">暂无可核实的关联板块数据。</p>
+      </section>
+      <section class="fund-panel" aria-labelledby="fund-more-title">
+        <h2 id="fund-more-title">更多基金信息及历史数据</h2>
+        <dl id="fund-more" class="fund-facts"></dl>
+        <details>
+          <summary>确认净值记录</summary>
+          <div class="history-scroll">
+            <table id="nav-history"><thead><tr><th scope="col">日期</th><th scope="col">单位净值</th><th scope="col">累计净值</th><th scope="col">总回报指数</th><th scope="col">现金分红 / 份</th></tr></thead><tbody></tbody></table>
+          </div>
+          <button id="show-more-history" type="button">再显示 60 条</button>
+        </details>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

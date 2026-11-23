@@ -3,6 +3,8 @@ from datetime import date
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import URLError
+from urllib.parse import parse_qs, urlsplit
 import argparse
 import json
 import shutil
@@ -10,6 +12,7 @@ from threading import Lock
 
 import pandas as pd
 
+from .funds import CODE, load_fund, search_funds
 from .indicators import calculate_indicators
 from .pipeline import ANALYSIS_LAYERS, run_analysis
 from .symbols import resolve_symbol
@@ -102,10 +105,35 @@ class ChartHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/demo":
             self.send_json(200, self.dataset)
+        elif self.path.startswith("/api/funds/"):
+            self.do_get_fund()
         elif self.path.startswith("/api/"):
             self.send_json(404, {"error": "Unknown API route"})
         else:
             super().do_GET()
+
+    def do_get_fund(self):
+        request = urlsplit(self.path)
+        action = request.path.removeprefix("/api/funds/")
+        if action == "status":
+            self.send_json(200, {"local": True})
+            return
+        try:
+            if action == "search":
+                term = parse_qs(request.query).get("q", [""])[0]
+                payload = {"funds": search_funds(term)}
+            elif CODE.fullmatch(action) and not request.query:
+                payload = load_fund(action)
+            else:
+                self.send_json(400, {"error": "请提供基金名称或六位场外基金代码。"})
+                return
+        except (URLError, TimeoutError):
+            self.send_json(502, {"error": "基金来源暂不可访问。可导入已获准使用的净值 JSON。"})
+            return
+        except (ValueError, OverflowError) as exc:
+            self.send_json(422, {"error": str(exc)})
+            return
+        self.send_json(200, payload)
 
     def do_POST(self):
         if self.path != "/api/analyze":

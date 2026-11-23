@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/test_chart_data.mjs tests/test_browser_providers.mjs",
-    "test:browser": "node scripts/test_pages_browser.mjs"
+    "test": "node --test tests/*.mjs",
+    "test:browser": "node scripts/test_pages_browser.mjs && node scripts/test_pages_funds.mjs"
   },
   "devDependencies": {
     "playwright-core": "1.58.2"

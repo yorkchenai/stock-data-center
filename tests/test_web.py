@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
 from unittest import TestCase, mock
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import pandas as pd
@@ -110,6 +110,27 @@ class WebHTTPTests(TestCase):
                 payload = json.load(response)
         self.assertEqual(len(payload['rows']), 1551)
         self.assertTrue(payload['live_analysis'])
+
+    def test_fund_namespace_and_provider_failure(self):
+        fund = {'kind': 'off_market_fund', 'code': '000001'}
+        with mock.patch('stock_analysis.web.load_fund', return_value=fund) as load, \
+                mock.patch('stock_analysis.web.search_funds', return_value=[fund]), \
+                mock.patch('stock_analysis.web.run_analysis') as stock:
+            with urlopen(self.base + '/api/funds/search?q=000001') as response:
+                self.assertEqual(json.load(response), {'funds': [fund]})
+            with urlopen(self.base + '/api/funds/000001') as response:
+                self.assertEqual(json.load(response), fund)
+                self.assertEqual(response.headers['Cache-Control'], 'no-store')
+            with self.assertRaises(HTTPError) as invalid:
+                urlopen(self.base + '/api/funds/sh000001')
+            self.assertEqual(invalid.exception.code, 400)
+            load.assert_called_once_with('000001')
+            stock.assert_not_called()
+        with mock.patch('stock_analysis.web.load_fund', side_effect=URLError('unavailable')):
+            with self.assertRaises(HTTPError) as unavailable:
+                urlopen(self.base + '/api/funds/000001')
+        self.assertEqual(unavailable.exception.code, 502)
+        self.assertNotIn('rows', json.load(unavailable.exception))
 
     def test_analyze_delegates_to_existing_pipeline(self):
         frame = calculate_indicators(pd.read_csv(ROOT / 'results/000688_daily.csv'))

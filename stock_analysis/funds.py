@@ -1,0 +1,317 @@
+"""Personal fund-data retrieval and data-only parsing for the separate funds UI."""
+from datetime import date, datetime, timezone
+from functools import lru_cache
+from pathlib import Path
+from urllib.error import URLError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+from zoneinfo import ZoneInfo
+import argparse
+import csv
+import json
+import math
+import re
+
+
+CATALOG_URL = "https://fund.eastmoney.com/js/fundcode_search.js"
+HISTORY_URL = "https://fund.eastmoney.com/pingzhongdata/{code}.js"
+MAX_RESPONSE = 4_000_000
+CODE = re.compile(r"[0-9]{6}")
+SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def download(url):
+    opener = build_opener(NoRedirect())
+    request = Request(url, headers={"Accept": "application/javascript, text/plain, */*"})
+    with opener.open(request, timeout=8) as response:
+        body = response.read(MAX_RESPONSE + 1)
+    if len(body) > MAX_RESPONSE:
+        raise ValueError("基金数据源响应超出限制。")
+    return body.decode("utf-8-sig")
+
+
+def assignment(text, name, optional=False):
+    """Parse a JSON value from a named JavaScript assignment without executing it."""
+    # Keep the semicolon in the consumed tail check so a literal followed by an
+    # expression or a function cannot be mistaken for a supported JSON value.
+    match = re.search(r"(?:^|[;\n])\s*(?:var\s+)?" + re.escape(name) + r"\s*=\s*", text)
+    if not match:
+        if optional:
+            return None
+        raise ValueError(f"数据源缺少字段 {name}。")
+    value, size = json.JSONDecoder().raw_decode(text[match.end():])
+    tail = text[match.end() + size:].lstrip()
+    if tail and not tail.startswith(";"):
+        raise ValueError(f"数据源字段 {name} 不是 JSON 常量。")
+    return value
+
+
+def category_for(label):
+    for text, category in (
+        ("QDII", "qdii"), ("货币", "money"), ("FOF", "fof"),
+        ("指数", "index"), ("股票", "stock"), ("混合", "mixed"), ("债券", "bond"),
+    ):
+        if text in label.upper():
+            return category
+    return "other" if label.strip() else "unknown"
+
+
+def is_off_market(name, label=""):
+    title = name.upper()
+    return not (
+        "REIT" in title or "场内" in label or "封闭式" in label
+        or ("ETF" in title and "联接" not in title and "连接" not in title and "FOF" not in title)
+    )
+
+
+def parse_catalog(text):
+    values = assignment(text, "r")
+    if not isinstance(values, list):
+        raise ValueError("基金目录格式无效。")
+    records = {}
+    for value in values:
+        if (not isinstance(value, list) or len(value) < 5
+                or not all(isinstance(item, str) for item in value[:5])):
+            continue
+        code, short, name, label, pinyin = value[:5]
+        if CODE.fullmatch(code) and name.strip() and is_off_market(name, label):
+            records[code] = {"code": code, "name": name.strip(), "category": category_for(label),
+                             "alias": f"{short} {pinyin}"}
+    if not records:
+        raise ValueError("基金目录没有可用记录。")
+    return records
+
+
+@lru_cache(maxsize=2)
+def catalog_for_day(day):
+    # Only the metadata directory is cached in the local process.
+    return parse_catalog(download(CATALOG_URL))
+
+
+def current_catalog():
+    return catalog_for_day(datetime.now(SHANGHAI).date())
+
+
+def number(value):
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def timestamp_day(value):
+    if not number(value) or value < 0:
+        raise ValueError("基金数据源日期格式无效。")
+    return datetime.fromtimestamp(value / 1000, SHANGHAI).date().isoformat()
+
+
+def positive(value):
+    return number(value) and value > 0
+
+
+def nav_event(value):
+    """Return cash per old share and new shares per old share when explicit."""
+    if value == "":
+        return 0.0, 1.0
+    if not isinstance(value, str):
+        return None
+    content = re.sub(r"\s+", "", value).rstrip("。；;")
+    cash = re.fullmatch(r"每(?:(\d+(?:\.\d+)?)?)份(?:基金份额)?派现金(\d+(?:\.\d+)?)元", content)
+    if cash:
+        shares = float(cash[1] or 1)
+        amount = float(cash[2])
+        return (amount / shares, 1.0) if positive(shares) and number(amount) else None
+    split = re.fullmatch(r"每(?:(\d+(?:\.\d+)?)?)份(?:基金份额)?折算(?:为)?(\d+(?:\.\d+)?)份", content)
+    if split:
+        old = float(split[1] or 1)
+        new = float(split[2])
+        return (0.0, new / old) if positive(old) and positive(new) else None
+    return None
+
+
+def parse_history(text, code, metadata=None, retrieved_at=None):
+    if not isinstance(code, str) or not CODE.fullmatch(code):
+        raise ValueError("请输入六位场外基金代码。")
+    if assignment(text, "fS_code") != code:
+        raise ValueError("行情源返回了不同的基金代码。")
+    name = assignment(text, "fS_name")
+    if not isinstance(name, str) or not name.strip() or not is_off_market(name):
+        raise ValueError("行情源没有识别到场外基金名称。")
+    record = metadata or {}
+    actual_category = record.get("category", "unknown")
+    as_of = retrieved_at or datetime.now(timezone.utc)
+    latest_allowed = as_of.astimezone(SHANGHAI).date().isoformat()
+    trend = assignment(text, "Data_netWorthTrend")
+    if not isinstance(trend, list) or not trend or len(trend) > 24_000:
+        raise ValueError("暂无确认单位净值，特殊净值产品可能需要独立接口。")
+    totals = assignment(text, "Data_ACWorthTrend", optional=True)
+    if totals is not None and not isinstance(totals, list):
+        raise ValueError("累计净值格式无效。")
+    accumulated = {}
+    for item in totals or []:
+        if isinstance(item, list) and len(item) == 2 and positive(item[1]):
+            day = timestamp_day(item[0])
+            if day in accumulated:
+                raise ValueError(f"累计净值日期重复 {day}。")
+            accumulated[day] = item[1]
+    rows = []
+    previous_nav = None
+    index = 1.0
+    ambiguous = 0
+    for item in trend:
+        if not isinstance(item, dict) or not positive(item.get("y")):
+            raise ValueError("单位净值无效。")
+        day = timestamp_day(item.get("x"))
+        if day > latest_allowed or (rows and day <= rows[-1]["date"]):
+            raise ValueError(f"净值日期未来、重复或非递增 {day}。")
+        nav = item["y"]
+        event = nav_event(item.get("unitMoney"))
+        cash, split = event if event else (None, None)
+        index_value = None
+        if previous_nav is None:
+            index_value = index
+        elif event:
+            multiplier = (nav * split + cash) / previous_nav
+            # The source also provides the disclosed daily growth rate. Require
+            # agreement to half a percentage point before applying this rule;
+            # small differences can come from rounded display NAV.
+            growth = item.get("equityReturn")
+            if number(growth) and not math.isclose(multiplier - 1, growth / 100, abs_tol=0.005):
+                ambiguous += 1
+            elif positive(multiplier * index):
+                index *= multiplier
+                index_value = index
+        else:
+            ambiguous += 1
+        rows.append({"date": day, "unit_nav": nav, "accumulated_nav": accumulated.get(day),
+                     "return_index": index_value, "cash_distribution": cash, "split_factor": split})
+        previous_nav = nav
+    inception = record.get("inception")
+    if inception and rows[0]["date"] < inception:
+        raise ValueError("净值早于基金成立日。")
+    daily = actual_category in {"stock", "mixed", "bond", "index"} and len(rows) >= 2
+    return {
+        "schema_version": 1, "kind": "off_market_fund", "code": code, "name": name.strip(),
+        "category": actual_category, "inception": inception, "manager": record.get("manager"),
+        "valuation_frequency": "daily" if daily else None,
+        "return_basis": "event_reinvested", "return_note": (
+            f"{ambiguous} 个转折点的分红、折算或净值增长率需要核实，跨越该点的区间总回报不可计算。"
+            if ambiguous else "使用确认日净值、现金分红和份额折算构造总回报。"
+        ),
+        "source": {"name": "天天基金 / 东方财富", "url": f"https://fund.eastmoney.com/{code}.html",
+                   "method": "确认单位净值及净值序列中的现金分红 / 份额折算",
+                   "retrieved_at": as_of.isoformat()},
+        "rows": rows,
+    }
+
+
+def load_fund(code):
+    if not isinstance(code, str) or not CODE.fullmatch(code):
+        raise ValueError("请输入六位场外基金代码。")
+    meta = {}
+    try:
+        meta = current_catalog().get(code, {})
+    except (URLError, ValueError, TimeoutError):
+        pass  # A directory outage is not a substitute for known classification.
+    return parse_history(download(HISTORY_URL.format(code=code)), code, meta)
+
+
+def search_funds(term):
+    word = term.strip().lower()
+    if not word or len(word) > 64:
+        raise ValueError("请输入不超过 64 个字符的基金名称或代码。")
+    order = sorted(current_catalog().values(), key=lambda row: (row["code"] != word, row["code"]))
+    return [row for row in order if any(word in row[field].lower() for field in ("code", "name", "alias"))][:16]
+
+
+def parse_disclosed_csv(stream, code, name, source_name, source_url, category="unknown",
+                        manager=None, inception=None, retrieved_at=None):
+    """Import NAV observations obtained from a cited report or authorized export."""
+    if not CODE.fullmatch(code) or not name.strip() or not source_name.strip() or not source_url.startswith("https://"):
+        raise ValueError("需提供六位基金代码、名称及 HTTPS 披露出处。")
+    if not is_off_market(name):
+        raise ValueError("该标的不能作为场外基金导入。")
+    as_of = retrieved_at or datetime.now(timezone.utc)
+    last_day = as_of.astimezone(SHANGHAI).date().isoformat()
+    if inception and date.fromisoformat(inception).isoformat() != inception:
+        raise ValueError("成立日期必须采用 YYYY-MM-DD。")
+    reader = csv.DictReader(stream)
+    if not {"date", "unit_nav"}.issubset(reader.fieldnames or []):
+        raise ValueError("CSV 缺少 date 或 unit_nav。")
+    seen = set()
+    rows = []
+    for row in reader:
+        value_date = row.get("date") or ""
+        if (date.fromisoformat(value_date).isoformat() != value_date or value_date in seen
+                or value_date > last_day or (inception and value_date < inception)):
+            raise ValueError(f"净值日期重复或越界 {value_date}。")
+        parsed = {key: float(row[key]) if row.get(key) else None
+                  for key in ("unit_nav", "accumulated_nav", "return_index")}
+        if not positive(parsed["unit_nav"]) or any(v is not None and not positive(v) for v in parsed.values()):
+            raise ValueError(f"净值或总回报指数无效 {value_date}。")
+        seen.add(value_date)
+        rows.append({"date": value_date, **parsed})
+        if len(rows) > 24_000:
+            raise ValueError("CSV 超出 24000 条记录。")
+    if not rows:
+        raise ValueError("CSV 不包含确认净值。")
+    has_total = any(row["return_index"] is not None for row in rows)
+    return {
+        "schema_version": 1, "kind": "off_market_fund", "code": code, "name": name.strip(),
+        "category": category, "inception": inception, "manager": manager,
+        "return_basis": "adjusted_nav" if has_total else "unavailable",
+        "return_note": "引用 CSV 的复权总回报指数。" if has_total else "仅有确认单位净值与累计净值，缺少总回报口径。",
+        "source": {"name": source_name, "url": source_url, "method": "个人导入披露净值 CSV",
+                   "retrieved_at": as_of.isoformat()},
+        "rows": sorted(rows, key=lambda row: row["date"]),
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate a personal, local fund JSON import")
+    parser.add_argument("code", help="Six-digit off-market fund code")
+    inputs = parser.add_mutually_exclusive_group()
+    inputs.add_argument("--snapshot", type=Path, help="Locally saved source script; only JSON constants are parsed")
+    inputs.add_argument("--nav-csv", type=Path, help="Officially disclosed or authorized confirmed NAV CSV")
+    parser.add_argument("--catalog", type=Path, help="Locally saved source catalogue")
+    parser.add_argument("--name", help="Disclosed share-class name for CSV imports")
+    parser.add_argument("--source-name", help="Disclosing entity for CSV imports")
+    parser.add_argument("--source-url", help="HTTPS disclosure URL for CSV imports")
+    parser.add_argument("--category", default="unknown", choices=["stock", "mixed", "bond", "index", "qdii", "money", "fof", "other", "unknown"])
+    parser.add_argument("--manager", help="Disclosed fund management company")
+    parser.add_argument("--inception", help="Disclosed share-class inception date")
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    if not CODE.fullmatch(args.code):
+        parser.error("请输入六位场外基金代码。")
+    try:
+        if args.nav_csv:
+            if not all((args.name, args.source_name, args.source_url)):
+                parser.error("--nav-csv 需要 --name、--source-name 和 --source-url。")
+            if args.nav_csv.stat().st_size > MAX_RESPONSE:
+                raise ValueError("本地源文件过大。")
+            with args.nav_csv.open(encoding="utf-8-sig", newline="") as stream:
+                data = parse_disclosed_csv(stream, args.code, args.name, args.source_name, args.source_url,
+                                           args.category, args.manager, args.inception)
+        elif args.snapshot:
+            with args.snapshot.open("rb") as stream:
+                body = stream.read(MAX_RESPONSE + 1)
+            if len(body) > MAX_RESPONSE:
+                raise ValueError("本地源文件过大。")
+            metadata = parse_catalog(args.catalog.read_text(encoding="utf-8-sig")).get(args.code) if args.catalog else None
+            modified_at = datetime.fromtimestamp(args.snapshot.stat().st_mtime, timezone.utc)
+            data = parse_history(body.decode("utf-8-sig"), args.code, metadata, modified_at)
+        else:
+            data = load_fund(args.code)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with args.output.open("x", encoding="utf-8") as stream:
+            json.dump(data, stream, ensure_ascii=False, allow_nan=False)
+        print(args.output)
+    except (OSError, ValueError, OverflowError) as exc:
+        parser.exit(1, f"基金数据不可用：{exc}\n")
+
+
+if __name__ == "__main__":
+    main()

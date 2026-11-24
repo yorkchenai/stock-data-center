@@ -10,6 +10,7 @@ on:
       - "web/funds.html"
       - "scripts/test_live_fund_charts.mjs"
       - "scripts/verify_fund_chart_observations.py"
+      - "scripts/audit_sector_volume.py"
   workflow_dispatch:
 
 permissions:
@@ -20,6 +21,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  volume-audit:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -r requirements.txt
+      - run: python -m scripts.audit_sector_volume --output work/sector-volume/observations.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sector-volume-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: work/sector-volume/observations.json
+          if-no-files-found: error
+          retention-days: 14
   browser:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest

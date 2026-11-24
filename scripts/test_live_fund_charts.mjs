@@ -153,10 +153,10 @@ try {
     if (!benchmarkCurve) assert.ok(!returnHover.includes("基准"));
     const firstFundRange=await page.locator("#fund-visible-range").textContent();
     await page.locator('#fund-periods [data-period="3m"]').click();
-    assert.notEqual(await page.locator("#fund-visible-range").textContent(),firstFundRange);
+    await page.waitForFunction((initial)=>document.getElementById("fund-visible-range").textContent!==initial,firstFundRange);
     assert.equal(await page.locator("#hover-values").textContent(),"");
     await page.locator('#fund-periods [data-period="1y"]').click();
-    assert.equal(await page.locator("#fund-visible-range").textContent(),firstFundRange);
+    await page.waitForFunction((initial)=>document.getElementById("fund-visible-range").textContent===initial,firstFundRange);
     const navGaps=fund.rows.filter((row)=>row.return_index==null);
     if (navGaps.length) {
       await page.locator('#fund-periods [data-period="all"]').click();

@@ -81,11 +81,8 @@
 .fund-chart {height: 320px; min-width: 0; position: relative;}
 .drawdown-chart {height: 190px;}
 .fund-chart.empty {display: grid; place-items: center; height: 115px; color: var(--muted); text-align: center; border: 1px dashed var(--line);}
-.fund-chart-legend {display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 7px; font-size: 14px;}
-.fund-chart-legend label {display: flex; align-items: center; gap: 5px;}
-.fund-chart-legend label:has(input:disabled) {color: var(--muted);}
-.fund-chart-legend i {flex: 0 0 10px; height: 3px; border-radius: 1px; background: #087e75;}
-.fund-chart-legend .line-benchmark {background: #5d73b3;}
+#benchmark-disclosure {margin: 0 0 10px;}
+#benchmark-disclosure a {white-space: nowrap;}
 .chart-description {min-height: 20px;}
 .risk-grid {display: grid; grid-template-columns: repeat(auto-fit, minmax(145px,1fr)); gap: 8px; margin-bottom: 13px;}
 .risk-metric {padding: 9px; background: #f8fafb;}
@@ -133,5 +130,5 @@
   .sector-chart {height: 335px;}
   .sector-chart.with-volume {height: 430px;}
   .sector-metrics {font-size: 13px;}
-  .indicator-toggles label, .fund-chart-legend label {min-height: 30px;}
+  .indicator-toggles label {min-height: 30px;}
 }

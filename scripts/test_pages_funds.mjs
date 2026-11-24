@@ -150,17 +150,15 @@ try {
       await page.mouse.move(bound.x+bound.width/2,bound.y+100);
       assert.equal(await page.locator("#core-metrics").innerText(),stats);
     }
-    assert.match(await page.locator("#benchmark-status").innerText(),/基准部分可用/);
+    assert.equal(await page.locator("#benchmark-disclosure").innerText(),"官方业绩比较基准：合成比较基准");
+    assert.equal(await page.locator("#benchmark-line").count(),0);
     assert.equal(await page.locator("[data-metric='excess'] strong").innerText(),"—");
     assert.notEqual(await page.locator("[data-metric='sharpe'] strong").innerText(),"—");
-    await page.locator("#benchmark-line").uncheck();
-    await page.locator("#benchmark-line").check();
     await page.getByRole("button",{name:"自定义",exact:true}).click();
     await page.locator("#fund-start").fill("2026-09-01");
     await page.locator("#fund-end").fill("2026-10-20");
     await page.getByRole("button",{name:"应用区间"}).click();
     assert.match(await page.locator("#range-status").innerText(),/2026-09-01 至 2026-10-20/);
-    assert.match(await page.locator("#benchmark-status").innerText(),/基准完整/);
     assert.match(await page.locator("[data-metric='excess'] strong").innerText(),/个百分点/);
     await page.locator("#fund-start").fill("2026-11-01");
     await page.getByRole("button",{name:"应用区间"}).click();
@@ -201,6 +199,7 @@ try {
     assert.match(await page.locator("#sector-volume-note").innerText(),/暂不可用/);
     await page.getByRole("link",{name:"返回基金列表"}).click();
     await page.getByRole("link",{name:second.name}).click();
+    assert.equal(await page.locator("#benchmark-disclosure").innerText(),"官方业绩比较基准：暂未核实");
     assert.equal(await page.locator("[data-metric='sharpe'] strong").innerText(),"—");
     assert.equal(await page.locator("[data-metric='excess'] strong").innerText(),"—");
     assert.match(await page.locator("#holdings-data").innerText(),/暂无/);

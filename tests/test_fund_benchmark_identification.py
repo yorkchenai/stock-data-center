@@ -7,7 +7,7 @@ from urllib.error import HTTPError, URLError
 from stock_analysis.fund_benchmark_formula import formula_key, parse_formula
 from stock_analysis.fund_benchmark_identification import identify
 from stock_analysis.fund_benchmark_sources import PROFILES, parse_profile, read_candidate
-from stock_analysis.funds import fund_benchmark
+from stock_analysis.funds import benchmark_metadata, fund_benchmark
 
 INDEX = "沪深300指数收益率"
 OTHER = "中证500指数收益率"
@@ -27,6 +27,21 @@ def statute(start, end, formula, **overrides):
 
 def evidence(*regimes):
     return {"123456": {"share_codes": ["123456"], "share_source_url": SOURCE, "regimes": regimes}}
+
+
+class BenchmarkDisplayTest(unittest.TestCase):
+    def test_reviewed_disclosures_are_available_without_computable_points(self):
+        self.assertIsNone(benchmark_metadata("110022", AS_OF)["benchmark_disclosure"])
+        for code, effective, weight in [("006751", "2026-07-27", "65%"), ("003095", "2026-09-21", "90%")]:
+            with self.subTest(code=code):
+                fields = benchmark_metadata(code, AS_OF)
+                self.assertIsNone(fields["benchmark"])
+                disclosure = fields["benchmark_disclosure"]
+                self.assertIn(weight, disclosure["formula"])
+                self.assertEqual(disclosure["effective_from"], effective)
+                self.assertTrue(disclosure["source_url"].startswith("https://"))
+                old = benchmark_metadata(code, "2026-07-01")["benchmark_disclosure"]
+                self.assertTrue(old is None or old["effective_from"] < effective)
 
 
 class BenchmarkSourcesTest(unittest.TestCase):

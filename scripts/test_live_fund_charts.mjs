@@ -10,6 +10,14 @@ const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH??"
 const chartCanvas="#sector-chart canvas";
 const cases=[["110022","399997"],["006751","000994"],["003095","000991"]];
 const report={mode:"live fund data, CSI rankings and stock-engine charts",funds:{},closeOnly:null};
+const disclosures={
+  "110022":["暂未核实",null],
+  "006751":["中证互联网指数收益率×65%＋恒生科技指数收益率×20%＋中债-国债总财富（1-3年）指数收益率×15%（2026-07-27起）",
+    "https://paper.cnstock.com/html/2026-06/27/content_2236123.htm"],
+  "003095":["中证医药卫生指数收益率×90%＋中证综合债指数收益率×10%（2026-09-21起）",
+    "https://www.zofund.com/2026/wsnotice/20261027/ebc7404b0b5b47b8a35e82b4fc5607f6.pdf"],
+};
+const formatReturn=(value)=>`${value*100>=.005?"+":""}${(value*100).toFixed(2)}%`;
 async function lookup(path) {
   const response=await fetch(new URL("/api/funds/"+path,origin),{signal:AbortSignal.timeout(300000)});
   assert.equal(response.status,200,await response.clone().text().then((body)=>body.slice(0,200)));
@@ -34,6 +42,28 @@ function checkAverages(payload, field, label, periods) {
 }
 
 async function open(page,code) {
+  await page.addInitScript(()=>{
+    let library;
+    Object.defineProperty(window,"LightweightCharts",{
+      get:()=>library,
+      set:(original)=>{
+        library={...original,createChart(element,options){
+          const chart=original.createChart(element,options);
+          if (element.id==="returns-chart") {
+            const series=[];
+            window.testReturns={chart,series};
+            const addSeries=chart.addSeries.bind(chart);
+            chart.addSeries=(type,settings)=>{
+              const line=addSeries(type,settings);
+              series.push(line);
+              return line;
+            };
+          }
+          return chart;
+        }};
+      },
+    });
+  });
   await page.goto(`${origin}/funds.html?fund=${code}`);
   await page.locator("#nav-chart canvas").first().waitFor({timeout:30000});
   await page.locator(chartCanvas).first().waitFor({timeout:300_000});
@@ -57,7 +87,10 @@ async function verifyLayout(page, width, mobile) {
       .map((row)=>row.getBoundingClientRect().height).filter((height)=>height>30);
     const columns=getComputedStyle(document.getElementById("core-metrics")).gridTemplateColumns.split(" ").length;
     const targets=[...document.querySelectorAll("#sector-tabs button,#sector-periods button,#fund-periods button")];
-    return {width:innerWidth,scrollWidth:document.documentElement.scrollWidth,charts,panes,columns,
+    const disclosure=document.getElementById("benchmark-disclosure");
+    const axisWidth=window.testReturns.chart.priceScale("right").width();
+    return {width:innerWidth,scrollWidth:document.documentElement.scrollWidth,charts,panes,columns,axisWidth,
+      disclosureFits:disclosure.scrollWidth<=disclosure.clientWidth,
       minimumTarget:Math.min(...targets.map((button)=>button.getBoundingClientRect().height)),
       tabLabelFits:[...document.querySelectorAll("#sector-tabs button")].every((tab)=>tab.scrollWidth<=tab.clientWidth),
       navTextNodes:[...document.getElementById("nav-chart").childNodes].some((node)=>node.nodeType===3&&node.textContent.trim())};
@@ -69,6 +102,8 @@ async function verifyLayout(page, width, mobile) {
   assert.equal(dimensions.navTextNodes,false,"loading or empty-state text must not cover the live NAV chart");
   assert.equal(dimensions.columns,mobile?2:3);
   assert.equal(dimensions.tabLabelFits,true);
+  assert.equal(dimensions.disclosureFits,true);
+  assert.ok(dimensions.axisWidth>=57,JSON.stringify(dimensions));
   assert.ok(dimensions.minimumTarget>=(mobile?44:36));
   assert.equal(dimensions.panes.length,2,JSON.stringify(dimensions.panes));
   assert.ok(Math.abs(dimensions.panes[1]/(dimensions.panes[0]+dimensions.panes[1])-.3)<.04,
@@ -81,6 +116,54 @@ async function hoverMiddle(page, selector) {
   await target.scrollIntoViewIfNeeded();
   const bounds=await target.boundingBox();
   await page.mouse.move(bounds.x+bounds.width*.53,bounds.y+bounds.height*.45);
+}
+
+async function checkDisclosure(page, code) {
+  const [formula,url]=disclosures[code];
+  const disclosure=page.locator("#benchmark-disclosure");
+  assert.equal(await disclosure.textContent(),`官方业绩比较基准：${formula}${url?" 查看披露":""}`);
+  assert.equal(await disclosure.locator("a").count(),url?1:0);
+  if (url) assert.equal(await disclosure.locator("a").getAttribute("href"),url);
+  assert.equal(await page.locator("#benchmark-line,#benchmark-status").count(),0);
+  return {formula,url};
+}
+
+async function checkReturns(page, fund, checkHover=true) {
+  const chart=page.locator("#returns-chart");
+  const [start,end]=(await page.locator("#range-status").textContent()).match(/\d{4}-\d{2}-\d{2}/g);
+  const rows=fund.rows.filter((row)=>row.date>=start&&row.date<=end);
+  assert.ok(rows.every((row)=>row.return_index>0));
+  const rendered=await page.evaluate(()=>{
+    const {chart,series}=window.testReturns;
+    const values=[.125,-.125,0];
+    return {points:series[0].data(),series:series.length,axis:values.map(chart.options().localization.priceFormatter),
+      labels:values.map((value)=>series[0].priceFormatter().format(value))};
+  });
+  assert.equal(rendered.series,1);
+  assert.deepEqual(rendered.axis,["+12.50%","-12.50%","0.00%"]);
+  assert.deepEqual(rendered.labels,rendered.axis);
+  assert.equal(rendered.points.length,rows.length);
+  for (const [i,point] of rendered.points.entries()) {
+    assert.equal(point.time,rows[i].date);
+    assert.ok(Math.abs(point.value-(rows[i].return_index/rows[0].return_index-1))<1e-12);
+  }
+  assert.equal(rendered.points[0].value,0);
+  const last=formatReturn(rendered.points.at(-1).value);
+  const metric=await page.locator('[data-metric="return"] strong').textContent();
+  assert.equal(parseFloat(metric),parseFloat(last));
+  if (checkHover) {
+    await chart.scrollIntoViewIfNeeded();
+    const plot=await chart.boundingBox();
+    for (const [date,expected] of [[start,"0.00%"],[end,last]]) {
+      const x=await page.evaluate((day)=>window.testReturns.chart.timeScale().timeToCoordinate(day),date);
+      assert.ok(Number.isFinite(x));
+      await page.mouse.move(plot.x+x,plot.y+plot.height*.45);
+      assert.equal(await page.locator("#hover-values").textContent(),`${date} · 累计收益率 ${expected}`);
+    }
+    await page.mouse.move(0,0);
+    assert.equal(await page.locator("#hover-values").textContent(),"");
+  }
+  return {start,end,first:"0.00%",last};
 }
 
 try {
@@ -99,7 +182,7 @@ try {
     assert.ok((await page.locator("#returns-source").textContent()).includes(latestFund.date));
     assert.ok((await page.locator("#returns-source").textContent()).includes(fund.source.name));
     const headings=await page.locator("#fund-detail h2").allTextContents();
-    assert.deepEqual(headings.slice(0,4),["基金历史净值","基金累计收益与业绩比较基准","风险分析","强关联板块指数分析"]);
+    assert.deepEqual(headings.slice(0,4),["基金历史净值","基金累计收益率","风险分析","强关联板块指数分析"]);
     const model=await lookup(`${code}/sectors`);
     const slots=await page.locator("#sector-tabs button").count();
     assert.equal(slots,model.sectors.length);
@@ -143,18 +226,34 @@ try {
     assert.equal(navHover[2],fund.rows.find((row)=>row.date===navHover[1]).unit_nav.toFixed(4));
     await page.locator("#nav-adjusted").click();
     assert.equal(await page.locator("#nav-hover").textContent(),incoming);
-    const benchmarkStatus=await page.locator("#benchmark-status").textContent();
-    const benchmarkCurve=await page.locator("#benchmark-line").isEnabled();
-    if (!benchmarkCurve) assert.match(benchmarkStatus,/暂无|无法核验|尚不可用|缺少|未验证/);
+    const benchmark=await checkDisclosure(page,code);
+    const oneYear=await checkReturns(page,fund);
     await hoverMiddle(page,"#returns-chart");
     const returnHover=await page.locator("#hover-values").textContent();
-    assert.match(returnHover,/^\d{4}-\d{2}-\d{2} · 基金 -?\d+\.\d{2}%/);
+    assert.match(returnHover,/^\d{4}-\d{2}-\d{2} · 累计收益率 [+-]?\d+\.\d{2}%/);
     assert.ok(fund.rows.some((row)=>row.date===returnHover.slice(0,10)));
-    if (!benchmarkCurve) assert.ok(!returnHover.includes("基准"));
     const firstFundRange=await page.locator("#fund-visible-range").textContent();
     await page.locator('#fund-periods [data-period="3m"]').click();
     await page.waitForFunction((initial)=>document.getElementById("fund-visible-range").textContent!==initial,firstFundRange);
     assert.equal(await page.locator("#hover-values").textContent(),"");
+    const threeMonths=await checkReturns(page,fund);
+    await page.locator('[aria-labelledby="returns-title"]').screenshot({path:`${output}/detail-returns-${code}-3m.png`});
+    if (code==="110022") {
+      await hoverMiddle(page,"#returns-chart");
+      const chart=await page.locator("#returns-chart").boundingBox();
+      const before=await page.locator("#fund-visible-range").textContent();
+      await page.mouse.wheel(0,-520);
+      await page.waitForFunction((from)=>document.getElementById("fund-visible-range").textContent!==from,before);
+      const afterZoom=await page.locator("#fund-visible-range").textContent();
+      const y=chart.y+chart.height*.45;
+      await page.mouse.move(chart.x+chart.width*.53,y);
+      await page.mouse.down();
+      await page.mouse.move(chart.x+chart.width*.74,y,{steps:12});
+      await page.mouse.up();
+      await page.waitForFunction((from)=>document.getElementById("fund-visible-range").textContent!==from,afterZoom);
+      await hoverMiddle(page,"#returns-chart");
+      assert.match(await page.locator("#hover-values").textContent(),/累计收益率 [+-]?\d+\.\d{2}%$/);
+    }
     await page.locator('#fund-periods [data-period="1y"]').click();
     await page.waitForFunction((initial)=>document.getElementById("fund-visible-range").textContent===initial,firstFundRange);
     const navGaps=fund.rows.filter((row)=>row.return_index==null);
@@ -163,6 +262,8 @@ try {
       assert.equal(await page.locator("#nav-gaps").isVisible(),true);
       const gaps=await page.locator("#nav-gap-list li").allTextContents();
       assert.deepEqual(gaps.map((item)=>item.slice(0,10)),navGaps.map((row)=>row.date));
+      assert.equal(await page.locator("#returns-chart canvas").count(),0);
+      assert.match(await page.locator("#returns-chart").textContent(),/当前统计区间暂无可计算的曲线/);
       await page.locator('#fund-periods [data-period="1y"]').click();
     }
     await page.locator('[data-indicator="MA5"]').uncheck();
@@ -241,12 +342,15 @@ try {
       await page.setViewportSize({width,height:1000});
       viewports[width]=await verifyLayout(page,width,false);
       await page.screenshot({path:`${output}/full-${code}-desktop-${width}.png`,fullPage:true});
+      if (width===1440) await page.locator('[aria-labelledby="returns-title"]').screenshot({
+        path:`${output}/detail-returns-${code}-desktop-${width}.png`,
+      });
     }
     await page.locator(".sector-panel").screenshot({path:`${output}/detail-${code}-index-${index.code}.png`});
     assert.deepEqual(errors,[]);
     report.funds[code]={selected:index.code,quality:price.quality,first:price.first,last:price.last,
       nav:{date:rawNav[1],unit_nav:Number(rawNav[2]),adjusted_readout:incoming,gapCount:navGaps.length},
-      mode:chartMode,viewports,benchmark:{curve:benchmarkCurve,status:benchmarkStatus},
+      mode:chartMode,viewports,benchmark,returns:{oneYear,threeMonths},
       ohlc:(({date,open,high,low,close})=>({date,open,high,low,close}))(price.rows.at(-1)),
       ma,vol,volume:price.rows.at(-1).volume,source:price.source.id,model_index_as_of:price.model_index_as_of,
       volume_unit:price.volume_unit,volume_status:price.quality.volume_status,ranked:model.sectors.map((item)=>({
@@ -265,12 +369,46 @@ try {
       await page.waitForFunction(()=>document.getElementById("fund-title").textContent.includes("中欧医疗"));
       await page.locator(chartCanvas).first().waitFor({timeout:300_000});
       assert.equal(await page.locator('[data-index="399997"]').count(),0);
+      await checkDisclosure(page,"003095");
+      assert.equal(await page.locator("#hover-values").textContent(),"");
       report.funds[code].switch_cleared=true;
     }
     await page.close();
 
     const phone=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1});
     await open(phone,code);
+    const cdp=await phone.context().newCDPSession(phone);
+    await checkDisclosure(phone,code);
+    assert.deepEqual(await checkReturns(phone,fund,false),oneYear);
+    const returnsChart=phone.locator("#returns-chart");
+    await returnsChart.scrollIntoViewIfNeeded();
+    const plot=await returnsChart.boundingBox();
+    const returnX=plot.x+plot.width*.43,returnY=plot.y+plot.height*.48;
+    const returnTouch=(type,...coordinates)=>cdp.send("Input.dispatchTouchEvent",{
+      type,touchPoints:coordinates.map((x,i)=>({x,y:returnY,id:i+1})),
+    });
+    const initialRange=await phone.locator("#fund-visible-range").textContent();
+    await returnTouch("touchStart",returnX-18,returnX+18);
+    for (let d=26;d<=70;d+=8) await returnTouch("touchMove",returnX-d,returnX+d);
+    await returnTouch("touchEnd");
+    await phone.waitForFunction((from)=>document.getElementById("fund-visible-range").textContent!==from,initialRange);
+    const afterPinch=await phone.locator("#fund-visible-range").textContent();
+    await returnTouch("touchStart",returnX);
+    for (let d=12;d<=72;d+=12) await returnTouch("touchMove",returnX+d);
+    await returnTouch("touchEnd");
+    await phone.waitForFunction((from)=>document.getElementById("fund-visible-range").textContent!==from,afterPinch);
+    await returnTouch("touchStart",returnX);
+    const touchLocator=phone.locator("#hover-values");
+    await phone.waitForFunction(()=>document.getElementById("hover-values").textContent.includes("%"));
+    const returnTouchReadout=await touchLocator.textContent();
+    const touchedReturn=fund.rows.find((row)=>row.date===returnTouchReadout.slice(0,10));
+    const returnBase=fund.rows.find((row)=>row.date===oneYear.start);
+    assert.ok(touchedReturn);
+    assert.equal(returnTouchReadout,`${touchedReturn.date} · 累计收益率 ${formatReturn(touchedReturn.return_index/returnBase.return_index-1)}`);
+    await returnTouch("touchEnd");
+    await phone.locator('#fund-periods [data-period="1y"]').tap();
+    assert.equal(await touchLocator.textContent(),"");
+    report.funds[code].returns.touch=returnTouchReadout;
     if (model.sectors[0].code!==target) {
       await phone.locator(`[data-index="${target}"]`).tap();
       await phone.locator(chartCanvas).first().waitFor();
@@ -279,7 +417,6 @@ try {
     await phone.locator("#sector-chart").scrollIntoViewIfNeeded();
     const bounds=await phone.locator("#sector-chart").boundingBox();
     const x=bounds.x+bounds.width*.48,y=bounds.y+bounds.height*.5;
-    const cdp=await phone.context().newCDPSession(phone);
     const touch=(type,x,y)=>cdp.send("Input.dispatchTouchEvent",{
       type,touchPoints:type==="touchEnd"?[]:[{x,y,id:1}],
     });
@@ -311,6 +448,7 @@ try {
       await phone.locator('#sector-periods [data-period="1y"]').tap();
       viewports[width]=await verifyLayout(phone,width,true);
       await phone.screenshot({path:`${output}/full-${code}-mobile-${width}.png`,fullPage:true});
+      await phone.locator('[aria-labelledby="returns-title"]').screenshot({path:`${output}/detail-returns-${code}-mobile-${width}.png`});
     }
     report.funds[code].touch=touchReadout;
     report.funds[code].pinch=true;

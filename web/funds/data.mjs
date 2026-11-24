@@ -66,6 +66,13 @@ export function normalizeFund(raw) {
     throw new Error("已声明总回报口径，实际缺少有效序列。");
   }
   const benchmark = normalizeBenchmark(raw.benchmark, shanghaiToday());
+  const disclosure = raw.benchmark_disclosure;
+  let benchmarkDisclosure = null;
+  if (optionalText(disclosure?.formula)) {
+    try {
+      if (validDate(disclosure.effective_from) <= latestDay) benchmarkDisclosure = disclosure;
+    } catch { /* Ignore invalid optional disclosure dates. */ }
+  }
   const riskFree = normalizeRiskFree(raw.risk_free, shanghaiToday());
   const category = Object.hasOwn(FUND_CATEGORIES, raw.category) ? raw.category : "unknown";
   const normalFrequency = ["stock", "mixed", "bond", "index", "other"].includes(category) && raw.valuation_frequency === "daily";
@@ -85,7 +92,8 @@ export function normalizeFund(raw) {
   return { code: raw.code, name: raw.name.trim(), category, inception,
     manager: optionalText(raw.manager), fund_manager: optionalText(raw.fund_manager),
     size: optionalText(raw.size), fee: optionalText(raw.fee), reference: optionalText(raw.reference),
-    holdings: disclosedHoldings, related, benchmark, risk_free: riskFree, rows, return_basis: basis,
+    holdings: disclosedHoldings, related, benchmark, benchmark_disclosure: benchmarkDisclosure,
+    risk_free: riskFree, rows, return_basis: basis,
     return_note: optionalText(raw.return_note), source,
     normalFrequency, mode: raw.synthetic === true ? "synthetic" : "reported",
   };

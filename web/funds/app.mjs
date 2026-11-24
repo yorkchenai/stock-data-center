@@ -279,7 +279,17 @@ function renderIdentity(code,fund) {
   $("fund-nav-date").textContent = latest?.date ?? "—";
   $("fund-source").textContent = "来源 " + (fund?.source.name ?? "—");
   $("fund-freshness").textContent = "状态 " + (fund ? fundFreshness(fund) : "未载入");
-  $("benchmark-label").textContent = fund?.benchmark?.name ?? "业绩比较基准";
+  const benchmark = fund?.benchmark_disclosure ?? fund?.benchmark;
+  const formula = benchmark?.formula || benchmark?.name || "暂未核实";
+  const since = benchmark?.effective_from ? `（${benchmark.effective_from}起）` : "";
+  const comparison = $("benchmark-disclosure");
+  comparison.textContent = `官方业绩比较基准：${formula}${since}`;
+  if (typeof benchmark?.source_url === "string" && URL.canParse(benchmark.source_url)) {
+    const source = new URL(benchmark.source_url);
+    if (source.protocol === "https:" && !source.username && !source.password) {
+      comparison.append(" ",tag("a","查看披露",{href:source.href,target:"_blank",rel:"noopener noreferrer"}));
+    }
+  }
   const sourceTime = fund && new Intl.DateTimeFormat("zh-CN",{
     timeZone:"Asia/Shanghai",dateStyle:"medium",timeStyle:"short",
   }).format(new Date(fund.source.retrieved_at));
@@ -339,27 +349,10 @@ function renderAnalysis(requestedStart, requestedEnd) {
     ? `${risk.name} · ${convention[risk.convention]} · ${risk.effective_from} 至 ${risk.effective_to} · ${risk.source}`
     : risk ? `年利率 ${pct(risk.annual_rate)} · 复利按 252 日折算 · ${risk.source}` : "缺少有出处的无风险利率时不计算夏普";
   $("risk-assumptions").textContent = "日收益波动率与日超额收益夏普均按 252 个净值观察日年化。索提诺目标为 0%。" + riskLabel + "。";
-  const comparison = analysis.comparison;
-  const benchmark = fund?.benchmark;
   $("returns-source").hidden = !fund;
   $("returns-source").textContent = fund ? `基金净值来源 ${fund.source.name} · 最新确认 ${latest}` : "";
-  const benchmarkStatus = {
-    complete:"基准完整，两条曲线以相同实际日期归零。",
-    partial:"基准部分可用，曲线截止于首个缺口前。",
-    disclosed:"该区间有官方披露的基准收益，日频曲线尚不可用。",
-    unverified:"该区间基准无法核验。",
-  };
-  $("benchmark-status").textContent = comparison
-    ? [benchmarkStatus[comparison.status], comparison.value == null ? null : "基准区间收益 " + pct(comparison.value) + "。",
-      comparison.disclosed ? "区间出处 " + comparison.disclosed.source + "。" : null,
-      comparison.status !== "disclosed" ? comparison.reason : null, benchmark?.series_source ?? benchmark?.source].filter(Boolean).join(" ")
-    : (analysis.metrics.excess.reason ?? "");
-  $("fund-line").disabled = !analysis.points.fund.length;
-  $("benchmark-line").disabled = !analysis.points.benchmark.length;
-  charts.display("fund",analysis.points);
-  charts.display("drawdown",analysis.points);
-  charts.showLine("fund",$("fund-line").checked);
-  charts.showLine("benchmark",$("benchmark-line").checked);
+  charts.display("fund",analysis.points.fund);
+  charts.display("drawdown",analysis.points.drawdown);
 }
 function renderNav(fund,start,end) {
   const adjusted=navMode==="adjusted";
@@ -509,8 +502,6 @@ $("fund-range").addEventListener("submit",(event)=>{
   event.preventDefault();
   renderAnalysis($("fund-start").value,$("fund-end").value);
 });
-$("fund-line").addEventListener("change",()=>charts.showLine("fund",$("fund-line").checked));
-$("benchmark-line").addEventListener("change",()=>charts.showLine("benchmark",$("benchmark-line").checked));
 $("show-more-history").addEventListener("click",()=>{historyLimit+=60;historyTable(loaded.get(selectedCode));});
 
 if (loopback) {

@@ -236,9 +236,21 @@ def official_benchmarks():
 
 
 def fund_benchmark(code, as_of):
-    from .fund_benchmark_identification import benchmark_definition
+    return benchmark_metadata(code, as_of)["benchmark"]
 
-    return official_benchmarks().get(code) or benchmark_definition(code, as_of)
+
+def benchmark_metadata(code, as_of):
+    from .fund_benchmark_identification import identify, reviewed_disclosures
+
+    benchmark = official_benchmarks().get(code)
+    disclosure = None
+    if code in reviewed_disclosures():
+        verified = identify(code, [], as_of)
+        active = verified["effective_regime"]
+        if active and active["verification"] == "official_verified":
+            disclosure = {field: active[field] for field in ("formula", "effective_from", "source_url")}
+        benchmark = benchmark or verified["benchmark"]
+    return {"benchmark": benchmark, "benchmark_disclosure": disclosure}
 
 
 def parse_history(text, code, metadata=None, retrieved_at=None):
@@ -332,7 +344,7 @@ def parse_history(text, code, metadata=None, retrieved_at=None):
         "source": {"name": "天天基金 / 东方财富", "url": f"https://fund.eastmoney.com/{code}.html",
                    "method": "确认单位净值及净值序列中的现金分红 / 份额折算",
                    "retrieved_at": as_of.isoformat()},
-        "rows": rows, "benchmark": fund_benchmark(code, latest_allowed),
+        "rows": rows, **benchmark_metadata(code, latest_allowed),
     }
 
 
@@ -400,7 +412,7 @@ def parse_disclosed_csv(stream, code, name, source_name, source_url, category="u
                    "retrieved_at": as_of.isoformat()},
         "rows": sorted(rows, key=lambda row: row["date"]),
         "valuation_frequency": "daily" if daily_nav else None,
-        "benchmark": fund_benchmark(code, last_day),
+        **benchmark_metadata(code, last_day),
     }
 
 

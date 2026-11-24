@@ -1,4 +1,7 @@
 const percent = (value) => (value * 100).toFixed(2) + "%";
+const signedPercent = new Intl.NumberFormat("zh-CN",{
+  style:"percent",signDisplay:"exceptZero",minimumFractionDigits:2,maximumFractionDigits:2,
+}).format;
 
 export function createFundCharts() {
   const options = {
@@ -10,33 +13,33 @@ export function createFundCharts() {
     localization:{locale:"zh-CN",priceFormatter:percent},
   };
   const definitions = {
-    fund:{element:"returns-chart", readout:"hover-values", series:[
-      {key:"fund", label:"基金", color:"#087e75"},
-      {key:"benchmark", label:"基准", color:"#5d73b3"},
-    ]},
-    drawdown:{element:"drawdown-chart", readout:"drawdown-values",
-      series:[{key:"drawdown", label:"回撤", color:"#a65c61"}]},
+    fund:{element:"returns-chart", readout:"hover-values", label:"累计收益率", color:"#087e75", format:signedPercent},
+    drawdown:{element:"drawdown-chart", readout:"drawdown-values", label:"回撤", color:"#a65c61", format:percent},
   };
   const ready = new Map();
 
-  function initialize(name, {element,readout,series}) {
+  function initialize(name, {element,readout,label,color,format}) {
     const target = document.getElementById(element);
-    const chart = LightweightCharts.createChart(target, options);
-    const lines = new Map(series.map(({key,color})=>[key,chart.addSeries(LightweightCharts.LineSeries,{
+    const LC = globalThis.LightweightCharts;
+    const isFund = name === "fund";
+    const chart = LC.createChart(target, isFund ? {
+      ...options, crosshair:{mode:LC.CrosshairMode.Magnet},
+      rightPriceScale:{...options.rightPriceScale,minimumWidth:74},
+      localization:{...options.localization,priceFormatter:format},
+    } : options);
+    const line = chart.addSeries(LC.LineSeries,{
       color,lineWidth:2,priceLineVisible:false,lastValueVisible:false,
-    })]));
+      ...(isFund ? {priceFormat:{type:"custom",minMove:0.0001,formatter:format}} : {}),
+    });
     const report = document.getElementById(readout);
     chart.subscribeCrosshairMove(({time,seriesData}) => {
-      const values = series.flatMap(({key,label}) => {
-        const line = lines.get(key), data = seriesData.get(line);
-        return data && line.options().visible ? [label + " " + percent(data.value)] : [];
-      });
-      report.textContent = typeof time === "string" && values.length ? `${time} · ${values.join(" · ")}` : "";
+      const value = seriesData.get(line)?.value;
+      report.textContent = typeof time === "string" && Number.isFinite(value) ? `${time} · ${label} ${format(value)}` : "";
     });
     if (name === "fund") chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
       document.getElementById("fund-visible-range").textContent = range ? `图表视窗 ${range.from} 至 ${range.to}` : "";
     });
-    const current = {chart,lines};
+    const current = {chart,line};
     ready.set(name,current);
     return current;
   }
@@ -44,12 +47,12 @@ export function createFundCharts() {
   function display(name, points) {
     const config = definitions[name];
     const target = document.getElementById(config.element);
-    const present = points[name].length && typeof LightweightCharts !== "undefined";
+    const present = points.length && globalThis.LightweightCharts;
     if (!present) {
       ready.get(name)?.chart.remove();
       ready.delete(name);
       target.classList.add("empty");
-      target.textContent = points[name].length ? "图表库暂不可用。" : "当前统计区间暂无可计算的曲线。";
+      target.textContent = points.length ? "图表库暂不可用。" : "当前统计区间暂无可计算的曲线。";
       document.getElementById(config.readout).textContent = "";
       if (name === "fund") document.getElementById("fund-visible-range").textContent = "";
       return;
@@ -58,15 +61,11 @@ export function createFundCharts() {
       target.classList.remove("empty");
       target.textContent = "";
     }
-    const {chart,lines} = ready.get(name) ?? initialize(name,config);
-    for (const [key,line] of lines) line.setData(points[key]);
+    const {chart,line} = ready.get(name) ?? initialize(name,config);
+    line.setData(points);
     document.getElementById(config.readout).textContent = "";
     chart.timeScale().fitContent();
   }
 
-  function showLine(key, checked) {
-    ready.get("fund")?.lines.get(key)?.applyOptions({visible:checked});
-  }
-
-  return {display, showLine};
+  return {display};
 }

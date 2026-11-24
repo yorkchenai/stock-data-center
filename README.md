@@ -36,7 +36,7 @@ python -m http.server 8765 --bind 127.0.0.1 --directory work/pages-site
 
 本地个人查询使用现有回环服务 `python -m stock_analysis.web --port 8765`，访问 `http://127.0.0.1:8765/funds.html`。静态 Pages 版支持导入本地净值 JSON。数据缺少基准、总回报或有来源的无风险利率时显示 —。GitHub runner 已验证天天基金目录和三只基金的历史接口。真实 GitHub Pages 来源的常规直连请求受 CORS 限制。个人导入和净值说明见 [场外基金说明](docs/off-market-funds.md)。官方比较基准、本地三个月国债历史利率与近 1、3、5 年核验见[第三阶段验收](docs/off-market-funds-phase3.md)。30 只真实份额的基线、覆盖率和性能见[第四阶段验收](docs/off-market-funds-phase4.md)。跨来源基准识别、官方版本核验和计算接入覆盖率见[第五阶段验收](docs/off-market-funds-phase5.md)。场外基金与行业指数的动态关联、披露对照和前向预测结果见[第六阶段研究](docs/off-market-funds-phase6.md)。中长期趋势、上涨参与和最大回撤对照见[第七阶段研究](docs/off-market-funds-phase7.md)。
 
-基金详情默认显示近一年。历史净值支持原始与复权切换，另有独立的累计收益与官方基准图。适用的主动权益基金可用回环服务自动加载统计关联指数及独立日K图。静态模式保留原净值 JSON 导入，也支持按数据许可导入一份包含关联分析与指数历史的图表包。操作方法、数据口径、真实样本和截图见[第八阶段验收](docs/off-market-funds-phase8.md)。
+基金详情默认显示近一年。历史净值支持原始与复权切换。基金累计收益率图以区间起点归零，官方业绩比较基准在标题下显示为文字，注明已核验公式的生效日期和出处。适用的主动权益基金可用回环服务自动加载统计关联指数及独立日K图。静态模式保留原净值 JSON 导入，也支持按数据许可导入一份包含关联分析与指数历史的图表包。操作方法、数据口径、真实样本和截图见[第八阶段验收](docs/off-market-funds-phase8.md)。
 
 基金关联指数的日 K、MA 和 VOL 复用现有股票引擎。[行情覆盖与数据口径](docs/off-market-funds-stock-chart.md)
 

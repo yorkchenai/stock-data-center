@@ -99,15 +99,11 @@
         <details id="nav-gaps" hidden><summary>复权数据缺口</summary><ul id="nav-gap-list" class="fund-note"></ul></details>
       </section>
       <section class="fund-panel chart-panel" aria-labelledby="returns-title">
-        <div class="panel-heading"><h2 id="returns-title">基金累计收益与业绩比较基准</h2><span id="fund-visible-range" class="fund-note"></span></div>
-        <div class="fund-chart-legend">
-          <label><input type="checkbox" id="fund-line" checked><i class="line-fund"></i>基金总回报</label>
-          <label><input type="checkbox" id="benchmark-line" checked><i class="line-benchmark"></i><span id="benchmark-label">业绩比较基准</span></label>
-        </div>
-        <div id="returns-chart" class="fund-chart" role="img" aria-label="基金和基准累计收益曲线"></div>
+        <div class="panel-heading"><h2 id="returns-title">基金累计收益率</h2><span id="fund-visible-range" class="fund-note"></span></div>
+        <p id="benchmark-disclosure" class="fund-note"></p>
+        <div id="returns-chart" class="fund-chart" role="img" aria-label="以统计区间起点归零的基金累计收益率曲线"></div>
         <p id="hover-values" class="fund-note chart-description" aria-live="off"></p>
         <p id="returns-source" class="fund-note" hidden></p>
-        <p id="benchmark-status" class="fund-note"></p>
         <a class="fund-note" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">图表由 TradingView Lightweight Charts™ 提供</a>
       </section>
       <section class="fund-panel chart-panel" aria-labelledby="risk-title">

@@ -1,6 +1,7 @@
 // Isolated workerd + persisted D1, no deployment or production credentials.
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -9,6 +10,7 @@ import { join, resolve, extname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright-core";
 import { calculateIndicators, FIELDS } from "../web/engine.mjs";
+import { snapshotStore } from "../worker/snapshots/store.mjs";
 
 const require=createRequire(pathToFileURL(join(process.env.SNAPSHOT_TEST_TOOLS??"/tmp/analysis-snapshot-tools","runner.cjs")));
 const {Miniflare}=require("miniflare");
@@ -91,6 +93,7 @@ const startServer=createServer(async(req,res)=>{
 await new Promise((done)=>startServer.listen(8767,"127.0.0.1",done));
 const results=[];
 const fallbackChecks=[];
+let independentAudit;
 let browser;
 
 const wait=(ms)=>new Promise((done)=>setTimeout(done,ms));
@@ -138,8 +141,40 @@ async function latestSnapshot(type,symbol) {
 const report=()=>({sample:sample?"deterministic fixture":"live vendor",stage:"local workerd + persisted D1",
   model_version:version,results,
   browser_fallback:fallbackChecks,
+  independent_audit:independentAudit,
   upstream:coldEvents.filter((event)=>event.event==="snapshot_upstream"),
   storage:coldEvents.filter((event)=>event.event==="snapshot_publish")});
+
+async function verifyIndependentAudit() {
+  const store=snapshotStore(await mf.getD1Database("DB"));
+  const files=[];
+  for (const row of results.filter((item)=>item.browser_mcp_identical)) {
+    const snapshot=await store.load(await store.header(row.snapshot_id));
+    const file=join(storage,row.snapshot_id+".json");
+    await writeFile(file,JSON.stringify({archive_only:true,snapshot}),{mode:0o600});
+    files.push(file);
+  }
+  if (!files.length) return {status:"no_verified_snapshots"};
+  const command=["-m","scripts.audit_hosted_snapshot","--calendar",join(pages,"calendar.json"),
+    "--config",join(pages,"fund-config.json"),...files];
+  return new Promise((resolve)=>{
+    const python=spawn(process.env.SNAPSHOT_AUDIT_PYTHON??"python",command,{cwd:root,stdio:["ignore","pipe","pipe"]});
+    let stdout="",stderr="";
+    python.stdout.setEncoding("utf8").on("data",(part)=>stdout+=part);
+    python.stderr.setEncoding("utf8").on("data",(part)=>stderr+=part);
+    python.on("error",(error)=>resolve({status:"failed",reason:error.code??"python_start_failed"}));
+    python.on("close",(code)=>{
+      if (code) {
+        // Preserve the failing field or assertion, never supplier values.
+        const reason=stderr.split("\n").findLast((line)=>/^ValueError:/.test(line));
+        resolve({status:"failed",reason:reason?.slice(0,180)??"independent_comparison_failed"});
+        return;
+      }
+      try {resolve({status:"passed",results:JSON.parse(stdout)});}
+      catch {resolve({status:"failed",reason:"invalid_audit_summary"});}
+    });
+  });
+}
 
 async function verifyFallback(type,mode) {
   const context=await browser.newContext({viewport:{width:type==="fund"?390:1440,height:900}});
@@ -295,12 +330,14 @@ try {
       verifyFallback("stock","version"),verifyFallback("fund","version"),
     ]));
   }
+  independentAudit=await verifyIndependentAudit();
   const summary={...report(),detail_upstream_requests:after};
   await mkdir(resolve(output,".."),{recursive:true});
   await writeFile(output,JSON.stringify(summary,null,2));
   console.log(JSON.stringify(summary));
   assert.equal(after,0,"detail reads must not request vendors");
   assert.ok(results.every(({browser_mcp_identical})=>browser_mcp_identical),"one or more instruments did not pass");
+  assert.equal(independentAudit.status,"passed",independentAudit.reason);
 } finally {
   if (browser) await browser.close();
   await mf.dispose();

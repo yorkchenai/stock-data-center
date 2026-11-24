@@ -16,7 +16,7 @@ mkdir -p work
 python -m stock_analysis.fund_charts 110022 --output work/fund-110022-charts.json
 ```
 
-`schema_version: 1` 的图表包含 `fund`、`analysis` 和 `indices`。本地接口 `GET /api/funds/<code>/sectors` 和 `GET /api/funds/<code>/sectors/<index>` 分别返回关联结果和所选指数历史。导入时检查基金代码、关联日期、指数代码、交易日期和行情字段。带成交量的授权指数文件须明确 `volume_unit`，并在 `source.volume_unit_evidence` 提供可核查的 HTTPS 来源。静态页面通过文件导入，不会请求第三方行情。在线自动加载需要另行取得使用权限及支持跨域的接口。
+`schema_version: 1` 的图表包包含 `fund`、`analysis` 和 `indices`。本地接口 `GET /api/funds/<code>/sectors` 和 `GET /api/funds/<code>/sectors/<index>` 分别返回关联结果和所选指数历史。导入时检查基金代码、关联日期、指数代码、交易日期和行情字段。成交量文件另需满足[成交量字段合同](off-market-funds-volume.md#成交量字段合同)。静态页面通过文件导入，不会请求第三方行情。在线自动加载需要另行取得使用权限及支持跨域的接口。
 
 ## 展示和计算口径
 

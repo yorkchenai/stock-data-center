@@ -6,6 +6,20 @@ const number = new Intl.NumberFormat("zh-CN",{maximumFractionDigits:2});
 const value = (v)=>v==null?"—":number.format(v);
 const showPoint = (date, amount)=>amount==null?{time:date}:{time:date,value:amount};
 
+function seriesSpans(rows, key) {
+  const spans = [];
+  let span = null;
+  for (const row of rows) {
+    if (row[key] == null) {
+      span = null;
+    } else {
+      if (!span) spans.push(span = []);
+      span.push(showPoint(row.date, row[key]));
+    }
+  }
+  return spans;
+}
+
 export function createSectorChart(element, readout, toggles, volumeNote, historyNote) {
   let chart, lines = new Map(), controls = new Map(), plotted = [];
   const checked = new Map([...AVERAGES,...VOLUMES].map((key)=>[key,true]));
@@ -15,6 +29,7 @@ export function createSectorChart(element, readout, toggles, volumeNote, history
     lines.clear();
     controls.clear();
     element.replaceChildren();
+    element.classList.remove("with-volume");
     delete element.dataset.chartMode;
     delete element.dataset.visibleFrom;
     delete element.dataset.visibleTo;
@@ -37,7 +52,7 @@ export function createSectorChart(element, readout, toggles, volumeNote, history
     label.textContent = "—";
     toggle.addEventListener("change",()=>{
       checked.set(key,toggle.checked);
-      lines.get(key)?.applyOptions({visible:toggle.checked});
+      for (const line of lines.get(key) ?? []) line.applyOptions({visible:toggle.checked});
     });
     item.append(toggle,text,label);
     group.append(item);
@@ -80,25 +95,23 @@ export function createSectorChart(element, readout, toggles, volumeNote, history
       // Separate spans for genuinely missing sessions, even if the chart library joins whitespace.
       const baseline = chart.addSeries(LC.LineSeries,{visible:false});
       baseline.setData(rows.map(({date})=>({time:date})));
-      let span = [];
-      function addSpan() {
-        if (!span.length) return;
+      for (const span of seriesSpans(rows,"close")) {
         chart.addSeries(LC.LineSeries,{...options,color:"#087e75",lineWidth:2,pointMarkersVisible:span.length===1}).setData(span);
-        span = [];
       }
-      for (const row of rows) {
-        if (row.close==null) addSpan();
-        else span.push(showPoint(row.date,row.close));
-      }
-      addSpan();
     }
     for (const key of AVERAGES) {
       const line = chart.addSeries(LC.LineSeries,{...options,visible:checked.get(key),color:COLORS[key],lineWidth:1});
       line.setData(rows.map((row)=>showPoint(row.date,row[key])));
-      lines.set(key,line);
+      lines.set(key,[line]);
       button(key,null,toggles[0]);
     }
     if (volume) {
+      const evidence=document.createElement("a");
+      evidence.href=history.source.volume_unit_evidence;
+      evidence.target="_blank";
+      evidence.rel="noopener noreferrer";
+      evidence.textContent="单位与来源";
+      volumeNote.replaceChildren("指数样本证券汇总 · ",evidence);
       const pane = chart.addPane();
       chart.panes()[0].setStretchFactor(7);
       pane.setStretchFactor(3);
@@ -107,12 +120,15 @@ export function createSectorChart(element, readout, toggles, volumeNote, history
       bars.setData(rows.map((row)=>row.volume==null?{time:row.date}:{
         time:row.date,value:row.volume,color:row.open==null?"#8296a5":row.close>=row.open?UP:DOWN,
       }));
-      lines.set("volume",bars);
+      lines.set("volume",[bars]);
       button("volume",history.volume_unit,toggles[1]);
       for (const key of VOLUMES.slice(1)) {
-        const line = pane.addSeries(LC.LineSeries,{...options,visible:checked.get(key),color:COLORS[key],lineWidth:1,priceFormat:format});
-        line.setData(rows.map((row)=>showPoint(row.date,row[key])));
-        lines.set(key,line);
+        lines.set(key,seriesSpans(rows,key).map((span)=>{
+          const line=pane.addSeries(LC.LineSeries,{...options,visible:checked.get(key),color:COLORS[key],lineWidth:1,
+            priceFormat:format,pointMarkersVisible:span.length===1});
+          line.setData(span);
+          return line;
+        }));
         button(key,null,toggles[1]);
       }
     }

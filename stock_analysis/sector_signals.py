@@ -34,6 +34,7 @@ def technical_series(history, sessions, volume_unit=None):
             directional = directional_indicators(block)
             frame.loc[directional.index,directional.columns] = directional
     if volume_unit is not None and "volume" in frame:
+        frame["volume"] = frame.volume.where(close_present & np.isfinite(frame.volume) & frame.volume.ge(0))
         for period in (5,10):
             frame[f"VOL{period}"] = frame.volume.rolling(period).mean()
     return frame

@@ -11,6 +11,23 @@ const chartCanvas="#sector-chart canvas";
 const codes=["110022","006751","003095"];
 const report={mode:"live fund and CSI public research sources",funds:{},closeOnly:null};
 let white;
+
+async function issuerVolumeLabels() {
+  const url="https://www.csindex.com.cn/#/indices/family/detail?indexCode=399997";
+  const page=await browser.newPage();
+  try {
+    const response=await page.goto(url,{waitUntil:"domcontentloaded",timeout:20_000});
+    if (!response?.ok()) return {url,status:`HTTP ${response?.status()??"unknown"}`};
+    await page.getByText(/中证白酒/).first().waitFor({timeout:15_000});
+    const text=await page.locator("body").innerText({timeout:5_000});
+    const labels=text.split("\n").map((line)=>line.trim()).filter((line)=>/成交量|亿股|万手|亿手|万股/.test(line));
+    return {url,status:"detail_loaded",labels:[...new Set(labels)].slice(0,8).map((line)=>line.slice(0,90))};
+  } catch (error) {
+    return {url,status:error.name};
+  } finally {
+    await page.close();
+  }
+}
 async function lookup(path) {
   const response=await fetch(new URL("/api/funds/"+path,origin),{signal:AbortSignal.timeout(300000)});
   assert.equal(response.status,200,await response.clone().text().then((body)=>body.slice(0,200)));
@@ -68,6 +85,9 @@ try {
     const chartMode=await page.locator("#sector-chart").getAttribute("data-chart-mode");
     if (code==="110022") assert.equal(chartMode,"candles");
     assert.equal(price.volume_unit,null);
+    assert.equal(price.quality.volume_status,"unit_unverified");
+    assert.ok(price.quality.volume_coverage?.last);
+    assert.equal(await page.locator("#sector-vol label").count(),0);
     assert.match(await page.locator("#sector-volume-note").textContent(),/暂不可用/);
     assert.match(await page.locator("#sector-metrics").textContent(),/60\/120 日/);
     if (code==="110022") assert.match(await page.locator("#sector-evidence").textContent(),/直接支持/);
@@ -127,7 +147,7 @@ try {
     report.funds[code]={selected:index.code,quality:price.quality,first:price.first,last:price.last,
       nav:{date:rawNav[1],unit_nav:Number(rawNav[2]),adjusted_readout:incoming},
       mode:chartMode,ohlc:(({date,open,high,low,close})=>({date,open,high,low,close}))(price.rows.at(-1)),
-      ma,volume_unit:price.volume_unit,ranked:model.sectors.map((item)=>({
+      ma,volume_unit:price.volume_unit,volume_status:price.quality.volume_status,ranked:model.sectors.map((item)=>({
         code:item.code,quality:item.quality,rank:item.rank,beta:item.beta,stability:item.stability,
         holdings:item.holdings.status,pearson60:item.windows[60].pearson,pearson120:item.windows[120].pearson,
         partial60:item.windows[60].partial,partial120:item.windows[120].partial,
@@ -191,6 +211,7 @@ try {
     await page.close();
   }
   assert.ok(report.closeOnly,"a real close-only index must exercise the downgrade");
+  report.issuerVolumeLabels=await issuerVolumeLabels();
 } finally {
   await writeFile(`${output}/observations.json`,JSON.stringify(report,null,2));
   await browser.close();

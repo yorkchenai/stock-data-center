@@ -71,7 +71,8 @@ function fixtureBundle() {
   },indices:sectors.map(({code,name},i)=>({
     schema_version:1,kind:"fund_sector_history",fund_code:first.code,code,name,
     model_as_of:end,first:first.rows[0].date,last:end,currency:"CNY",basis:"price",volume_unit:i?null:"股",
-    source:{url:"https://example.test/fixture",name:"合成测试",volume_unit_evidence:i?null:"https://example.test/unit"},
+    source:{url:"https://example.test/fixture",name:"合成测试",volume_unit_evidence:i?null:"https://example.test/unit",
+      volume:i?null:{raw_unit:"股",raw_field:"volume",conversion_factor:1,scope:"index_constituents",permission:"authorized_local_use"}},
     quality:{internal_gaps:0},rows:first.rows.map((row)=>({date:row.date,close:row.unit_nav*100,
       open:i?null:row.unit_nav*99,high:i?null:row.unit_nav*102,low:i?null:row.unit_nav*98,
       MA5:row.unit_nav*100,MA10:row.unit_nav*100,MA20:row.unit_nav*100,MA60:row.unit_nav*100,
@@ -172,12 +173,27 @@ try {
     assert.equal(await page.locator("#sector-vol label").count(),3);
     assert.match(await page.locator("#sector-vol").innerText(),/股/);
     assert.equal(await page.locator('#sector-chart table tr').count()>=3,true);
+    assert.match(await page.locator('#sector-volume-note').innerText(),/指数样本证券汇总/);
+    if (!mobile) {
+      await page.locator("#sector-chart").scrollIntoViewIfNeeded();
+      const plot=await page.locator("#sector-chart").boundingBox();
+      const x=plot.x+plot.width*.52;
+      await page.mouse.move(x,plot.y+plot.height*.30);
+      const previous=await page.locator("#sector-ohlc").innerText();
+      assert.match(previous,/^\d{4}-\d{2}-\d{2}/);
+      assert.notEqual(previous.slice(0,10),first.rows.at(-1).date);
+      await page.mouse.move(x,plot.y+plot.height*.78);
+      assert.equal(await page.locator("#sector-ohlc").innerText(),previous);
+      assert.equal(await page.locator('[data-readout="volume"]').innerText(),"100");
+    }
     await page.locator("[data-indicator='VOL10']").uncheck();
     assert.equal(await page.locator("[data-indicator='VOL10']").isChecked(),false);
     await page.locator("#nav-raw").click();
     assert.match(await page.locator("#nav-basis").innerText(),/原始单位净值/);
     await page.locator("[data-index='932139']").click();
     await page.locator('#sector-chart[data-chart-mode="close"]').waitFor();
+    assert.equal(await page.locator("#sector-vol label").count(),0);
+    assert.equal(await page.locator("#sector-chart.with-volume").count(),0);
     assert.match(await page.locator("#sector-evidence").innerText(),/持仓资料存在冲突/);
     assert.match(await page.locator("#sector-volume-note").innerText(),/暂不可用/);
     await page.getByRole("link",{name:"返回基金列表"}).click();

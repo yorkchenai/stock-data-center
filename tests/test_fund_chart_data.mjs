@@ -21,6 +21,9 @@ const history={
   source:{name:"测试指数源",url:"https://example.test/prices"},
   rows:dates.map((date,i)=>({date,close:110+i,volume:800,VOL5:720,VOL10:690,MA5:105+i})),
 };
+const evidence={...history.source, volume_unit_evidence:"https://example.test/unit", volume:{
+  raw_unit:"股",raw_field:"tradingVol",conversion_factor:.01,scope:"index_constituents",permission:"authorized_local_use",
+}};
 const pack={schema_version:1,kind:"fund_chart_bundle",fund,indices:[history],analysis:{
   schema_version:1,kind:"fund_sector_analysis",fund_code:fund.code,fund_as_of:dates.at(-1),model_as_of:dates.at(-1),
   computed_at:"2024-01-06T00:00:00Z",sectors:[entry],
@@ -47,11 +50,34 @@ test("capability disables unverified volume and shows raw close without invented
   assert.equal(out.rows[0].volume,null);
   assert.equal(out.rows[0].open,null);
   assert.deepEqual(indexCapabilities(out.rows,out.volume_unit),{candles:false,volume:false});
-  const withUnit={...history,source:{...history.source,volume_unit_evidence:"https://example.test/unit"},
+  const withUnit={...history,source:evidence,
     rows:history.rows.map((row)=>({...row,open:109,high:114,low:107}))};
   const audited=normalizeIndex(withUnit,fund.code,entry,history.model_as_of);
   assert.equal(audited.volume_unit,"手");
   assert.deepEqual(indexCapabilities(audited.rows,audited.volume_unit),{candles:true,volume:true});
+});
+test("volume rejects unknown units, a wrong factor, wrong purpose or ambiguous evidence",()=>{
+  for (const changes of [{raw_unit:"斤"},{raw_unit:"份"},{conversion_factor:1},{scope:"ETF"},
+    {raw_field:"tradingValue"},{permission:"license_unverified"}]) {
+    const raw={...history,source:{...evidence,volume:{...evidence.volume,...changes}}};
+    const output=normalizeIndex(raw,fund.code,entry,history.model_as_of);
+    assert.equal(output.volume_unit,null);
+    assert.equal(output.rows[0].close,110);
+  }
+  const raw={...history,source:{...evidence,volume_unit_evidence:"http://example.test/unit"}};
+  assert.equal(normalizeIndex(raw,fund.code,entry,history.model_as_of).volume_unit,null);
+});
+test("precomputed volume warmup restarts across missing or invalid rows without hiding candles",()=>{
+  const sessions=["2024-01-02","2024-01-03","2024-01-04","2024-01-05","2024-01-08","2024-01-09",
+    "2024-01-10","2024-01-11","2024-01-12","2024-01-15","2024-01-16","2024-01-17"];
+  const last=sessions.at(-1);
+  const raw={...history,source:evidence,last,rows:sessions.map((date,i)=>({date,open:109,high:118,low:107,close:110,
+    volume:i===0?0:i===10?-1:800,VOL5:720,VOL10:690}))};
+  const out=normalizeIndex(raw,fund.code,{...entry,index_as_of:last},history.model_as_of);
+  assert.deepEqual(out.rows.map((row)=>row.volume),[0,...Array(9).fill(800),null,800]);
+  assert.deepEqual(out.rows.map((row)=>row.VOL5),[...Array(4).fill(null),...Array(6).fill(720),null,null]);
+  assert.deepEqual(out.rows.map((row)=>row.VOL10),[...Array(9).fill(null),690,null,null]);
+  assert.equal(indexCapabilities(out.rows,out.volume_unit).candles,true);
 });
 test("partial or inverted OHLC cannot be accepted as a candle",()=>{
   const bad={...history,rows:[{...history.rows[0],open:100,high:90,low:80},...history.rows.slice(1)]};

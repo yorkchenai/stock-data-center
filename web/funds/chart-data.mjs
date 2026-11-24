@@ -9,6 +9,8 @@ const INDEX_CODE = /^[0-9A-Z]{6}$/;
 const QUALITY = new Set(["strong", "moderate"]);
 const EVIDENCE = new Set(["direct_support", "unverified", "conflict", "insufficient"]);
 const VOLUME_UNITS = new Set(["股", "手", "份"]);
+const VOLUME_SCALES = new Map([["股",1],["手",100],["万股",10000],["万手",1000000],["亿股",100000000],
+  ["份",1],["万份",10000]]);
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 const bounded = (value, low, high) => finite(value) && low <= value && value <= high;
 export const dayAge = (day) => day ? Math.max(0, (Date.parse(shanghaiToday()) - Date.parse(day)) / 86400000) : null;
@@ -43,6 +45,17 @@ function sourceLink(value) {
   if (typeof value !== "string" || !URL.canParse(value)) return null;
   const link = new URL(value);
   return link.protocol === "https:" && !link.username && !link.password ? link.href : null;
+}
+
+function documentedVolume(raw) {
+  const unit = raw.volume_unit;
+  const source = raw.source.volume;
+  if (!VOLUME_UNITS.has(unit) || !sourceLink(raw.source.volume_unit_evidence) || !source
+      || source.scope !== "index_constituents" || source.permission !== "authorized_local_use"
+      || !["tradingVol", "volume", "vol"].includes(source.raw_field)) return null;
+  const rawScale = VOLUME_SCALES.get(source.raw_unit);
+  const sameDimension = (unit === "份") === ["份", "万份"].includes(source.raw_unit);
+  return rawScale && sameDimension && source.conversion_factor === rawScale / VOLUME_SCALES.get(unit) ? unit : null;
 }
 
 export function normalizeAssociations(raw, fundCode) {
@@ -93,8 +106,9 @@ export function normalizeIndex(raw, fundCode, entry, modelDay) {
       || !Array.isArray(raw.rows) || !raw.rows.length || raw.rows.length > 5000) {
     throw new Error("指数数据与当前基金、板块或模型日期不一致。");
   }
-  const hasVolume = VOLUME_UNITS.has(raw.volume_unit) && Boolean(sourceLink(raw.source.volume_unit_evidence));
+  const volumeUnit = documentedVolume(raw);
   let prior = "";
+  let validVolumeDays = 0;
   const data = raw.rows.map((row) => {
     const date = validDate(row.date);
     if (date <= prior || date > shanghaiToday()) throw new Error("指数行情日期重复、乱序或越界。");
@@ -109,16 +123,16 @@ export function normalizeIndex(raw, fundCode, entry, modelDay) {
         || values.low > Math.min(values.open, values.close) || values.high < Math.max(values.open, values.close))) {
       throw new Error("指数开高低收不符合校验条件。");
     }
-    for (const key of VOLUMES) {
-      if (hasVolume && row[key] != null && (!finite(row[key]) || row[key] < 0)) throw new Error("指数成交量数值无效。");
-      values[key] = hasVolume ? (row[key] ?? null) : null;
-    }
+    values.volume = volumeUnit && values.close !== null && finite(row.volume) && row.volume >= 0 ? row.volume : null;
+    validVolumeDays = values.volume === null ? 0 : validVolumeDays + 1;
+    values.VOL5 = validVolumeDays >= 5 && finite(row.VOL5) && row.VOL5 >= 0 ? row.VOL5 : null;
+    values.VOL10 = validVolumeDays >= 10 && finite(row.VOL10) && row.VOL10 >= 0 ? row.VOL10 : null;
     return values;
   });
   const observed = data.filter((row)=>row.close !== null);
   if (!observed.length || observed[0].date !== raw.first || observed.at(-1).date !== raw.last
       || raw.last !== entry.index_as_of) throw new Error("指数实际走势与覆盖日期不一致。");
-  return {...raw, rows:data, volume_unit:hasVolume ? raw.volume_unit : null, source:{...raw.source,url:sourceLink(raw.source.url)}};
+  return {...raw, rows:data, volume_unit:volumeUnit, source:{...raw.source,url:sourceLink(raw.source.url)}};
 }
 
 export function normalizeChartFile(raw) {

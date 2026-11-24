@@ -9,7 +9,7 @@ from time import monotonic
 import pandas as pd
 
 from . import funds
-from .sector_data import ROOT, collect_indices, read_catalog, session_index
+from .sector_data import ROOT, checked_volume_source, collect_indices, read_catalog, session_index
 from .sector_holdings import holdings_evidence
 from .sector_model import alignment, rank_associations
 from .sector_signals import finite_or_none, technical_series
@@ -114,11 +114,17 @@ def index_payload(fund_code, entry, frame, coverage, as_of):
     for field in ("open", "high", "low"):
         if field not in frame:
             frame = frame.assign(**{field: float("nan")})
-    # Keep blank sessions in the dataset so line series do not bridge known gaps.
-    adjusted = technical_series(frame, sessions, volume_unit=coverage.get("volume_unit"))
-    volume_unit = coverage.get("volume_unit")
-    if volume_unit and not coverage.get("volume_unit_evidence"):
-        raise ValueError("成交量单位缺少可核实证据。")
+    volume_source = checked_volume_source(coverage)
+    volume_unit = coverage["volume_unit"] if volume_source and "volume" in frame else None
+    if volume_unit:
+        frame = frame.assign(volume=frame.volume.mul(volume_source["conversion_factor"]))
+    # Keep blank sessions so rolling windows and charts do not bridge known gaps.
+    adjusted = technical_series(frame, sessions, volume_unit=volume_unit)
+    if volume_unit and adjusted.volume.isna().all():
+        volume_unit = None
+    volume_status = ("available" if volume_unit else "invalid_provenance" if coverage.get("volume_unit") and not volume_source
+                     else "unit_unverified" if "volume" in frame and frame.volume.notna().any() and not volume_source
+                     else "missing")
     fields = PRICE_FIELDS + (VOLUME_FIELDS if volume_unit else ())
     bars = [{"date": day.date().isoformat(), **{field: finite_or_none(row[field]) for field in fields}}
             for day, row in adjusted.iterrows()]
@@ -128,8 +134,10 @@ def index_payload(fund_code, entry, frame, coverage, as_of):
         "basis": "price", "currency": "CNY", "volume_unit": volume_unit,
         "source": {"name": "中证指数有限公司", "url": coverage.get("definition") or coverage["source_url"],
                    "api_url": coverage["source_url"], "permission": coverage["permission"],
-                   "volume_unit_evidence": coverage.get("volume_unit_evidence")},
-        "quality": {key: coverage[key] for key in ("count", "internal_gaps", "ohlc_rows")},
+                   "volume_unit_evidence": coverage["volume_unit_evidence"] if volume_unit else None,
+                   "volume": volume_source if volume_unit else None},
+        "quality": {**{key: coverage[key] for key in ("count", "internal_gaps", "ohlc_rows")},
+                    "volume_status": volume_status, "volume_coverage": coverage.get("volume_coverage")},
         "rows": bars,
     }
 

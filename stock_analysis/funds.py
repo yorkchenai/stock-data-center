@@ -248,7 +248,8 @@ def benchmark_metadata(code, as_of):
         verified = identify(code, [], as_of)
         active = verified["effective_regime"]
         if active and active["verification"] == "official_verified":
-            disclosure = {field: active[field] for field in ("formula", "effective_from", "source_url")}
+            disclosure = {"formula": active["formula"], "effective_from": active["effective_from"],
+                          "source_url": active.get("display_source_url", active["source_url"])}
         benchmark = benchmark or verified["benchmark"]
     return {"benchmark": benchmark, "benchmark_disclosure": disclosure}
 

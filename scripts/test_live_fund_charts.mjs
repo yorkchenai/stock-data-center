@@ -13,7 +13,7 @@ const report={mode:"live fund data, CSI rankings and stock-engine charts",funds:
 const disclosures={
   "110022":["暂未核实",null],
   "006751":["中证互联网指数收益率×65%＋恒生科技指数收益率×20%＋中债-国债总财富（1-3年）指数收益率×15%（2026-07-27起）",
-    "https://paper.cnstock.com/html/2026-06/27/content_2236123.htm"],
+    "https://www.fullgoal.com.cn/noticedetails/107041/index.html"],
   "003095":["中证医药卫生指数收益率×90%＋中证综合债指数收益率×10%（2026-09-21起）",
     "https://www.zofund.com/2026/wsnotice/20261027/ebc7404b0b5b47b8a35e82b4fc5607f6.pdf"],
 };

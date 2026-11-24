@@ -75,6 +75,7 @@
           "verification": "official_verified",
           "formula": "中证互联网指数收益率×65%＋恒生科技指数收益率×20%＋中债-国债总财富（1-3年）指数收益率×15%",
           "source_url": "https://paper.cnstock.com/html/2026-06/27/content_2236123.htm",
+        "display_source_url": "https://www.fullgoal.com.cn/noticedetails/107041/index.html",
           "announced_on": "2026-06-27",
           "change_confirmed": true,
           "method": "daily_weighted",

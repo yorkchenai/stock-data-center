@@ -2,7 +2,10 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from urllib.parse import urlsplit
 import argparse
+import hashlib
+import html
 import json
 import os
 
@@ -14,7 +17,25 @@ from . import funds
 from .sector_data import read_catalog
 
 
-def build_pages(destination, calendar_end=None, fund_index_snapshot=None):
+def analysis_model_version(inputs):
+    paths = [ROOT / "web/engine.mjs", ROOT / "web/providers.mjs"]
+    paths += [ROOT / "web/funds" / f"{name}.mjs" for name in (
+        "benchmark", "chart-data", "data", "nav-source", "performance", "risk-free",
+        "sector-browser", "sector-model",
+    )]
+    paths += sorted((ROOT / "worker/snapshots").glob("*.mjs"))
+    digest = hashlib.sha256()
+    for path in paths:
+        if path.is_file():
+            digest.update(path.relative_to(ROOT).as_posix().encode())
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    digest.update(json.dumps(inputs, sort_keys=True, ensure_ascii=False, allow_nan=False).encode())
+    return "analysis-v1-" + digest.hexdigest()[:20]
+
+
+def build_pages(destination, calendar_end=None, fund_index_snapshot=None, snapshot_service=None):
     now = datetime.now(ZoneInfo("UTC"))
     # Calendar has an explicit validity window; it is never extrapolated in JS.
     end = calendar_end or min(now.date() + timedelta(days=31), now.date().replace(month=12, day=31)).isoformat()
@@ -23,10 +44,14 @@ def build_pages(destination, calendar_end=None, fund_index_snapshot=None):
     dataset = load_demo()
     dataset.update(snapshot=True, generated_at_utc=now.isoformat())
     output = export_demo(destination, dataset)
-    page = output / "index.html"
-    page.write_text(page.read_text(encoding="utf-8").replace('<html lang="zh-CN">', '<html lang="zh-CN" data-mode="pages">'), encoding="utf-8")
-    fund_page = output / "funds.html"
-    fund_page.write_text(fund_page.read_text(encoding="utf-8").replace('<html lang="zh-CN">', '<html lang="zh-CN" data-mode="pages">'), encoding="utf-8")
+    service_attribute = ""
+    if snapshot_service:
+        service = urlsplit(snapshot_service)
+        local = service.scheme == "http" and service.hostname in ("localhost", "127.0.0.1")
+        if ((service.scheme != "https" and not local) or not service.hostname or service.username
+                or service.password or service.path not in ("", "/") or service.query or service.fragment):
+            raise ValueError("快照服务必须是 HTTPS 来源，本地验收可使用回环 HTTP。")
+        service_attribute = f' data-analysis-origin="{html.escape(snapshot_service, quote=True)}"'
     payload = {
         "schema_version": 1, "start": start, "end": end,
         "calendar": "exchange_calendars:XSHG", "version": xcals.__version__,
@@ -43,6 +68,7 @@ def build_pages(destination, calendar_end=None, fund_index_snapshot=None):
                              for code in sorted(funds.official_benchmarks().keys() | reviewed_disclosures().keys())},
               "indices": read_catalog(),
               "holdings": json.loads((ROOT / "research/sector_holdings_evidence.json").read_text(encoding="utf-8"))}
+    snapshot = None
     if fund_index_snapshot:
         config["index_snapshot"] = "fund-index-snapshot.json"
         snapshot = json.loads(Path(fund_index_snapshot).read_text(encoding="utf-8"))
@@ -52,10 +78,20 @@ def build_pages(destination, calendar_end=None, fund_index_snapshot=None):
             raise ValueError("基金静态行情只接收已登记且股票接口未映射的特殊指数。")
         (output / config["index_snapshot"]).write_text(json.dumps(snapshot, ensure_ascii=False, allow_nan=False), encoding="utf-8")
     (output / "fund-config.json").write_text(json.dumps(config, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+    model_version = analysis_model_version({
+        "calendar": {key: value for key, value in payload.items() if key != "generated_at_utc"},
+        "fund_config": config, "special_indices": snapshot,
+    })
+    attributes = f'data-mode="pages" data-analysis-model="{model_version}"{service_attribute}'
+    for filename in ("index.html", "funds.html"):
+        page = output / filename
+        page.write_text(page.read_text(encoding="utf-8").replace(
+            '<html lang="zh-CN">', f'<html lang="zh-CN" {attributes}>'), encoding="utf-8")
     (output / "build-info.json").write_text(json.dumps({
         "schema_version": 1, "commit_sha": os.getenv("GITHUB_SHA", "local-unversioned"),
         "generated_at_utc": now.isoformat(), "calendar_end": end,
         "snapshot_last_date": dataset["rows"][-1]["date"],
+        "analysis_model_version": model_version,
     }, ensure_ascii=False, allow_nan=False), encoding="utf-8")
     (output / ".nojekyll").touch()
     return output
@@ -65,8 +101,10 @@ def main():
     parser = argparse.ArgumentParser(description="Build the GitHub Pages site")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--fund-index-snapshot", type=Path)
+    parser.add_argument("--snapshot-service")
     args = parser.parse_args()
-    print(build_pages(args.output, fund_index_snapshot=args.fund_index_snapshot))
+    print(build_pages(args.output, fund_index_snapshot=args.fund_index_snapshot,
+                      snapshot_service=args.snapshot_service))
 
 
 if __name__ == "__main__":

@@ -91,10 +91,10 @@ function snapshotIndex(snapshot,item,sessions,end) {
   return {rows,source:{name:record.source.name,url:url.href,retrieved_at:record.retrieved_at},volume:false,transport:"static"};
 }
 
-async function fetchSpecial(item,sessions,end,signal) {
+async function fetchSpecial(item,sessions,end,signal,readText) {
   const url=new URL(CSI_URL);
   url.search=new URLSearchParams({indexCode:item.code,startDate:HISTORY_START.replaceAll("-",""),endDate:end.replaceAll("-","")});
-  const data=JSON.parse(await readFundText(url,{signal}));
+  const data=JSON.parse(await readText(url,{signal}));
   return {rows:csiRows(data.data,item,sessions,end),
     source:{name:"中证指数有限公司",url:item.definition,api_url:url.href},volume:false,transport:"browser-cors"};
 }
@@ -164,13 +164,15 @@ export function sectorAnalysisPayload(fund,histories,config,bounds,computed=new 
       missing:Object.keys(indices).filter((index)=>!used.has(index)),
       price_sources:[...new Set([...used].map((index)=>histories[index].source.name))]},
     model_age_sessions:sessions.filter((day)=>day>result.as_of).length,
+    profiles:result.profiles,models:result.models,
     sectors:result.ranked.map((item,i)=>({code:item.code,name:indices[item.code].name,rank:i+1,quality:item.quality,
       beta:item.beta,stability:item.positive_fraction,windows:item.windows,index_as_of:histories[item.code].rows.at(-1).date,
       holdings:{status:item.holdings_evidence?"direct_support":"unverified",period_end:evidence.period_end??null,
         source:evidence.source??null,weight_pct_nav:item.holdings_evidence?.known_weight_pct_nav??null}}))};
 }
 
-export function createBrowserSectorProvider(configPromise, stockHistory=fetchHistory, pageData=readPageData) {
+export function createBrowserSectorProvider(configPromise, stockHistory=fetchHistory, pageData=readPageData,
+  {readText=readFundText,timeout=45_000,priorityMarkets=false,reusePending=true}={}) {
   let cached;
   async function collect(config,calendar,bounds) {
     const histories={};
@@ -182,15 +184,15 @@ export function createBrowserSectorProvider(configPromise, stockHistory=fetchHis
       catch {return true;}
     });
     const missingSpecial=new Set(special.map((item)=>item.code));
-    const deadline=AbortSignal.timeout(45_000);
-    const getJSON=async(url)=>JSON.parse(await readFundText(url,{signal:deadline}));
+    const deadline=AbortSignal.timeout(timeout);
+    const getJSON=async(url)=>JSON.parse(await readText(url,{signal:deadline}));
     const collectSpecial=async()=>{
       let direct=true;
       for (const item of special) {
         if (deadline.aborted) break;
         try {
           const data=snapshotIndex(snapshot,item,sessionSet,bounds.end)??(direct?
-            await fetchSpecial(item,sessionSet,bounds.end,deadline):null);
+            await fetchSpecial(item,sessionSet,bounds.end,deadline,readText):null);
           if (data) histories[item.code]=data;
         } catch (error) {
           if (error instanceof TypeError || /HTTP (401|403|429)/.test(error.message)) direct=false;
@@ -199,6 +201,7 @@ export function createBrowserSectorProvider(configPromise, stockHistory=fetchHis
       }
     };
     const queue=items.filter((item)=>!missingSpecial.has(item.code));
+    if (priorityMarkets) queue.sort((left,right)=>Number(right.role==="market")-Number(left.role==="market"));
     const collectStock=async()=>{
       while (queue.length&&!deadline.aborted) {
         const item=queue.shift();
@@ -213,11 +216,19 @@ export function createBrowserSectorProvider(configPromise, stockHistory=fetchHis
     await Promise.all([collectStock(),collectStock(),collectStock(),collectSpecial()]);
     return histories;
   }
-  async function base() {
+  async function base(refresh) {
     const [config,calendar]=await Promise.all([configPromise(),pageData("calendar.json")]);
     const bounds=tradingWindow(calendar);
     const now=Date.now();
-    if (!cached || cached.end!==bounds.end || now-cached.time>5*60_000) {
+    if (!reusePending) {
+      if (refresh || cached?.end!==bounds.end || now-cached.time>5*60_000) {
+        const histories=await collect(config,calendar,bounds);
+        if (Object.keys(histories).length) cached={end:bounds.end,time:now,histories};
+        return {config,bounds,histories};
+      }
+      return {config,bounds,histories:cached.histories};
+    }
+    if (refresh || !cached || cached.end!==bounds.end || now-cached.time>5*60_000) {
       const pending=collect(config,calendar,bounds);
       cached={end:bounds.end,time:now,pending};
       pending.then((items)=>{if (!Object.keys(items).length&&cached?.pending===pending) cached=null;},
@@ -226,11 +237,11 @@ export function createBrowserSectorProvider(configPromise, stockHistory=fetchHis
     return {config,bounds,histories:await cached.pending};
   }
   return {
-    async analyze(fund) {
+    async analyze(fund,{refresh=false}={}) {
       if (!["stock","mixed"].includes(fund.category)||fund.valuation_frequency!=="daily") {
         return {report:sectorAnalysisPayload(fund,{},{},{})};
       }
-      const {config,bounds,histories}=await base();
+      const {config,bounds,histories}=await base(refresh);
       return {report:sectorAnalysisPayload(fund,histories,config,bounds),histories,sessions:bounds.sessions};
     },
     history(fundCode,entry,context) {

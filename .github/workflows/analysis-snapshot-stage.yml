@@ -1,0 +1,48 @@
+name: Analysis snapshot isolation
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/analysis-snapshot-stage.yml'
+      - 'worker/snapshots/**'
+      - 'scripts/test_snapshot_stage.mjs'
+      - 'tests/test_analysis_snapshots.mjs'
+      - 'web/**'
+      - 'stock_analysis/pages.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  workerd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci --ignore-scripts
+      - run: npm install --prefix /tmp/analysis-snapshot-tools --no-save esbuild@0.28.1 miniflare@4.20260730.0
+      - run: python -m stock_analysis.pages --output work/snapshot-stage-pages --snapshot-service http://127.0.0.1:8787
+      - run: node --test tests/test_analysis_snapshots.mjs
+      - name: Verify fixed test data, D1 persistence and landscape browser wiring
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          SNAPSHOT_TEST_REPORT=work/snapshot-fixture-summary.json node scripts/test_snapshot_stage.mjs --fixture
+      - name: Verify real market data through the isolated Worker
+        if: always()
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          node scripts/test_snapshot_stage.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: analysis-snapshot-summary
+          path: |
+            work/snapshot-stage-summary.json
+            work/snapshot-fixture-summary.json
+          if-no-files-found: warn

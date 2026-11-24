@@ -6,6 +6,7 @@ import { createNavChart } from "./nav-chart.mjs";
 import { createSectorPanel } from "./sector-panel.mjs";
 import { fetchFund, fetchFundDirectory, readPageData } from "./providers.mjs";
 import { createBrowserSectorProvider } from "./sector-browser.mjs";
+import { browserModelVersion, getPageSnapshot, getSnapshotIndex, snapshotNote, snapshotsEnabled } from "../snapshot-client.mjs";
 
 const $ = (id) => document.getElementById(id);
 function tag(name, text, attrs = {}) {
@@ -28,6 +29,7 @@ const key = "stock-data-center.off-market-funds.v1";
 const loaded = new Map();
 const catalog = new Map();
 const beingLoaded = new Map();
+const sharedSnapshots = new Map();
 const columns = [
   ["name","基金名称 / 代码"],["type","基金类型"],["nav","最新单位净值"],["date","净值日期"],...PERIODS,
   ["source","来源"],["actions","操作"],
@@ -112,18 +114,32 @@ async function readApi(path) {
   if (!response.ok) throw new Error(data.error ?? "基金接口暂不可用。");
   return data;
 }
-function loadFund(code) {
-  if (!beingLoaded.has(code)) {
-    const pending=online?fetchPageConfig().then((config)=>fetchFund(code,config)):readApi("/" + code);
-    beingLoaded.set(code,pending.then((raw)=>{
+async function loadOnlineFund(code, snapshotId) {
+  if (snapshotsEnabled) {
+    try {
+      const snapshot=await getPageSnapshot({asset_type:"fund",symbol:code},snapshotId);
+      return {raw:snapshot.data.fund,snapshot};
+    } catch (error) {
+      if (snapshotId) throw error;
+    }
+  } else if (snapshotId) throw new Error("此页面未配置该共享快照服务。");
+  return {raw:await fetchFund(code,await fetchPageConfig()),snapshot:null};
+}
+function loadFund(code,snapshotId=null) {
+  const key=snapshotId??code;
+  if (!beingLoaded.has(key)) {
+    const pending=online?loadOnlineFund(code,snapshotId):readApi("/" + code).then((raw)=>({raw}));
+    beingLoaded.set(key,pending.then(({raw,snapshot})=>{
       const fund = normalizeFund(raw);
       if (fund.code !== code) throw new Error("查询结果的基金代码不一致。");
+      if (snapshot) sharedSnapshots.set(code,snapshot);
+      else sharedSnapshots.delete(code);
       recordFund(fund);
       save();
       return fund;
-    }).finally(()=>beingLoaded.delete(code)));
+    }).finally(()=>beingLoaded.delete(key)));
   }
-  return beingLoaded.get(code);
+  return beingLoaded.get(key);
 }
 async function loadListFund(code) {
   status("list-status",`正在载入 ${code} 的确认净值…`);
@@ -295,7 +311,10 @@ function renderIdentity(code,fund) {
   const latest = fund?.rows.at(-1);
   $("fund-nav").textContent = shown(latest?.unit_nav,nav);
   $("fund-nav-date").textContent = latest?.date ?? "—";
-  $("fund-source").textContent = "来源 " + (fund?.source.name ?? "—");
+  const shared = fund && sharedSnapshots.get(code);
+  const origin = shared ? snapshotNote(shared) : online && fund ?
+    `网页独立数据 · 截至 ${latest.date} · ${browserModelVersion}` : "";
+  $("fund-source").textContent = "来源 " + (fund?.source.name ?? "—") + (origin?" · "+origin:"");
   $("fund-freshness").textContent = "状态 " + (fund ? fundFreshness(fund) : "未载入");
   const benchmark = fund?.benchmark_disclosure ?? fund?.benchmark;
   const formula = benchmark?.formula || benchmark?.name || "暂未核实";
@@ -348,7 +367,12 @@ function renderAnalysis(requestedStart, requestedEnd) {
   }
   navRange=[chartStart,chartEnd];
   renderNav(fund,...navRange);
-  const analysis = analyzePerformance(fund,range);
+  const shared=sharedSnapshots.get(selectedCode);
+  const precomputed=!requestedStart && !requestedEnd && shared?.data.risk?.windows[rangeKey];
+  const canCompute=!shared || shared.model_version===browserModelVersion;
+  const analysis=precomputed || analyzePerformance(fund,canCompute?range:{
+    error:"当前页面的模型版本与快照不同，自定义统计不可用。",rows:[],
+  });
   const interval = range.start ? `${range.start} 至 ${range.end}` : "—";
   $("range-status").textContent = range.error ?? `统计范围 ${interval} · 已载入净值 ${fund.rows[0].date} 至 ${latest}`;
   $("core-metrics").replaceChildren(...coreDefinitions.map(([id,label,format,description])=>{
@@ -419,7 +443,9 @@ function navigateLink(event) {
 }
 async function route() {
   const version = ++routeNumber;
-  const code = new URL(location.href).searchParams.get("fund");
+  const params = new URL(location.href).searchParams;
+  const code = params.get("fund");
+  const pinned=params.get("snapshot_id");
   selectedCode = FUND_CODE.test(code ?? "") ? code : null;
   $("fund-list").hidden = Boolean(selectedCode);
   $("fund-detail").hidden = !selectedCode;
@@ -432,6 +458,11 @@ async function route() {
     return;
   }
   const current = selectedCode;
+  const shared=sharedSnapshots.get(current);
+  if ((pinned && pinned!==shared?.snapshot_id) || (shared && Date.parse(shared.expires_at)<=Date.now())) {
+    sharedSnapshots.delete(current);
+    loaded.delete(current);
+  }
   rangeKey = "1y";
   historyLimit = 60;
   syncButtons();
@@ -439,12 +470,16 @@ async function route() {
   renderAnalysis();
   status("detail-status",loaded.has(current) ? "" : noData);
   window.scrollTo(0,0);
-  const startSectors=(fund)=>sectors.start(current,{local,bundle:bundles.get(current),browser:browserSectors,fund});
+  const startSectors=(fund)=>{
+    const snapshot=sharedSnapshots.get(current);
+    return sectors.start(current,{local,bundle:snapshot?null:bundles.get(current),
+      browser:browserSectors,fund,snapshot,loadSnapshotIndex:getSnapshotIndex});
+  };
   if (loaded.has(current) || (!local && !online)) void startSectors(loaded.get(current));
   if ((local || online) && !loaded.has(current)) {
     status("detail-status",`正在载入 ${current} 的确认净值…`);
     try {
-      const fund = await loadFund(current);
+      const fund = await loadFund(current,pinned);
       if (version!==routeNumber) return;
       if (online) addFund(catalog.get(current));
       status("detail-status","");
@@ -469,6 +504,7 @@ async function importFiles(event) {
       if (raw.kind!=="fund_chart_bundle" && file.size>MAX_FILE_BYTES) throw new Error("净值文件超出 4 MB。");
       const {fund:dataset,bundle}=normalizeChartFile(raw);
       if (mode==="detail-status" && dataset.code!==selectedCode) throw new Error("文件基金代码与当前详情不一致。");
+      sharedSnapshots.delete(dataset.code);
       recordFund(dataset);
       if (bundle) bundles.set(dataset.code,bundle);
       else bundles.delete(dataset.code);

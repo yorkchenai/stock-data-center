@@ -1,5 +1,6 @@
 import { COLORS, PANELS, dateKey, formatValue, seriesData } from "./data.mjs";
 import { fetchHistory } from "./providers.mjs";
+import { browserModelVersion, getPageSnapshot, snapshotNote, snapshotsEnabled } from "./snapshot-client.mjs";
 
 const isPages = document.documentElement?.dataset?.mode === "pages";
 let calendarPromise;
@@ -357,6 +358,10 @@ function displayDataset(dataset) {
   elements.kind.value = instrument.kind;
   elements.start.value = dataset.requested_start;
   elements.end.value = dataset.requested_end;
+  if (isPages && snapshotsEnabled && dataset.snapshot) {
+    elements.start.value = "2025-01-01";
+    elements.end.value = new Date(Date.now()+8*3_600_000).toISOString().slice(0,10);
+  }
   elements["source-label"].textContent =
     `来源 ${{ repository_csv: "仓库真实历史样本", local_csv: "已保存行情", eastmoney: "东方财富", tencent: "腾讯" }[dataset.source] || dataset.source} · 不复权`;
   elements["history-label"].textContent =
@@ -386,7 +391,9 @@ function displayDataset(dataset) {
   setRange("244");
   requestAnimationFrame(positionLegends);
   setStatus(
-    isPages
+    dataset.analysis_label
+      ? dataset.analysis_label + "。调整显示区间只改变视窗。"
+      : isPages
       ? dataset.snapshot
         ? "已展示明确标注日期的存档样本。点击“加载历史行情”向公开行情源取数；调整显示区间只改变视窗。"
         : `已从公开行情源载入历史。${dataset.attempts?.some((a) => a.status === "failed") ? "东方财富请求失败，已使用腾讯备用源。" : ""}调整显示区间只改变视窗。`
@@ -401,6 +408,21 @@ async function loadDemo() {
   if (!response.ok)
     throw new Error(`无法读取演示数据（HTTP ${response.status}）`);
   return response.json();
+}
+
+async function loadPagesAnalysis(options, snapshotId) {
+  if (snapshotsEnabled) {
+    try {
+      const snapshot=await getPageSnapshot({asset_type:"stock",...options},snapshotId);
+      return {...snapshot.data,analysis_label:snapshotNote(snapshot)};
+    } catch (error) {
+      if (snapshotId) throw error;
+    }
+  } else if (snapshotId) {
+    throw new Error("此页面未配置该共享快照服务。");
+  }
+  const data=await fetchHistory(options,await loadCalendar());
+  return {...data,analysis_label:`网页独立取数 · ${data.source} · 截至 ${data.rows.at(-1).date} · ${browserModelVersion}`};
 }
 
 async function runLoad(action, message = "正在读取已保存样本，请稍候…") {
@@ -476,7 +498,7 @@ elements["query-form"].addEventListener("submit", (event) => {
     if (options.start > options.end)
       throw new Error("开始日期不能晚于结束日期");
     if (isPages) {
-      const result = await fetchHistory(options, await loadCalendar());
+      const result = await loadPagesAnalysis(options);
       displayDataset(result);
       return;
     }
@@ -520,4 +542,9 @@ elements["locate-form"].addEventListener("submit", (event) => {
   setStatus(`已定位 ${row.date}，右侧显示该交易日原始指标数值。`);
 });
 if (isPages) elements.demo.textContent = "查看存档样本";
-runLoad(async () => displayDataset(await loadDemo()));
+const requestedPage=new URLSearchParams(location.search);
+if (isPages && requestedPage.has("snapshot_id")) {
+  runLoad(async()=>displayDataset(await loadPagesAnalysis({
+    symbol:requestedPage.get("symbol"),kind:requestedPage.get("kind")??"auto",
+  },requestedPage.get("snapshot_id"))),"正在读取指定快照…");
+} else runLoad(async () => displayDataset(await loadDemo()));

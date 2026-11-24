@@ -122,7 +122,8 @@ export function createSectorPanel() {
     try {
       let confirmed=histories.get(entry.code)??bundle?.indexes.get(entry.code);
       if (!confirmed) {
-        const raw=onlineContext?mode.browser.history(code,entry,onlineContext):
+        const raw=mode.snapshot ? await mode.loadSnapshotIndex(mode.snapshot,entry.code) :
+          onlineContext?mode.browser.history(code,entry,onlineContext):
           await fetchLocal(`${code}/sectors/${entry.code}`,indexRequest.signal,300_000);
         if (id!==indexVersion||context!==generation) return;
         confirmed=normalizeIndex(raw,code,entry,report.model_as_of);
@@ -141,9 +142,9 @@ export function createSectorPanel() {
     code=nextCode;
     mode=nextMode;
     bundle=refresh?null:mode.bundle;
-    const available=mode.local || Boolean(mode.browser && mode.fund?.mode==="reported");
+    const available=mode.local || Boolean(mode.snapshot || mode.browser && mode.fund?.mode==="reported");
     period="1y";
-    hide("sector-refresh",!available);
+    hide("sector-refresh",!available || Boolean(mode.snapshot));
     $("sector-refresh").disabled=true;
     if (!code) return;
     if (!available&&!bundle) {
@@ -153,13 +154,17 @@ export function createSectorPanel() {
     text("sector-status","正在识别关联板块并检查指数历史。首次加载可能需要几分钟。");
     request=new AbortController();
     try {
-      if (!bundle && !mode.local) {
+      if (!bundle && !mode.local && !mode.snapshot) {
         const result=await mode.browser.analyze(mode.fund);
         if (version!==generation) return;
         onlineContext=result;
       }
-      const source=bundle?bundle.analysis:normalizeAssociations(onlineContext?.report??
-        await fetchLocal(`${code}/sectors`,request.signal,300_000),nextCode);
+      if (mode.snapshot && !mode.snapshot.data.association) {
+        text("sector-status",STATUSES.indices_unavailable);
+        return;
+      }
+      const source=bundle?bundle.analysis:normalizeAssociations(mode.snapshot?.data.association ??
+        onlineContext?.report??await fetchLocal(`${code}/sectors`,request.signal,300_000),nextCode);
       if (version!==generation) return;
       report=source;
       const timestamp=stamp(report.computed_at);

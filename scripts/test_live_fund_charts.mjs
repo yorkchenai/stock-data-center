@@ -49,6 +49,7 @@ async function open(page,code) {
       set:(original)=>{
         library={...original,createChart(element,options){
           const chart=original.createChart(element,options);
+          if (element.id==="sector-chart") window.testSector=chart;
           if (element.id==="returns-chart") {
             const series=[];
             window.testReturns={chart,series};
@@ -95,7 +96,9 @@ async function verifyLayout(page, width, height, mobile) {
       return {size:parseFloat(getComputedStyle(label).fontSize),height:rect.height,
         fit:label.scrollWidth<=label.clientWidth && rect.bottom<=document.getElementById("sector-chart").getBoundingClientRect().top};
     });
+    const volumeTicksFullyVisible=window.testSector.priceScale("right",1).options().entireTextOnly;
     return {width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,charts,panes,columns,axisWidth,
+      volumeTicksFullyVisible,
       indicators,titleSize:fontSize("#fund-title"),metricSize:fontSize(".metric strong"),
       riskSize:fontSize(".risk-metric strong"),rankingSize:fontSize("#sector-metrics"),
       disclosureFits:disclosure.scrollWidth<=disclosure.clientWidth,
@@ -121,6 +124,7 @@ async function verifyLayout(page, width, height, mobile) {
   assert.equal(sectorHeight,mobile ? {390:450,430:490}[width] : 510);
   assert.deepEqual([dimensions.titleSize,dimensions.metricSize],mobile ? [20,20] : [27,25]);
   assert.equal(dimensions.rankingSize,14);
+  assert.equal(dimensions.volumeTicksFullyVisible,mobile);
   assert.equal(dimensions.indicators.length,7);
   assert.ok(dimensions.indicators.every(({size,height,fit})=>fit && (mobile ? size===14 && height>=44 : size===13)),
     JSON.stringify(dimensions.indicators));
@@ -481,6 +485,11 @@ try {
     }
     for (const [width,height] of [[390,844],[430,932]]) {
       await phone.setViewportSize({width,height});
+      // Let the chart respond to the new width before fitting the full comparison range.
+      await phone.evaluate(()=>new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      await phone.locator('#fund-periods [data-period="1y"]').tap();
+      await phone.waitForFunction(({start,end})=>
+        document.getElementById("fund-visible-range").textContent===`图表视窗 ${start} 至 ${end}`,oneYear);
       await phone.locator('#sector-periods [data-period="1y"]').tap();
       viewports[width]=await verifyLayout(phone,width,height,true);
       await phone.screenshot({path:`${output}/full-${code}-mobile-${width}.png`,fullPage:true});

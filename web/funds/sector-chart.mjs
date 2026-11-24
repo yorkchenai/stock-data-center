@@ -25,11 +25,15 @@ function seriesSpans(rows, key) {
 }
 
 export function createSectorChart(element, readout, toggles, volumeNote, historyNote) {
-  let chart, lines = new Map(), controls = new Map(), plotted = [];
+  let chart, volumeScale, lines = new Map(), controls = new Map(), plotted = [];
+  const compact = matchMedia("(max-width: 620px)");
+  const fitVolumeTicks = () => volumeScale?.applyOptions({entireTextOnly:compact.matches});
+  compact.addEventListener("change",fitVolumeTicks);
   const checked = new Map([...AVERAGES,...VOLUMES].map((key)=>[key,true]));
   function clear({reset = false} = {}) {
     chart?.remove();
     chart = null;
+    volumeScale = null;
     lines.clear();
     controls.clear();
     element.replaceChildren();
@@ -116,6 +120,8 @@ export function createSectorChart(element, readout, toggles, volumeNote, history
       pane.setStretchFactor(3);
       const format = {type:"volume"};
       const bars = pane.addSeries(LC.HistogramSeries,{...options,visible:checked.get("volume"),priceFormat:format});
+      volumeScale = bars.priceScale();
+      fitVolumeTicks();
       bars.setData(rows.map((row)=>row.volume==null?{time:row.date}:{
         time:row.date,value:row.volume,color:row.open==null?"#8296a5":(row.close>=row.open?UP:DOWN)+"80",
       }));

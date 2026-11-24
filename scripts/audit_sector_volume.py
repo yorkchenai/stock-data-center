@@ -15,7 +15,7 @@ from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
 from stock_analysis import funds
-from stock_analysis.sector_data import CSI_URL, collect_indices, error_status
+from stock_analysis.sector_data import CSI_URL, collect_indices, error_status, read_with_transient_retry
 
 CORE = {"399997": ("0", "中证白酒"), "000994": ("1", "全指通信"), "000991": ("1", "全指医药")}
 EASTMONEY = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
@@ -101,7 +101,7 @@ def audit(start, end):
                 item["eastmoney"] = {"status": "not_requested_after_restriction"}
             else:
                 try:
-                    item["eastmoney"] = eastmoney_day(code, day)
+                    item["eastmoney"] = read_with_transient_retry(lambda: eastmoney_day(code, day))
                 except (ValueError, KeyError, TypeError, OSError) as exc:
                     item["eastmoney"] = error_status(exc)
                     constrained = item["eastmoney"]["status"] == "access_restricted"
@@ -112,6 +112,10 @@ def audit(start, end):
                                            for key in ("open", "close", "high", "low"))
                 item["raw_volume_ratio"] = csi["tradingVol"] / east["f56"] if csi["tradingVol"] is not None and east["f56"] else None
                 item["raw_turnover_ratio"] = csi["tradingValue"] / east["f57"] if csi["tradingValue"] is not None and east["f57"] else None
+                item["within_rounding"] = {
+                    "volume_x100": csi["tradingVol"] is not None and abs(csi["tradingVol"] - east["f56"] * 100) <= 50,
+                    "turnover_x1e8": csi["tradingValue"] is not None and abs(csi["tradingValue"] * 1e8 - east["f57"]) <= 500_000,
+                }
             samples[code][day] = item
     return {"schema_version": 1, "as_of": datetime.now(funds.SHANGHAI).isoformat(), "start": start, "end": end,
             "source": CSI_URL, "comparison_source": EASTMONEY, "indices": coverage, "samples": samples,

@@ -20,8 +20,10 @@ async function issuerVolumeLabels() {
     if (!response?.ok()) return {url,status:`HTTP ${response?.status()??"unknown"}`};
     await page.getByText(/中证白酒/).first().waitFor({timeout:15_000});
     const text=await page.locator("body").innerText({timeout:5_000});
-    const labels=text.split("\n").map((line)=>line.trim()).filter((line)=>/成交量|亿股|万手|亿手|万股/.test(line));
-    return {url,status:"detail_loaded",labels:[...new Set(labels)].slice(0,8).map((line)=>line.slice(0,90))};
+    const labels=text.split("\n").map((line)=>line.trim()).filter((line)=>/成交量|成交额|亿股|万手|亿手|万股/.test(line));
+    const nearby=await page.getByText(/^成交[量额][：:]$/).evaluateAll((items)=>items.slice(0,4)
+      .map((item)=>item.parentElement.innerText.trim().slice(0,100)));
+    return {url,status:"detail_loaded",labels:[...new Set([...labels,...nearby])].slice(0,12)};
   } catch (error) {
     return {url,status:error.name};
   } finally {

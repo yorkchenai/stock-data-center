@@ -49,7 +49,8 @@ async function verifyLayout(page, width, mobile) {
       return {id, width:rect.width, left:rect.left, right:rect.right,
         fits:Array.from(node.querySelectorAll("canvas")).every((canvas)=>{
           const bounds=canvas.getBoundingClientRect();
-          return bounds.right<=rect.right+1 && bounds.bottom<=rect.bottom+1;
+          // Lightweight Charts may add two pixels at pane separators.
+          return bounds.right<=rect.right+1 && bounds.bottom<=rect.bottom+3;
         })};
     });
     const panes=[...document.querySelectorAll("#sector-chart table tr")]

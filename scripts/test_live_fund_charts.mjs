@@ -69,14 +69,14 @@ async function open(page,code) {
   await page.locator(chartCanvas).first().waitFor({timeout:300_000});
 }
 
-async function verifyLayout(page, width, mobile) {
+async function verifyLayout(page, width, height, mobile) {
   await page.evaluate(()=>new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const dimensions=await page.evaluate(()=>{
     const ids=["nav-chart","returns-chart","drawdown-chart","sector-chart"];
     const charts=ids.map((id)=>{
       const node=document.getElementById(id);
       const rect=node.getBoundingClientRect();
-      return {id, width:rect.width, left:rect.left, right:rect.right,
+      return {id, width:rect.width, height:rect.height, left:rect.left, right:rect.right,
         fits:Array.from(node.querySelectorAll("canvas")).every((canvas)=>{
           const bounds=canvas.getBoundingClientRect();
           // Lightweight Charts may add two pixels at pane separators.
@@ -86,16 +86,25 @@ async function verifyLayout(page, width, mobile) {
     const panes=[...document.querySelectorAll("#sector-chart table tr")]
       .map((row)=>row.getBoundingClientRect().height).filter((height)=>height>30);
     const columns=getComputedStyle(document.getElementById("core-metrics")).gridTemplateColumns.split(" ").length;
-    const targets=[...document.querySelectorAll("#sector-tabs button,#sector-periods button,#fund-periods button")];
+    const targets=[...document.querySelectorAll("#sector-tabs button,#sector-periods button,#fund-periods button,#sector-refresh")];
     const disclosure=document.getElementById("benchmark-disclosure");
     const axisWidth=window.testReturns.chart.priceScale("right").width();
-    return {width:innerWidth,scrollWidth:document.documentElement.scrollWidth,charts,panes,columns,axisWidth,
+    const fontSize=(selector)=>parseFloat(getComputedStyle(document.querySelector(selector)).fontSize);
+    const indicators=[...document.querySelectorAll(".indicator-toggles label")].map((label)=>{
+      const rect=label.getBoundingClientRect();
+      return {size:parseFloat(getComputedStyle(label).fontSize),height:rect.height,
+        fit:label.scrollWidth<=label.clientWidth && rect.bottom<=document.getElementById("sector-chart").getBoundingClientRect().top};
+    });
+    return {width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,charts,panes,columns,axisWidth,
+      indicators,titleSize:fontSize("#fund-title"),metricSize:fontSize(".metric strong"),
+      riskSize:fontSize(".risk-metric strong"),rankingSize:fontSize("#sector-metrics"),
       disclosureFits:disclosure.scrollWidth<=disclosure.clientWidth,
       minimumTarget:Math.min(...targets.map((button)=>button.getBoundingClientRect().height)),
       tabLabelFits:[...document.querySelectorAll("#sector-tabs button")].every((tab)=>tab.scrollWidth<=tab.clientWidth),
       navTextNodes:[...document.getElementById("nav-chart").childNodes].some((node)=>node.nodeType===3&&node.textContent.trim())};
   });
   assert.equal(dimensions.width,width);
+  assert.equal(dimensions.height,height);
   assert.ok(dimensions.scrollWidth<=width+1,JSON.stringify(dimensions));
   assert.ok(dimensions.charts.every(({width,left,right,fits})=>width>0&&left>=0&&right<=dimensions.width+1&&fits),
     JSON.stringify(dimensions));
@@ -108,7 +117,15 @@ async function verifyLayout(page, width, mobile) {
   assert.equal(dimensions.panes.length,2,JSON.stringify(dimensions.panes));
   assert.ok(Math.abs(dimensions.panes[1]/(dimensions.panes[0]+dimensions.panes[1])-.3)<.04,
     JSON.stringify(dimensions.panes));
-  return dimensions.panes;
+  const sectorHeight=dimensions.charts.find(({id})=>id==="sector-chart").height;
+  assert.equal(sectorHeight,mobile ? {390:450,430:490}[width] : 510);
+  assert.deepEqual([dimensions.titleSize,dimensions.metricSize],mobile ? [20,20] : [27,25]);
+  assert.equal(dimensions.rankingSize,14);
+  assert.equal(dimensions.indicators.length,7);
+  assert.ok(dimensions.indicators.every(({size,height,fit})=>fit && (mobile ? size===14 && height>=44 : size===13)),
+    JSON.stringify(dimensions.indicators));
+  return {height,sectorHeight,panes:dimensions.panes,columns:dimensions.columns,
+    titleSize:dimensions.titleSize,metricSize:dimensions.metricSize,riskSize:dimensions.riskSize};
 }
 
 async function hoverMiddle(page, selector) {
@@ -151,6 +168,14 @@ async function checkReturns(page, fund, checkHover=true) {
   const last=formatReturn(rendered.points.at(-1).value);
   const metric=await page.locator('[data-metric="return"] strong').textContent();
   assert.equal(parseFloat(metric),parseFloat(last));
+  let peak=rows[0].return_index, maxDrawdown=0;
+  for (const row of rows) {
+    peak=Math.max(peak,row.return_index);
+    maxDrawdown=Math.min(maxDrawdown,row.return_index/peak-1);
+  }
+  const drawdown=`${(maxDrawdown*100).toFixed(2)}%`;
+  assert.equal(await page.locator('[data-metric="drawdown"] strong').textContent(),drawdown);
+  assert.equal(await page.locator("#risk-metrics .risk-metric").nth(1).locator("strong").textContent(),drawdown);
   if (checkHover) {
     await chart.scrollIntoViewIfNeeded();
     const plot=await chart.boundingBox();
@@ -163,7 +188,7 @@ async function checkReturns(page, fund, checkHover=true) {
     await page.mouse.move(0,0);
     assert.equal(await page.locator("#hover-values").textContent(),"");
   }
-  return {start,end,first:"0.00%",last};
+  return {start,end,first:"0.00%",last,drawdown};
 }
 
 try {
@@ -340,7 +365,7 @@ try {
     const viewports={};
     for (const width of [1440,1920]) {
       await page.setViewportSize({width,height:1000});
-      viewports[width]=await verifyLayout(page,width,false);
+      viewports[width]=await verifyLayout(page,width,1000,false);
       await page.screenshot({path:`${output}/full-${code}-desktop-${width}.png`,fullPage:true});
       if (width===1440) await page.locator('[aria-labelledby="returns-title"]').screenshot({
         path:`${output}/detail-returns-${code}-desktop-${width}.png`,
@@ -375,7 +400,8 @@ try {
     }
     await page.close();
 
-    const phone=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1});
+    const touchViewport=code==="006751" ? {width:430,height:932} : {width:390,height:844};
+    const phone=await browser.newPage({viewport:touchViewport,isMobile:true,hasTouch:true,deviceScaleFactor:1});
     await open(phone,code);
     const cdp=await phone.context().newCDPSession(phone);
     await checkDisclosure(phone,code);
@@ -443,15 +469,27 @@ try {
     await touch("touchEnd",x,y);
     await phone.locator('#sector-periods [data-period="3m"]').tap();
     assert.match(await phone.locator("#sector-range-status").textContent(),/显示 \d{4}-\d{2}-\d{2}/);
-    for (const width of [390,430]) {
-      await phone.setViewportSize({width,height:844});
+    const missingFacts=phone.locator("#fund-missing-facts");
+    if (await missingFacts.isVisible()) {
+      assert.equal(await missingFacts.getAttribute("open"),null);
+      const fieldNames=await phone.locator("#fund-more dt.fact-missing").allTextContents();
+      assert.match(await missingFacts.locator("summary").textContent(),new RegExp(`（${fieldNames.length} 项）`));
+      await missingFacts.locator("summary").tap();
+      assert.deepEqual(await missingFacts.locator("dt:visible").allTextContents(),fieldNames);
+      assert.ok((await missingFacts.locator("dd:visible").allTextContents()).every((value)=>value==="—"));
+      await missingFacts.locator("summary").tap();
+    }
+    for (const [width,height] of [[390,844],[430,932]]) {
+      await phone.setViewportSize({width,height});
       await phone.locator('#sector-periods [data-period="1y"]').tap();
-      viewports[width]=await verifyLayout(phone,width,true);
+      viewports[width]=await verifyLayout(phone,width,height,true);
       await phone.screenshot({path:`${output}/full-${code}-mobile-${width}.png`,fullPage:true});
       await phone.locator('[aria-labelledby="returns-title"]').screenshot({path:`${output}/detail-returns-${code}-mobile-${width}.png`});
+      await phone.locator(".sector-panel").screenshot({path:`${output}/detail-sector-${code}-mobile-${width}.png`});
     }
     report.funds[code].touch=touchReadout;
     report.funds[code].pinch=true;
+    report.funds[code].touchViewport=touchViewport;
     await phone.close();
   }
 

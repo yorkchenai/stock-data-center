@@ -136,6 +136,19 @@ try {
     assert.equal(await page.locator("#core-metrics article").count(),6);
     const grid = await page.locator("#core-metrics").evaluate((el)=>getComputedStyle(el).gridTemplateColumns.split(" ").length);
     assert.equal(grid,mobile ? 2 : 3);
+    const detail=page.locator("#fund-missing-facts");
+    assert.equal(await detail.isVisible(),mobile);
+    assert.ok(await page.locator("#fund-more dt.fact-missing").count());
+    if (mobile) {
+      assert.equal(await page.locator("#fund-more dt.fact-missing:visible").count(),0);
+      assert.ok(await page.locator("#fund-more dd:not(.fact-missing):visible").count());
+      await detail.locator("summary").click();
+      assert.deepEqual(await detail.locator("dt:visible").allTextContents(),
+        await page.locator("#fund-more dt.fact-missing").allTextContents());
+      await detail.locator("summary").click();
+    } else {
+      assert.ok(await page.locator("#fund-more dt.fact-missing:visible").count());
+    }
     const nav = await page.locator("#fund-nav").innerText();
     const value = page.locator("[data-metric='return'] strong");
     const initial = await value.innerText();

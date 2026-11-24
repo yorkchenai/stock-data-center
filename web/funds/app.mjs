@@ -233,13 +233,16 @@ function renderSearch(results, term) {
   }
 }
 
+const missingFact = ([,value,sourceUrl]) => value == null && !sourceUrl;
 function showFacts(target, fields) {
-  target.replaceChildren(...fields.flatMap(([name,value,sourceUrl])=>{
-    const description = tag("dd",value ?? "—");
+  target.replaceChildren(...fields.flatMap((field)=>{
+    const [name,value,sourceUrl] = field;
+    const attrs = missingFact(field) ? {class:"fact-missing"} : {};
+    const description = tag("dd",value ?? "—",attrs);
     if (typeof sourceUrl === "string" && URL.canParse(sourceUrl) && new URL(sourceUrl).protocol === "https:") {
       description.append(" ",tag("a","查看来源",{href:sourceUrl,target:"_blank",rel:"noopener noreferrer"}));
     }
-    return [tag("dt",name),description];
+    return [tag("dt",name,attrs),description];
   }));
 }
 function renderHoldings(fund) {
@@ -293,10 +296,17 @@ function renderIdentity(code,fund) {
   const sourceTime = fund && new Intl.DateTimeFormat("zh-CN",{
     timeZone:"Asia/Shanghai",dateStyle:"medium",timeStyle:"short",
   }).format(new Date(fund.source.retrieved_at));
-  showFacts($("fund-more"),[["基金成立日期",fund?.inception],["基金规模",fund?.size],["费率",fund?.fee],
+  const facts = [["基金成立日期",fund?.inception],["基金规模",fund?.size],["费率",fund?.fee],
     ["基金经理",fund?.fund_manager],["业绩比较基准",fund?.benchmark?.name ?? fund?.reference],
     ["基准公式",fund?.benchmark?.formula],["基准披露出处",fund?.benchmark?.source,fund?.benchmark?.source_url],["数据获取时间（上海）",sourceTime],
-    ["原始数据口径",fund?.source.method],["总回报口径",fund?.return_note ?? (fund?.return_basis==="adjusted_nav" ? "来源提供的复权总回报序列" : "—")]]);
+    ["原始数据口径",fund?.source.method],["总回报口径",fund?.return_note ?? (fund?.return_basis==="adjusted_nav" ? "来源提供的复权总回报序列" : null)]];
+  showFacts($("fund-more"),facts);
+  const missing = facts.filter(missingFact);
+  const missingDetails = $("fund-missing-facts");
+  missingDetails.hidden = !missing.length;
+  missingDetails.open = false;
+  missingDetails.querySelector("summary").textContent = `未取得的基金信息（${missing.length} 项）`;
+  showFacts($("fund-missing-fact-list"),missing);
   renderHoldings(fund);
   historyTable(fund);
   const first = fund?.rows[0].date ?? "";
@@ -329,7 +339,11 @@ function renderAnalysis(requestedStart, requestedEnd) {
   $("core-metrics").replaceChildren(...coreDefinitions.map(([id,label,format,description])=>{
     const article = tag("article",null,{class:"metric","data-metric":id,title:description});
     const metric = analysis.metrics[id];
-    article.append(tag("h3",label),tag("strong",shown(metric.value,format)),tag("small",metric.reason ?? interval));
+    const note = tag("small",metric.reason ?? interval);
+    if (!metric.reason && range.start) {
+      note.replaceChildren(tag("time",range.start,{datetime:range.start})," 至 ",tag("time",range.end,{datetime:range.end}));
+    }
+    article.append(tag("h3",label),tag("strong",shown(metric.value,format)),note);
     return article;
   }));
   const riskMetrics = [

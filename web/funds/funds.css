@@ -125,10 +125,50 @@
 .indicator-toggles output {min-width: 38px; font-variant-numeric: tabular-nums; font-weight: 650;}
 #nav-gaps {color: var(--muted);}
 #nav-gaps ul {max-height: 150px; overflow: auto;}
+#fund-missing-facts {display: none;}
 @media (max-width: 620px) {
-  #fund-detail .fund-controls button {min-height: 44px;}
+  #fund-detail h1 {font-size: 20px; line-height: 1.3;}
+  #fund-detail h2 {font-size: 17px; margin-bottom: 8px;}
+  #fund-detail .panel-heading {column-gap: 10px; row-gap: 4px; margin-bottom: 7px;}
+  #fund-detail .panel-heading h2 {margin: 0;}
+  #fund-detail .fund-panel {margin-bottom: 12px;}
+  #fund-detail .fund-controls button, #sector-refresh {min-width: 44px; min-height: 44px;}
+  #detail-status:empty {display: none;}
+  .fund-identity {gap: 10px;}
+  .fund-identity p {font-size: 13px;}
+  .fund-nav-value, .fund-source {font-size: 13px;}
+  .fund-nav-value strong {font-size: 20px;}
+  #fund-detail .fund-note {line-height: 1.5; margin-block: 6px;}
+  #fund-detail .chart-description {min-height: 18px;}
+  #fund-detail :is(#fund-visible-range,#range-status,#sector-analysis-meta,#sector-index-meta,#sector-range-status,#returns-source) {
+    font-size: 13px;
+  }
+  #fund-detail #fund-visible-range {margin: 0;}
+  #fund-detail #benchmark-disclosure {margin: 0 0 8px;}
+  .metric {padding: 10px;}
+  .metric h3 {line-height: 1.35;}
+  .metric strong {font-size: 20px; line-height: 1.2; margin: 4px 0;}
+  .metric small, .risk-metric small {font-size: 13px; line-height: 1.45;}
+  .metric time {white-space: nowrap;}
+  .risk-grid {grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; margin-bottom: 8px;}
+  .risk-metric {padding: 8px;}
+  .risk-metric span {margin-bottom: 2px;}
+  .risk-metric strong {font-size: 16px; line-height: 1.25;}
+  .risk-metric small {display: block; overflow-wrap: anywhere;}
+  .risk-metric small:empty {display: none;}
   .sector-chart {height: 335px;}
-  .sector-chart.with-volume {height: 430px;}
-  .sector-metrics {font-size: 13px;}
-  .indicator-toggles label {min-height: 30px;}
+  .sector-chart.with-volume {height: clamp(430px,calc(100vw + 60px),490px);}
+  .sector-metrics {padding: 8px 10px; margin: 6px 0; font-size: 14px;}
+  #sector-index-title {margin-top: 12px;}
+  #sector-index-meta a {display: inline-block;}
+  .indicator-toggles:not(:empty) {display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 8px;}
+  .indicator-toggles label {min-width: 0; min-height: 44px; align-content: center; flex-wrap: wrap; font-size: 14px;}
+  .indicator-toggles label > input {margin: 0 2px 0 0;}
+  .indicator-toggles output {min-width: 0; overflow-wrap: anywhere;}
+  #sector-ma:not(:empty) {border-bottom: 1px solid var(--line);}
+  #sector-vol label:first-child {grid-column: 1 / -1;}
+  #fund-more > .fact-missing {display: none;}
+  #fund-missing-facts {display: block; margin-bottom: 6px;}
+  #fund-missing-facts summary {min-height: 44px; padding-block: 10px;}
+  #fund-more, #fund-missing-fact-list {font-size: 13px; gap: 6px 8px; margin: 8px 0;}
 }

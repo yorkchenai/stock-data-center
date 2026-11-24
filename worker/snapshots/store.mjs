@@ -72,9 +72,9 @@ export function snapshotStore(binding) {
     release:(key, token)=>statement(
       "DELETE FROM analysis_snapshot_leases WHERE cache_key=? AND token=?", key, token
     ).run(),
-    failure:(key, now)=>statement(
+    buildState:(key, now)=>statement(
       "SELECT failure FROM analysis_snapshot_leases WHERE cache_key=? AND expires_at>?",key,now
-    ).first().then((row)=>row?.failure??null),
+    ).first(),
     cooldown:(key, token, now)=>statement(
       "UPDATE analysis_snapshot_leases SET token='', failure='data_unavailable', expires_at=? WHERE cache_key=? AND token=?",
       now+15_000,key,token

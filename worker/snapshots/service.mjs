@@ -40,6 +40,10 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
 
   return {
     async initial(binding,args,{waitUntil,waitMs=7_000}={}) {
+      const requestedAfter=args?.after_snapshot_id;
+      if (requestedAfter!==undefined && (typeof requestedAfter!=="string"||!SNAPSHOT_ID.test(requestedAfter)||args.refresh)) {
+        return response("invalid_arguments","续查刷新需要有效的旧快照编号，且不能再次请求刷新。");
+      }
       let query;
       try { query=analysisQuery(args,calendar,clock()); }
       catch (error) { return response("invalid_arguments",error.message); }
@@ -48,17 +52,34 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
         observe({event:"snapshot_hit",symbol:snapshot.symbol,snapshot_id:snapshot.snapshot_id});
         return {...snapshotMetadata(snapshot),...snapshot.summary,cache:"hit"};
       };
-      const building=response("building","快照正在构建。结束后按同一代码查询即可获得快照编号。",
-        {asset_type:query.asset_type,symbol:query.symbol,retry_after_seconds:3});
+      const building=(previous)=>response("building",previous?
+        "快照正在刷新。按同一代码和返回的 after_snapshot_id 续查。":
+        "快照正在构建。结束后按同一代码查询即可获得快照编号。",
+        {asset_type:query.asset_type,symbol:query.symbol,retry_after_seconds:3,
+          ...(previous?{after_snapshot_id:previous}:{})});
       try {
         const store=snapshotStore(binding);
+        if (requestedAfter!==undefined) {
+          const previous=await store.header(requestedAfter);
+          if (!previous||previous.cache_key!==key) return response("snapshot_not_found","找不到该查询的旧快照。");
+          // Read build state before the candidate. If publication committed in
+          // between, the candidate read can see the new ID, never the old one.
+          const state=await store.buildState(key,ms());
+          const newer=await store.latest(key,ms());
+          if (newer&&newer.snapshot_id!==requestedAfter&&Date.parse(newer.computed_at)>=previous.created_at) {
+            return cacheHit(newer);
+          }
+          if (state?.failure) return unavailable();
+          if (state) return building(requestedAfter);
+          return response("refresh_not_found","没有更新的快照或进行中的刷新。");
+        }
         const before=await store.latest(key,ms());
         if (before&&!args.refresh) return cacheHit(before);
         const token=await store.lease(key,ms());
         if (!token) {
           const ready=await store.latest(key,ms());
           if (ready && ready.snapshot_id!==before?.snapshot_id) return cacheHit(ready);
-          return await store.failure(key,ms()) ? unavailable() : building;
+          return (await store.buildState(key,ms()))?.failure ? unavailable() : building(before?.snapshot_id);
         }
         let after;
         try { after=await store.latest(key,ms()); }
@@ -72,7 +93,9 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
         waitUntil(work);
         let timer;
         try {
-          return await Promise.race([work,new Promise((resolve)=>{timer=setTimeout(()=>resolve(building),waitMs);})]);
+          return await Promise.race([work,new Promise((resolve)=>{
+            timer=setTimeout(()=>resolve(building(before?.snapshot_id)),waitMs);
+          })]);
         } finally {clearTimeout(timer);}
       } catch {
         return response("cache_unavailable","快照缓存不可用。");

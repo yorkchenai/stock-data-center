@@ -5,6 +5,7 @@ import { analysisService } from "./service.mjs";
 
 const PROTOCOL = "2026-07-28";
 const symbolSchema={type:"string",description:"六位代码。股票或指数可带 sh/sz 前缀；基金保留前导零。"};
+const afterSnapshot={type:"string",description:"仅续查刷新时使用。传回 building 响应的 after_snapshot_id，并省略 refresh。"};
 const dates=Object.fromEntries(["start","end","date","before"].map((key)=>[key,{type:"string",format:"date"}]));
 const detailsFields={
   asset_type:{enum:["stock","fund"]},symbol:symbolSchema,snapshot_id:{type:"string"},
@@ -16,15 +17,15 @@ const detailsFields={
 
 const tools=[
   {
-    name:"get_stock_analysis",description:"股票雷达。将中文逐位代码转为数字。首次返回最近交易日、指标和 snapshot_id；追问使用同一个 ID 调用 get_analysis_details。building 时按代码重试。传 refresh:true 请求新快照。",
+    name:"get_stock_analysis",description:"股票雷达。将中文逐位代码转为数字。首次返回最近交易日、指标和 snapshot_id；追问使用同一个 ID 调用 get_analysis_details。building 时按代码重试，若返回 after_snapshot_id 须带回该值。传 refresh:true 请求新快照。",
     inputSchema:{type:"object",required:["symbol"],additionalProperties:false,properties:{
-      symbol:symbolSchema,start:dates.start,end:dates.end,kind:{enum:["stock","index","auto"]},refresh:{type:"boolean"},
+      symbol:symbolSchema,start:dates.start,end:dates.end,kind:{enum:["stock","index","auto"]},refresh:{type:"boolean"},after_snapshot_id:afterSnapshot,
     }},
   },
   {
-    name:"get_fund_analysis",description:"基金雷达。将中文逐位代码转为数字，保留前导零。首次返回确认净值日期、收益摘要和 snapshot_id；后续用该 ID 查询。building 时按基金代码重试。缺少行业指数时如实说明。",
+    name:"get_fund_analysis",description:"基金雷达。将中文逐位代码转为数字，保留前导零。首次返回确认净值日期、收益摘要和 snapshot_id；后续用该 ID 查询。building 时按基金代码重试，若返回 after_snapshot_id 须带回该值。缺少行业指数时如实说明。",
     inputSchema:{type:"object",required:["symbol"],additionalProperties:false,
-      properties:{symbol:symbolSchema,refresh:{type:"boolean"}}},
+      properties:{symbol:symbolSchema,refresh:{type:"boolean"},after_snapshot_id:afterSnapshot}},
   },
   {
     name:"get_analysis_details",description:"按上一条结果的 snapshot_id 查询。历史与指标支持日期或最近若干条、区间内最高或最低值。风险和关联板块读取已计算结果。快照过期时依照用户要求刷新。",
@@ -116,6 +117,7 @@ export function createSnapshotWorker({calendar,config,modelVersion,authorize=()=
         if (!cors) return json({status:"access_denied"},403);
         // Public readers have no force-refresh option and share a bounded quota.
         delete args.refresh;
+        delete args.after_snapshot_id;
         const blocked=await limit(env.DB,"page",60);
         if (blocked) return json({status:blocked},statusCode(blocked),cors);
         const output=args.snapshot_id
@@ -147,6 +149,7 @@ export function createSnapshotWorker({calendar,config,modelVersion,authorize=()=
       const args=message.params.arguments;
       if (!args || typeof args!=="object" || !definition.inputSchema.required.every((key)=>typeof args[key]==="string") ||
           Object.keys(args).some((key)=>!Object.hasOwn(definition.inputSchema.properties,key)) ||
+          (Object.hasOwn(args,"after_snapshot_id") && typeof args.after_snapshot_id!=="string") ||
           (Object.hasOwn(args,"refresh") && typeof args.refresh!=="boolean")) return pack({status:"invalid_arguments"});
       const detail=name==="get_analysis_details";
       const blocked=await limit(env.DB,detail?"owner_details":"owner_initial",detail?30:6);

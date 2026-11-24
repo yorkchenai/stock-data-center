@@ -120,6 +120,44 @@ test("failed sources and absent cache never present an ID",async()=>{
   assert.equal(recovered.cache,"miss");
 });
 
+test("refresh continuation waits for a newer ID and never starts another build",async()=>{
+  const {connection}=database();
+  const previous=await make(async()=>data).initial(connection(),query);
+  let complete, builds=0, background;
+  const pending=new Promise((resolve)=>{complete=resolve;});
+  const server=make(async()=>{builds++;return pending;});
+  const initial=await server.initial(connection(),{...query,refresh:true},{
+    waitUntil:(p)=>{background=p;},waitMs:1,
+  });
+  assert.equal(initial.status,"building");
+  assert.equal(initial.after_snapshot_id,previous.snapshot_id);
+  assert.equal((await server.initial(connection(),query)).snapshot_id,previous.snapshot_id);
+  const poll={...query,after_snapshot_id:initial.after_snapshot_id};
+  const waiting=await server.initial(connection(),poll);
+  assert.equal(waiting.status,"building");
+  assert.equal(waiting.snapshot_id,undefined);
+  assert.equal((await server.initial(connection(),{...poll,refresh:true})).status,"invalid_arguments");
+  assert.equal((await server.initial(connection(),{...poll,symbol:"600519"})).status,"snapshot_not_found");
+  complete(data);
+  const published=await background;
+  const result=await server.initial(connection(),poll);
+  assert.notEqual(result.snapshot_id,previous.snapshot_id);
+  assert.equal(result.snapshot_id,published.snapshot_id);
+  assert.equal(builds,1);
+});
+
+test("refresh failure never masquerades as an earlier cached result",async()=>{
+  const {connection}=database();
+  const previous=await make(async()=>data).initial(connection(),query);
+  const failure=make(async()=>{throw new Error("upstream unavailable");});
+  assert.equal((await failure.initial(connection(),{...query,refresh:true})).status,"data_unavailable");
+  const poll={...query,after_snapshot_id:previous.snapshot_id};
+  assert.equal((await failure.initial(connection(),poll)).status,"data_unavailable");
+  assert.equal((await failure.initial(connection(),query)).snapshot_id,previous.snapshot_id);
+  const later=make(()=>assert.fail("continuation cannot build"),"model-a",()=>new Date(now+16_000));
+  assert.equal((await later.initial(connection(),poll)).status,"refresh_not_found");
+});
+
 test("browser authorization and MCP use the same ID and values", async()=>{
   const {connection}=database();
   const db=connection();

@@ -1,6 +1,10 @@
 import { AVERAGES, VOLUMES, indexCapabilities } from "./chart-data.mjs";
 
 const UP = "#c74542", DOWN = "#21805f";
+const VOLUME_UNAVAILABLE = {
+  unsupported_symbol:"股票行情引擎暂未映射该指数，成交量暂不可用。",
+  stock_sources_unavailable:"股票行情源未返回有效数据，成交量暂不可用。",
+};
 const COLORS = {MA5:"#9d6450",MA10:"#6464c4",MA20:"#137485",MA60:"#984e8d",VOL5:"#986642",VOL10:"#5266aa"};
 const number = new Intl.NumberFormat("zh-CN",{maximumFractionDigits:2});
 const value = (v)=>v==null?"—":number.format(v);
@@ -77,7 +81,7 @@ export function createSectorChart(element, readout, toggles, volumeNote, history
     element.classList.toggle("with-volume",volume);
     element.dataset.chartMode = candles?"candles":"close";
     historyNote.textContent = candles ? "" : "当前区间缺少完整可验证的开高低行情，暂以收盘价走势展示。";
-    volumeNote.textContent = volume ? "" : "成交量数据尚未核实，暂不可用。";
+    volumeNote.textContent = volume ? "" : VOLUME_UNAVAILABLE[history.quality?.stock_chart_status] ?? "成交量暂不可用。";
     chart = LC.createChart(element,{
       autoSize:true,layout:{background:{color:"#fff"},textColor:"#536579",attributionLogo:true,
         panes:{enableResize:false,separatorColor:"#e2e9ef"}},
@@ -106,12 +110,7 @@ export function createSectorChart(element, readout, toggles, volumeNote, history
       button(key,null,toggles[0]);
     }
     if (volume) {
-      const evidence=document.createElement("a");
-      evidence.href=history.source.volume_unit_evidence;
-      evidence.target="_blank";
-      evidence.rel="noopener noreferrer";
-      evidence.textContent="单位与来源";
-      volumeNote.replaceChildren("指数样本证券汇总 · ",evidence);
+      volumeNote.textContent=`日成交量 · ${history.volume_unit} · ${history.source.name}`;
       const pane = chart.addPane();
       chart.panes()[0].setStretchFactor(7);
       pane.setStretchFactor(3);

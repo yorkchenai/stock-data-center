@@ -6,6 +6,8 @@ import json
 import pandas as pd
 
 from stock_analysis import fund_charts, sector_data
+from stock_analysis.data import FetchError
+from stock_analysis.symbols import resolve_symbol
 
 
 ENTRY = {"code": "399997", "name": "测试指数"}
@@ -15,6 +17,62 @@ VOLUME_SOURCE = {"raw_unit": "手", "raw_field": "tradingVol", "conversion_facto
 
 
 class FundChartsTest(unittest.TestCase):
+    def test_last_completed_session_checks_exchange_close_and_holidays(self):
+        for now, expected in (("2025-01-06T14:59:00+08:00", "2025-01-03"),
+                              ("2025-01-06T15:00:00+08:00", "2025-01-06"),
+                              ("2025-01-01T19:00:00+08:00", "2024-12-31")):
+            self.assertEqual(fund_charts.last_completed_session(pd.Timestamp(now)), expected)
+
+    def test_stock_volume_uses_lots_as_is_and_restarts_stock_indicators_after_gap(self):
+        days = fund_charts.session_index("2025-03-03", "2025-03-26")
+        selected = days.delete(6)
+        frame = pd.DataFrame({"date": selected, "open": 100., "high": 104., "low": 99., "close": 103.,
+                              "volume_lots": [0.] + [150.5] * (len(selected) - 1), "turnover_cny": 4000.})
+        end = days[-1].date().isoformat()
+        code = ENTRY["code"]
+        entry = {**ENTRY, "index_as_of": "2025-03-27"}
+        context = ({}, {}, {"sectors": [entry], "model_as_of": end}, {})
+        provenance = {"source": "eastmoney", "volume_unit": "100-share lots", "adjustment": "none"}
+
+        def fetched(instrument, start, end, validator):
+            self.assertEqual(instrument, resolve_symbol("sz399997", kind="index"))
+            self.assertEqual(end, days[-1].date().isoformat())
+            validator(frame)
+            return frame, provenance
+
+        fund_charts.stock_chart_history.cache_clear()
+        self.addCleanup(fund_charts.stock_chart_history.cache_clear)
+        with patch.object(fund_charts, "fund_context", return_value=context), \
+                patch.object(fund_charts, "last_completed_session", return_value=end), \
+                patch.object(fund_charts, "fetch_daily", side_effect=fetched):
+            result = fund_charts.sector_history("110022", code)
+        self.assertEqual(result["last"], end)
+        self.assertEqual(result["model_index_as_of"], "2025-03-27")
+        self.assertEqual(result["volume_unit"], "手")
+        self.assertNotIn("permission", result["source"])
+        self.assertNotIn("volume_unit_evidence", result["source"])
+        self.assertEqual(result["rows"][0]["volume"], 0)
+        self.assertIsNone(result["rows"][6]["volume"])
+        self.assertIsNone(result["rows"][10]["VOL5"])
+        self.assertIsNone(result["rows"][15]["VOL10"])
+        self.assertEqual(result["rows"][-1]["VOL10"], 150.5)
+
+    def test_stock_failure_retains_issuer_prices_and_reports_reason(self):
+        day = "2025-03-03"
+        prices = pd.DataFrame({"open": [100.], "high": [104.], "low": [99.], "close": [103.], "volume": [1.]},
+                              index=pd.to_datetime([day]))
+        for code, reason in (("399997", "stock_sources_unavailable"), ("932139", "unsupported_symbol")):
+            entry = {**ENTRY, "code": code, "index_as_of": day}
+            context = ({}, {code: prices}, {"sectors": [entry], "model_as_of": day}, {code: {}})
+            with self.subTest(code=code), patch.object(fund_charts, "fund_context", return_value=context), \
+                    patch.object(fund_charts, "last_completed_session", return_value=day), \
+                    patch.object(fund_charts, "stock_chart_history", side_effect=FetchError([])) as fetch:
+                result = fund_charts.sector_history("110022", code)
+                self.assertEqual(result["quality"]["stock_chart_status"], reason)
+                self.assertIsNone(result["volume_unit"])
+                self.assertEqual(result["rows"][0]["close"], 103.)
+                self.assertEqual(fetch.call_count, int(code == "399997"))
+
     def test_payload_keeps_missing_sessions_and_does_not_infer_volume(self):
         sessions = pd.to_datetime(["2025-01-02", "2025-01-03", "2025-01-06"])
         frame = pd.DataFrame({"open": [100, 102], "high": [102, 103], "low": [99, 101],

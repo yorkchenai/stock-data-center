@@ -44,28 +44,34 @@ test("static bundle verifies share, model day, sector, and expiry dates",()=>{
   assert.throws(()=>normalizeChartFile({...pack,indices:[{...history,model_as_of:dates[1]}]}),/不一致/);
   assert.throws(()=>normalizeChartFile({...pack,indices:[]}),/数量/);
 });
-test("capability disables unverified volume and shows raw close without invented candles",()=>{
-  const out=normalizeIndex(history,fund.code,entry,history.model_as_of);
+test("known stock engine units display with no legacy authorization fields",()=>{
+  const out=normalizeIndex({...history,volume_unit:null},fund.code,entry,history.model_as_of);
   assert.equal(out.volume_unit,null);
   assert.equal(out.rows[0].volume,null);
   assert.equal(out.rows[0].open,null);
   assert.deepEqual(indexCapabilities(out.rows,out.volume_unit),{candles:false,volume:false});
-  const withUnit={...history,source:evidence,
+  const withUnit={...history,
     rows:history.rows.map((row)=>({...row,open:109,high:114,low:107}))};
   const audited=normalizeIndex(withUnit,fund.code,entry,history.model_as_of);
   assert.equal(audited.volume_unit,"手");
+  assert.equal(audited.rows[0].volume,800);
   assert.deepEqual(indexCapabilities(audited.rows,audited.volume_unit),{candles:true,volume:true});
 });
-test("volume rejects unknown units, a wrong factor, wrong purpose or ambiguous evidence",()=>{
-  for (const changes of [{raw_unit:"斤"},{raw_unit:"份"},{conversion_factor:1},{scope:"ETF"},
-    {raw_field:"tradingValue"},{permission:"license_unverified"}]) {
-    const raw={...history,source:{...evidence,volume:{...evidence.volume,...changes}}};
-    const output=normalizeIndex(raw,fund.code,entry,history.model_as_of);
-    assert.equal(output.volume_unit,null);
-    assert.equal(output.rows[0].close,110);
-  }
-  const raw={...history,source:{...evidence,volume_unit_evidence:"http://example.test/unit"}};
-  assert.equal(normalizeIndex(raw,fund.code,entry,history.model_as_of).volume_unit,null);
+test("unknown units are excluded and display units do not require permission metadata",()=>{
+  const wrong=normalizeIndex({...history,volume_unit:"斤"},fund.code,entry,history.model_as_of);
+  assert.equal(wrong.volume_unit,null);
+  assert.equal(wrong.rows[0].close,110);
+  const raw={...history,source:{...history.source,volume_unit_evidence:"http://example.test/unit"}};
+  const displayed=normalizeIndex(raw,fund.code,entry,history.model_as_of);
+  assert.equal(displayed.volume_unit,"手");
+  assert.equal(displayed.source.volume_unit_evidence,null);
+});
+test("independent chart cutoff may differ from the linked model index cutoff",()=>{
+  const early={...history,last:dates[2],model_index_as_of:entry.index_as_of,rows:history.rows.slice(0,3)};
+  const accepted=normalizeIndex(early,fund.code,entry,history.model_as_of);
+  assert.equal(accepted.last,dates[2]);
+  assert.equal(accepted.model_index_as_of,dates[3]);
+  assert.throws(()=>normalizeIndex({...early,model_index_as_of:dates[1]},fund.code,entry,history.model_as_of),/覆盖日期/);
 });
 test("precomputed volume warmup restarts across missing or invalid rows without hiding candles",()=>{
   const sessions=["2024-01-02","2024-01-03","2024-01-04","2024-01-05","2024-01-08","2024-01-09",

@@ -181,6 +181,13 @@ class ProviderTests(TestCase):
         self.assertEqual(frame.volume_lots.iloc[0], 123)
         self.assertEqual(frame.turnover_cny.iloc[0], 45678)
 
+    def test_eastmoney_index_rejects_matching_code_in_wrong_market(self):
+        instrument = resolve_symbol("sh000991", kind="index")
+        query = {"data": {"code": "000991", "market": 0, "klines": ["2025-01-06,10,11,12,9,123,45678"]}}
+        with mock.patch.object(data, "request_json", return_value=query):
+            with self.assertRaisesRegex(ValueError, "different instrument"):
+                data.eastmoney(instrument, "2025-01-01", "2025-01-10")
+
     def test_tencent_units_and_unadjusted_parameters(self):
         import akshare as ak
         frame = numerical_fixture([10, 11]).rename(columns={"volume_lots": "volume", "turnover_cny": "amount"})

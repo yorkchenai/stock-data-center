@@ -70,9 +70,8 @@ function fixtureBundle() {
     fund_as_of:end,model_as_of:end,sectors,
   },indices:sectors.map(({code,name},i)=>({
     schema_version:1,kind:"fund_sector_history",fund_code:first.code,code,name,
-    model_as_of:end,first:first.rows[0].date,last:end,currency:"CNY",basis:"price",volume_unit:i?null:"股",
-    source:{url:"https://example.test/fixture",name:"合成测试",volume_unit_evidence:i?null:"https://example.test/unit",
-      volume:i?null:{raw_unit:"股",raw_field:"volume",conversion_factor:1,scope:"index_constituents",permission:"authorized_local_use"}},
+    model_as_of:end,first:first.rows[0].date,last:end,currency:"CNY",basis:"price",volume_unit:i?null:"手",
+    source:{url:"https://example.test/fixture",name:"合成测试"},
     quality:{internal_gaps:0},rows:first.rows.map((row)=>({date:row.date,close:row.unit_nav*100,
       open:i?null:row.unit_nav*99,high:i?null:row.unit_nav*102,low:i?null:row.unit_nav*98,
       MA5:row.unit_nav*100,MA10:row.unit_nav*100,MA20:row.unit_nav*100,MA60:row.unit_nav*100,
@@ -171,9 +170,9 @@ try {
       buffer:Buffer.from(JSON.stringify(fixtureBundle()))});
     await page.locator('#sector-chart[data-chart-mode="candles"]').waitFor();
     assert.equal(await page.locator("#sector-vol label").count(),3);
-    assert.match(await page.locator("#sector-vol").innerText(),/股/);
+    assert.match(await page.locator("#sector-vol").innerText(),/手/);
     assert.equal(await page.locator('#sector-chart table tr').count()>=3,true);
-    assert.match(await page.locator('#sector-volume-note').innerText(),/指数样本证券汇总/);
+    assert.match(await page.locator('#sector-volume-note').innerText(),/日成交量 · 手/);
     if (!mobile) {
       await page.locator("#sector-chart").scrollIntoViewIfNeeded();
       const plot=await page.locator("#sector-chart").boundingBox();

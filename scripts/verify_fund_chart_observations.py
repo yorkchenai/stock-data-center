@@ -1,11 +1,11 @@
-"""Cross-check a small set of rendered chart readings against the CSI source."""
+"""Cross-check the rendered last bar through the stock engine's selected provider."""
 from argparse import ArgumentParser
+from datetime import date, timedelta
 import json
 from pathlib import Path
 
-import numpy as np
-
-from stock_analysis.sector_data import csi_history, read_catalog, read_with_transient_retry
+from stock_analysis.data import fetch_daily
+from stock_analysis.symbols import resolve_symbol
 
 
 def main():
@@ -13,17 +13,18 @@ def main():
     parser.add_argument("observations", type=Path)
     args = parser.parse_args()
     data = json.loads(args.observations.read_text(encoding="utf-8"))
-    catalog = read_catalog()
     for fund in data["funds"].values():
         ohlc, code = fund["ohlc"], fund["selected"]
         day = ohlc["date"]
-        frame = read_with_transient_retry(lambda: csi_history(catalog[code], day, day))
-        original = frame.loc[day]
+        start = (date.fromisoformat(day) - timedelta(days=14)).isoformat()
+        frame, report = fetch_daily(resolve_symbol(code, kind="index"), start, day, source=fund["source"])
+        original = frame.set_index("date").loc[day]
         for key in ("open", "high", "low", "close"):
-            audited = float(original[key]) if np.isfinite(original[key]) else None
-            if audited != ohlc[key]:
+            if float(original[key]) != ohlc[key]:
                 raise SystemExit(f"Source mismatch: {code} {day} {key}")
-        fund["verified_last_ohlc_against_issuer"] = True
+        if report["volume_unit"] != "100-share lots" or float(original.volume_lots) != fund["volume"]:
+            raise SystemExit(f"Source mismatch: {code} {day} volume")
+        fund["verified_last_ohlcv_against_provider"] = True
     args.observations.write_text(json.dumps(data, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
 
 

@@ -86,6 +86,7 @@ export function createSectorPanel() {
     const about=$("sector-index-meta");
     about.replaceChildren(`价格指数 · 点 · ${history.first} 至 ${history.last} · `,
       newLink(history.source.name,history.source.url));
+    if (history.model_index_as_of !== history.last) about.append(` · 关联模型指数数据截至 ${history.model_index_as_of}`);
     const gaps=history.quality?.internal_gaps;
     if (Number.isInteger(gaps) && gaps) about.append(` · 未补齐 ${gaps} 个开市缺口`);
     if (dayAge(history.last)>7) about.append(" · 行情日期已超过 7 天");

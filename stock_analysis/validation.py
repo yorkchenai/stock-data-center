@@ -8,6 +8,17 @@ COLUMNS = ["date", "open", "close", "high", "low", "volume_lots", "turnover_cny"
 NUMERIC_COLUMNS = COLUMNS[1:]
 
 
+def last_completed_session(now):
+    import exchange_calendars as xcals
+
+    today = pd.Timestamp(now).tz_convert("Asia/Shanghai").date().isoformat()
+    calendar = xcals.get_calendar("XSHG")
+    day = calendar.date_to_session(today, direction="previous")
+    if calendar.session_close(day) > now:
+        day = calendar.previous_session(day)
+    return day.date().isoformat()
+
+
 def normalize_daily(frame):
     missing = set(COLUMNS) - set(frame.columns)
     if missing:

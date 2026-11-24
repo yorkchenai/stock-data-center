@@ -96,15 +96,16 @@ export function normalizeDaily(input) {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+export function rollingMean(values, period) {
+  return values.map((_, i) => i + 1 < period ? null :
+    values.slice(i + 1 - period, i + 1).reduce((total, value) => total + value, 0) / period);
+}
+
 export function calculateIndicators(input) {
   const rows = normalizeDaily(input),
     close = rows.map((r) => r.close),
     length = rows.length;
   const mean = (values) => values.reduce((a, b) => a + b, 0) / values.length;
-  const rolling = (values, period) =>
-    values.map((_, i) =>
-      i + 1 < period ? null : mean(values.slice(i + 1 - period, i + 1)),
-    );
   const ema = (values, span) => {
     const alpha = 2 / (span + 1),
       out = [values[0]];
@@ -116,9 +117,9 @@ export function calculateIndicators(input) {
     change_pct: close.map((v, i) => (i ? (v / close[i - 1] - 1) * 100 : null)),
   };
   for (const period of [5, 10, 20, 60])
-    columns[`MA${period}`] = rolling(close, period);
+    columns[`MA${period}`] = rollingMean(close, period);
   for (const period of [5, 10])
-    columns[`VOL${period}`] = rolling(
+    columns[`VOL${period}`] = rollingMean(
       rows.map((r) => r.volume_lots),
       period,
     );

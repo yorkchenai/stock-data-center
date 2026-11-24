@@ -22,7 +22,7 @@ export function createSectorPanel() {
   const container=$("sector-chart");
   const graph=createSectorChart(container,$("sector-ohlc"),[$("sector-ma"),$("sector-vol")],
     $("sector-volume-note"),$("sector-history-note"));
-  let request, indexRequest, generation=0, indexVersion=0, code, report, local=false, bundle, current, history, period="1y";
+  let request, indexRequest, generation=0, indexVersion=0, code, report, mode, onlineContext, bundle, current, history, period="1y";
   const histories=new Map();
   function text(id,value) { $(id).textContent=value; }
   function hide(id,hidden) { $(id).hidden=hidden; }
@@ -37,7 +37,7 @@ export function createSectorPanel() {
     indexVersion++;
     request?.abort();
     indexRequest?.abort();
-    code=report=current=history=null;
+    code=report=current=history=mode=onlineContext=null;
     histories.clear();
     graph.clear({reset:true});
     clearDetails();
@@ -88,6 +88,7 @@ export function createSectorPanel() {
     about.replaceChildren(`指数行情 · 点 · ${history.first} 至 ${history.last} · `,
       newLink(history.source.name,history.source.url));
     if (history.model_index_as_of !== history.last) about.append(` · 关联模型指数数据截至 ${history.model_index_as_of}`);
+    if (history.transport==="static") about.append(" · 静态历史");
     const gaps=history.quality?.internal_gaps;
     if (Number.isInteger(gaps) && gaps) about.append(` · 未补齐 ${gaps} 个开市缺口`);
     if (dayAge(history.last)>7) about.append(" · 行情日期已超过 7 天");
@@ -121,7 +122,8 @@ export function createSectorPanel() {
     try {
       let confirmed=histories.get(entry.code)??bundle?.indexes.get(entry.code);
       if (!confirmed) {
-        const raw=await fetchLocal(`${code}/sectors/${entry.code}`,indexRequest.signal,300_000);
+        const raw=onlineContext?mode.browser.history(code,entry,onlineContext):
+          await fetchLocal(`${code}/sectors/${entry.code}`,indexRequest.signal,300_000);
         if (id!==indexVersion||context!==generation) return;
         confirmed=normalizeIndex(raw,code,entry,report.model_as_of);
         histories.set(entry.code,confirmed);
@@ -133,31 +135,40 @@ export function createSectorPanel() {
       if (id===indexVersion&&context===generation) text("sector-status",error.message);
     }
   }
-  async function start(nextCode,nextLocal,nextBundle,refresh=false) {
+  async function start(nextCode,nextMode,refresh=false) {
     clear();
     const version=generation;
     code=nextCode;
-    local=nextLocal;
-    bundle=nextBundle;
+    mode=nextMode;
+    bundle=refresh?null:mode.bundle;
+    const available=mode.local || Boolean(mode.browser && mode.fund?.mode==="reported");
     period="1y";
-    hide("sector-refresh",!local);
+    hide("sector-refresh",!available);
     $("sector-refresh").disabled=true;
     if (!code) return;
-    if (!local&&!bundle) {
-      text("sector-status","静态页面支持导入经许可的基金图表数据包。");
+    if (!available&&!bundle) {
+      text("sector-status","可导入包含关联指数历史的基金图表包。");
       return;
     }
     text("sector-status","正在识别关联板块并检查指数历史。首次加载可能需要几分钟。");
     request=new AbortController();
     try {
-      const source=bundle && !refresh ? bundle.analysis : normalizeAssociations(
+      if (!bundle && !mode.local) {
+        const result=await mode.browser.analyze(mode.fund);
+        if (version!==generation) return;
+        onlineContext=result;
+      }
+      const source=bundle?bundle.analysis:normalizeAssociations(onlineContext?.report??
         await fetchLocal(`${code}/sectors`,request.signal,300_000),nextCode);
       if (version!==generation) return;
       report=source;
       const timestamp=stamp(report.computed_at);
       const outdated=report.model_age_sessions>5 || dayAge(report.model_as_of)>7
         || Date.now()-Date.parse(report.computed_at)>7*86400000;
-      text("sector-analysis-meta",`净值截至 ${report.fund_as_of} · 模型截至 ${report.model_as_of??"—"} · 计算时间 ${timestamp}（上海）${outdated?" · 数据可能已过期":""}`);
+      const coverage=report.index_coverage;
+      const coverageText=coverage?
+        ` · 指数覆盖 ${coverage.available}/${coverage.total}${coverage.missing.length?` · 未纳入 ${coverage.missing.join("、")}`:""}`:"";
+      text("sector-analysis-meta",`净值截至 ${report.fund_as_of} · 模型截至 ${report.model_as_of??"—"} · 计算时间 ${timestamp}（上海）${outdated?" · 数据可能已过期":""}${coverageText}`);
       if (!report.sectors.length) {
         text("sector-status",STATUSES[report.status]??"当前暂无可用关联分析。");
         return;
@@ -170,7 +181,6 @@ export function createSectorPanel() {
         b.addEventListener("click",()=>void select(entry));
         $("sector-tabs").append(b);
       }
-      if (refresh) bundle=null;
       await select(report.sectors[0]);
     } catch (error) {
       if (version===generation) text("sector-status",error.message);
@@ -178,7 +188,7 @@ export function createSectorPanel() {
       if (version===generation) $("sector-refresh").disabled=false;
     }
   }
-  $("sector-refresh").addEventListener("click",()=>{if(local&&code) void start(code,local,null,true);});
+  $("sector-refresh").addEventListener("click",()=>{if(code&&mode) void start(code,mode,true);});
   for (const [key,label] of [["3m","近3月"],["6m","近6月"],["1y","近1年"],["3y","近3年"],["5y","近5年"],["all","全部历史"],["custom","自定义"]]) {
     const button=document.createElement("button");
     button.type="button";

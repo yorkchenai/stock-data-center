@@ -93,7 +93,7 @@ export function normalizeFund(raw) {
     manager: optionalText(raw.manager), fund_manager: optionalText(raw.fund_manager),
     size: optionalText(raw.size), fee: optionalText(raw.fee), reference: optionalText(raw.reference),
     holdings: disclosedHoldings, related, benchmark, benchmark_disclosure: benchmarkDisclosure,
-    risk_free: riskFree, rows, return_basis: basis,
+    risk_free: riskFree, rows, return_basis: basis, valuation_frequency:raw.valuation_frequency==="daily"?"daily":null,
     return_note: optionalText(raw.return_note), source,
     normalFrequency, mode: raw.synthetic === true ? "synthetic" : "reported",
   };

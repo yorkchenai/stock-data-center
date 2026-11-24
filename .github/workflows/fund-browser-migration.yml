@@ -1,0 +1,44 @@
+name: Fund browser migration
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/fund-browser-migration.yml'
+      - 'web/funds/**'
+      - 'scripts/*browser_fund_migration*'
+      - 'stock_analysis/pages.py'
+      - 'web/engine.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci --ignore-scripts
+      - run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+      - run: python -m stock_analysis.pages --output work/pages-site
+      - name: Run PR assets within an isolated browser at the project origin
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          node scripts/test_browser_fund_migration.mjs
+      - name: Compare with Python on matching history
+        run: python -m scripts.verify_browser_fund_migration work/browser-fund-parity-input.json work/browser-funds/python-summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-fund-migration-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            work/browser-funds/*.json
+            work/browser-funds/*.png
+          retention-days: 14
+          if-no-files-found: error

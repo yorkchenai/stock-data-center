@@ -4,6 +4,8 @@ import { createFundCharts } from "./charts.mjs";
 import { BUNDLE_BYTES, normalizeChartFile } from "./chart-data.mjs";
 import { createNavChart } from "./nav-chart.mjs";
 import { createSectorPanel } from "./sector-panel.mjs";
+import { fetchFund, fetchFundDirectory, readPageData } from "./providers.mjs";
+import { createBrowserSectorProvider } from "./sector-browser.mjs";
 
 const $ = (id) => document.getElementById(id);
 function tag(name, text, attrs = {}) {
@@ -47,9 +49,21 @@ const bundles = new Map();
 let navMode = "adjusted";
 let navRange = [];
 const loopback = ["127.0.0.1","localhost","[::1]"].includes(location.hostname);
+const online = document.documentElement.dataset.mode==="pages";
+let pageConfig;
+function fetchPageConfig() {
+  if (!pageConfig) {
+    pageConfig=readPageData("fund-config.json").then((config)=>{
+      if (config.schema_version!==1 || !config.indices) throw new Error("基金网页配置资料不完整。");
+      return config;
+    }).catch((error)=>{pageConfig=null;throw error;});
+  }
+  return pageConfig;
+}
+const browserSectors = online?createBrowserSectorProvider(fetchPageConfig):null;
 const url = (code) => new URL(code ? `?fund=${code}` : "funds.html", location.href);
 const localURL = (path) => new URL("/api/funds" + path, location.origin);
-const noData = "未载入可用净值。请导入该基金的 JSON。";
+const noData = "未载入可用净值。";
 let local = false;
 let routeNumber = 0;
 let searchNumber = 0;
@@ -100,7 +114,8 @@ async function readApi(path) {
 }
 function loadFund(code) {
   if (!beingLoaded.has(code)) {
-    beingLoaded.set(code,readApi("/" + code).then((raw)=>{
+    const pending=online?fetchPageConfig().then((config)=>fetchFund(code,config)):readApi("/" + code);
+    beingLoaded.set(code,pending.then((raw)=>{
       const fund = normalizeFund(raw);
       if (fund.code !== code) throw new Error("查询结果的基金代码不一致。");
       recordFund(fund);
@@ -185,7 +200,7 @@ function renderList() {
         const remove = tag("button","移除",{"aria-label":`移除 ${row.code}`});
         remove.addEventListener("click",()=>{state.list=state.list.filter((entry)=>entry.code!==row.code);save();renderList();});
         td.append(star," ",remove);
-        if (local) {
+        if (local || online) {
           const refresh = tag("button",fund ? "刷新" : "载入",{"aria-label":`载入 ${row.code} 的净值`});
           refresh.addEventListener("click",()=>{refresh.disabled=true;void loadListFund(row.code);});
           td.append(" ",refresh);
@@ -219,7 +234,7 @@ function renderSearch(results, term) {
       add.disabled=true;
       add.textContent="已添加";
       renderList();
-      if (local && !loaded.has(entry.code)) {
+      if ((local || online) && !loaded.has(entry.code)) {
         await loadListFund(entry.code);
       } else if (!loaded.has(entry.code)) status("list-status",`已添加 ${entry.code}。请导入该基金确认净值 JSON。`);
       else status("list-status",`已添加 ${entry.code}。`);
@@ -228,7 +243,7 @@ function renderSearch(results, term) {
     list.append(row);
   }
   $("search-result").replaceChildren(list);
-  if (FUND_CODE.test(term) && !local && !loaded.has(term)) {
+  if (FUND_CODE.test(term) && !local && !online && !loaded.has(term)) {
     $("search-result").append(tag("p","可按代码登记。导入确认净值后显示名称与收益。",{class:"fund-note"}));
   }
 }
@@ -424,17 +439,19 @@ async function route() {
   renderAnalysis();
   status("detail-status",loaded.has(current) ? "" : noData);
   window.scrollTo(0,0);
-  if (loaded.has(current) || !local) void sectors.start(current,local,bundles.get(current));
-  if (local && !loaded.has(current)) {
+  const startSectors=(fund)=>sectors.start(current,{local,bundle:bundles.get(current),browser:browserSectors,fund});
+  if (loaded.has(current) || (!local && !online)) void startSectors(loaded.get(current));
+  if ((local || online) && !loaded.has(current)) {
     status("detail-status",`正在载入 ${current} 的确认净值…`);
     try {
       const fund = await loadFund(current);
       if (version!==routeNumber) return;
+      if (online) addFund(catalog.get(current));
       status("detail-status","");
       syncButtons();
       renderIdentity(current,fund);
       renderAnalysis();
-      void sectors.start(current,local,bundles.get(current));
+      void startSectors(fund);
     } catch (error) {if (version===routeNumber) status("detail-status",error.message,true);}
   }
 }
@@ -486,13 +503,19 @@ $("fund-search").addEventListener("submit",async (event)=>{
   event.preventDefault();
   const number = ++searchNumber;
   const term = $("search-term").value.trim();
+  if (online && FUND_CODE.test(term)) {
+    history.pushState(null,"",url(term));
+    await route();
+    return;
+  }
   let results = searchCatalog(catalog,term);
-  if (local && term) {
+  if (term && (local || (online && !results.length))) {
     status("list-status","正在查找基金目录…");
     try {
-      const response = await readApi("/search?q=" + encodeURIComponent(term));
+      const entries = local?(await readApi("/search?q=" + encodeURIComponent(term))).funds:
+        (await fetchFundDirectory()).values();
       if (number!==searchNumber) return;
-      for (const entry of response.funds) catalog.set(entry.code,entry);
+      for (const entry of entries) catalog.set(entry.code,entry);
       results=searchCatalog(catalog,term);
       status("list-status","");
     } catch (error) {if (number===searchNumber) status("list-status",error.message,true);}
@@ -518,9 +541,10 @@ $("fund-range").addEventListener("submit",(event)=>{
 });
 $("show-more-history").addEventListener("click",()=>{historyLimit+=60;historyTable(loaded.get(selectedCode));});
 
-if (loopback) {
+if (loopback && !online) {
   try {local=(await readApi("/status")).local===true;}
   catch {local=false;}
 }
-$("data-mode").textContent = local ? "本地模式可自动加载基金净值与相关板块，也可导入数据包。" : "静态页面支持导入经许可的净值 JSON 或基金图表包。文件只在浏览器处理。";
+$("data-mode").textContent = online ? "输入六位基金代码直接查询。名称可搜索并添加至列表。" :
+  local ? "本地模式可自动加载基金净值与相关板块，也可导入数据包。" : "静态页面支持导入净值 JSON 或基金图表包。";
 await route();

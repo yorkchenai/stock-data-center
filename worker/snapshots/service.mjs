@@ -5,18 +5,24 @@ import { SNAPSHOT_ID, selectDetails, snapshotMetadata } from "./details.mjs";
 
 const response = (status, message, extra={}) => ({schema_version:1,status,message,...extra});
 const unavailable=()=>response("data_unavailable","行情源不可用或数据未通过校验。",{retry_after_seconds:15});
+const presentSummary=(snapshot,cache)=>({...snapshotMetadata(snapshot),...snapshot.summary,cache});
 
 export function analysisService({compute,calendar,modelVersion,clock=()=>new Date(),observe=()=>{}}) {
   if (!modelVersion) throw new Error("必须配置分析模型版本。");
   const ms=()=>clock().getTime();
 
-  async function build(store,key,token,query,refresh) {
+  async function build(store,key,token,query,refresh,requestId,present) {
     const started=ms();
+    let upstreamRequests=0;
+    const onUpstream=(trace)=>{
+      upstreamRequests++;
+      observe({event:"snapshot_upstream",request_id:requestId,...trace});
+    };
     try {
       let data;
-      try { data=await compute(query,{refresh}); }
-      catch (error) {
-        observe({event:"snapshot_failure",symbol:query.symbol,reason:error.message});
+      try { data=await compute(query,{refresh,onUpstream}); }
+      catch {
+        observe({event:"snapshot_failure",request_id:requestId,symbol:query.symbol,upstream_requests:upstreamRequests});
         await store.cooldown(key,token,ms());
         return unavailable();
       }
@@ -26,12 +32,12 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
         expires_at:new Date(snapshotExpiry(query,data,calendar,now)).toISOString(),...data};
       const record=await createRecord(snapshot);
       await store.publish(key,token,snapshot,record,ms());
-      observe({event:"snapshot_publish",symbol:snapshot.symbol,snapshot_id:snapshot.snapshot_id,
+      observe({event:"snapshot_publish",request_id:requestId,symbol:snapshot.symbol,snapshot_id:snapshot.snapshot_id,
         status:snapshot.status,bytes:record.bytes,compressed_bytes:record.compressed_bytes,
-        duration_ms:ms()-started});
-      return {...snapshotMetadata(snapshot),...snapshot.summary,cache:"miss"};
-    } catch (error) {
-      observe({event:"snapshot_write_error",symbol:query.symbol,reason:error.message});
+        upstream_requests:upstreamRequests,compute_ms:now.getTime()-started,duration_ms:ms()-started});
+      return present(snapshot,"miss");
+    } catch {
+      observe({event:"snapshot_write_error",request_id:requestId,symbol:query.symbol,upstream_requests:upstreamRequests});
       return response("cache_unavailable","快照存储或写入失败。");
     } finally {
       await store.release(key,token).catch(()=>{});
@@ -39,7 +45,8 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
   }
 
   return {
-    async initial(binding,args,{waitUntil,waitMs=7_000}={}) {
+    async initial(binding,args,{waitUntil,waitMs=7_000,present=presentSummary,requestId=crypto.randomUUID()}={}) {
+      const started=ms();
       const requestedAfter=args?.after_snapshot_id;
       if (requestedAfter!==undefined && (typeof requestedAfter!=="string"||!SNAPSHOT_ID.test(requestedAfter)||args.refresh)) {
         return response("invalid_arguments","续查刷新需要有效的旧快照编号，且不能再次请求刷新。");
@@ -49,8 +56,9 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
       catch (error) { return response("invalid_arguments",error.message); }
       const key=JSON.stringify([modelVersion,query]);
       const cacheHit=(snapshot)=>{
-        observe({event:"snapshot_hit",symbol:snapshot.symbol,snapshot_id:snapshot.snapshot_id});
-        return {...snapshotMetadata(snapshot),...snapshot.summary,cache:"hit"};
+        observe({event:"snapshot_hit",request_id:requestId,symbol:snapshot.symbol,snapshot_id:snapshot.snapshot_id,
+          upstream_requests:0,duration_ms:ms()-started});
+        return present(snapshot,"hit");
       };
       const building=(previous)=>response("building",previous?
         "快照正在刷新。按同一代码和返回的 after_snapshot_id 续查。":
@@ -88,7 +96,7 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
           await store.release(key,token);
           return cacheHit(after);
         }
-        const work=build(store,key,token,query,args.refresh===true);
+        const work=build(store,key,token,query,args.refresh===true,requestId,present);
         if (!waitUntil) return await work;
         waitUntil(work);
         let timer;
@@ -102,6 +110,7 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
       }
     },
     async details(binding,args,options={}) {
+      const started=ms();
       if (!SNAPSHOT_ID.test(args?.snapshot_id??"") || !["stock","fund"].includes(args?.asset_type)) {
         return response("invalid_arguments","请提供首次查询返回的快照编号和标的类型。");
       }
@@ -115,6 +124,7 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
         }
       } catch(error) {return response("invalid_arguments",error.message);}
       let snapshot;
+      let readMs;
       try {
         const store=snapshotStore(binding);
         const head=await store.header(args.snapshot_id);
@@ -125,12 +135,14 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
           return response("expired","此快照已过期，请重新查询生成新快照。",{snapshot_id:head.id});
         }
         snapshot=await store.load(head);
+        readMs=ms()-started;
       } catch {
         return response("cache_unavailable","快照缓存不可用。");
       }
       try {
         const result=selectDetails(snapshot,args,options);
-        observe({event:"snapshot_read",snapshot_id:snapshot.snapshot_id,symbol,category:args.category});
+        observe({event:"snapshot_read",request_id:options.requestId,snapshot_id:snapshot.snapshot_id,symbol,
+          category:args.category,upstream_requests:0,d1_read_and_decode_ms:readMs,duration_ms:ms()-started});
         return result;
       } catch (error) {
         return response("invalid_arguments",error.message);

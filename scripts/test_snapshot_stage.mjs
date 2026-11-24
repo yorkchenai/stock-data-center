@@ -59,7 +59,7 @@ const trace=(event)=>{
 const auth=(request,env)=>request.headers.get("Authorization")==="Bearer "+env.TEST_SECRET;
 const worker=createSnapshotWorker({calendar,config,modelVersion,observe:trace,
   ${sample?'compute:createSnapshotCompute({calendar,config,fetcher:replay,observe:(event)=>trace({event:"snapshot_upstream",...event})}),':''}
-  authorize:auth});
+  authorize:auth,authorizePage:(request)=>new URL(request.url).hostname==="127.0.0.1"});
 export default {fetch(request,env,ctx) {
   if(auth(request,env) && new URL(request.url).pathname==="/__stage_trace") return Response.json(events);
   return worker.fetch(request,env,ctx);
@@ -90,6 +90,7 @@ const startServer=createServer(async(req,res)=>{
 });
 await new Promise((done)=>startServer.listen(8767,"127.0.0.1",done));
 const results=[];
+const fallbackChecks=[];
 let browser;
 
 const wait=(ms)=>new Promise((done)=>setTimeout(done,ms));
@@ -136,8 +137,68 @@ async function latestSnapshot(type,symbol) {
 }
 const report=()=>({sample:sample?"deterministic fixture":"live vendor",stage:"local workerd + persisted D1",
   model_version:version,results,
+  browser_fallback:fallbackChecks,
   upstream:coldEvents.filter((event)=>event.event==="snapshot_upstream"),
   storage:coldEvents.filter((event)=>event.event==="snapshot_publish")});
+
+async function verifyFallback(type,mode) {
+  const context=await browser.newContext({viewport:{width:type==="fund"?390:1440,height:900}});
+  try {
+    const page=await context.newPage();
+    const isStock=type==="stock";
+    const code=isStock?"300078":"110022";
+    const sessions=JSON.parse(calendar).sessions.filter((d)=>d>="2025-01-01"&&d<="2026-11-23");
+    const headers={"Access-Control-Allow-Origin":"*"};
+    let sourceRequests=0;
+    await page.route(service+"/api/analysis?*",async(route)=>{
+      if (mode==="timeout") {
+        await wait(12_000);
+        await route.abort().catch(()=>{});
+      } else if (mode==="version") {
+        const response=await route.fetch();
+        const body=await response.json();
+        if (body.detail_status==="available") body.model_version="incompatible-model";
+        await route.fulfill({response,json:body});
+      } else await route.fulfill({status:503,headers,json:{status:"cache_unavailable",message:"测试服务暂不可用"}});
+    });
+    await page.route("https://push2his.eastmoney.com/**",(route)=>{
+      const p=new URL(route.request().url()).searchParams;
+      const secid=p.get("secid");
+      if (secid!=="0.300078") return route.abort();
+      sourceRequests++;
+      const klines=sessions.filter((date)=>date.replaceAll("-","")>=p.get("beg")&&date.replaceAll("-","")<=p.get("end"))
+        .map((date,i)=>[date,10+i/100,11+i/100,12+i/100,9+i/100,10000,200000].join(","));
+      return route.fulfill({headers,json:{data:{code,market:0,name:"浏览器独立股票",klines}}});
+    });
+    await page.route("https://fund.eastmoney.com/**",(route)=>{
+      const nav=route.request().url().includes("pingzhongdata");
+      if (nav) sourceRequests++;
+      const rows=sessions.map((date,i)=>({x:Date.parse(date),y:2+i/1000,unitMoney:""}));
+      const body=nav?`var fS_code="${code}";var fS_name="浏览器独立基金";var Data_netWorthTrend=${JSON.stringify(rows)};`:
+        `var r=[["${code}","T","浏览器独立基金","债券型","T"]];`;
+      return route.fulfill({headers,contentType:"application/javascript",body});
+    });
+    if (isStock) {
+      await page.goto(origin+"/index.html");
+      await page.locator("#load").waitFor();
+      await page.locator("#symbol").fill(code);
+      await page.locator("#kind").selectOption("stock");
+      await page.locator("#start").fill("2025-01-01");
+      await page.locator("#end").fill("2026-11-23");
+      await page.locator("#load").click();
+    } else await page.goto(origin+"/funds.html?fund="+code);
+    const selector=isStock?"#data-timestamp":"#fund-source";
+    await page.waitForFunction((id)=>document.querySelector(id).textContent.includes("网页独立"),selector,{timeout:17_000});
+    const label=await page.locator(selector).textContent();
+    assert.ok(sourceRequests>0);
+    assert.match(label,/2026-11-23/);
+    assert.ok(label.includes(version));
+    assert.match(label,mode==="version"?/版本不兼容/:mode==="timeout"?/加载超时/:/服务暂不可用/);
+    assert.doesNotMatch(label,/共享快照 [a-f0-9]{8}-/);
+    assert.equal(await page.locator(isStock?".pane-legend":"#core-metrics article").count(),isStock?5:6);
+    return {type,mode,passed:true};
+  } finally {await context.close();}
+}
 try {
   for (const [type,symbol] of symbols) {
     try {
@@ -226,6 +287,14 @@ try {
   }
   await wait(250);
   const after=(await traces()).filter((event)=>event.event==="snapshot_upstream").length;
+  if (sample) {
+    // The injected browser vendor is distinct from the snapshot feed, so the
+    // label and request count prove fallback instead of mixing the two modes.
+    fallbackChecks.push(...await Promise.all([
+      verifyFallback("stock","failure"),verifyFallback("fund","timeout"),
+      verifyFallback("stock","version"),verifyFallback("fund","version"),
+    ]));
+  }
   const summary={...report(),detail_upstream_requests:after};
   await mkdir(resolve(output,".."),{recursive:true});
   await writeFile(output,JSON.stringify(summary,null,2));

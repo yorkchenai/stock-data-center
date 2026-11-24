@@ -380,9 +380,7 @@ function displayDataset(dataset) {
   elements.end.disabled = !canLoad;
   elements["data-timestamp"].textContent = dataset.snapshot
     ? `存档样本 · 构建于 ${dataset.generated_at_utc}；非最新行情`
-    : dataset.fetched_at_utc
-      ? `取数完成 ${dataset.fetched_at_utc}`
-      : "";
+    : [dataset.analysis_label, dataset.fetched_at_utc && `取数完成 ${dataset.fetched_at_utc}`].filter(Boolean).join(" · ");
   const check = dataset.validation;
   elements["validation-note"].textContent = check
     ? `已确认停牌 ${check.confirmed_suspension_sessions?.length || 0} 日；未核实缺口 ${check.unverified_missing_sessions?.length ?? check.missing_sessions.length} 日；停牌数据冲突 ${check.suspension_data_conflicts?.length || 0} 日。未核实缺口包括上市前或范围边界，不能直接认定为源数据缺失。股票完整性仍需核实。`
@@ -411,18 +409,21 @@ async function loadDemo() {
 }
 
 async function loadPagesAnalysis(options, snapshotId) {
+  let fallback;
   if (snapshotsEnabled) {
     try {
       const snapshot=await getPageSnapshot({asset_type:"stock",...options},snapshotId);
       return {...snapshot.data,analysis_label:snapshotNote(snapshot)};
     } catch (error) {
       if (snapshotId) throw error;
+      fallback=error.name==="TimeoutError"?"共享快照加载超时":error.message;
     }
   } else if (snapshotId) {
     throw new Error("此页面未配置该共享快照服务。");
   }
   const data=await fetchHistory(options,await loadCalendar());
-  return {...data,analysis_label:`网页独立取数 · ${data.source} · 截至 ${data.rows.at(-1).date} · ${browserModelVersion}`};
+  const label=["网页独立取数",data.source,`截至 ${data.rows.at(-1).date}`,browserModelVersion,fallback];
+  return {...data,analysis_label:label.filter(Boolean).join(" · ")};
 }
 
 async function runLoad(action, message = "正在读取已保存样本，请稍候…") {

@@ -172,9 +172,9 @@ export function sectorAnalysisPayload(fund,histories,config,bounds,computed=new 
 }
 
 export function createBrowserSectorProvider(configPromise, stockHistory=fetchHistory, pageData=readPageData,
-  {readText=readFundText,timeout=45_000,priorityMarkets=false,reusePending=true}={}) {
+  {readText=readFundText,timeout=45_000,priorityMarkets=false,reusePending=true,stockTransport="browser-cors"}={}) {
   let cached;
-  async function collect(config,calendar,bounds) {
+  async function collect(config,calendar,bounds,read) {
     const histories={};
     const sessionSet=new Set(bounds.sessions);
     const snapshot=config.index_snapshot?await pageData(config.index_snapshot).catch(()=>null):null;
@@ -185,14 +185,14 @@ export function createBrowserSectorProvider(configPromise, stockHistory=fetchHis
     });
     const missingSpecial=new Set(special.map((item)=>item.code));
     const deadline=AbortSignal.timeout(timeout);
-    const getJSON=async(url)=>JSON.parse(await readText(url,{signal:deadline}));
+    const getJSON=async(url)=>JSON.parse(await read(url,{signal:deadline}));
     const collectSpecial=async()=>{
       let direct=true;
       for (const item of special) {
         if (deadline.aborted) break;
         try {
           const data=snapshotIndex(snapshot,item,sessionSet,bounds.end)??(direct?
-            await fetchSpecial(item,sessionSet,bounds.end,deadline,readText):null);
+            await fetchSpecial(item,sessionSet,bounds.end,deadline,read):null);
           if (data) histories[item.code]=data;
         } catch (error) {
           if (error instanceof TypeError || /HTTP (401|403|429)/.test(error.message)) direct=false;
@@ -208,7 +208,7 @@ export function createBrowserSectorProvider(configPromise, stockHistory=fetchHis
         try {
           const result=await stockHistory({symbol:item.code,kind:"index",start:HISTORY_START,end:bounds.end},calendar,getJSON);
           const [name,url]=names[result.source];
-          histories[item.code]={rows:result.rows,source:{name,url,id:result.source},volume:true,transport:"browser-cors"};
+          histories[item.code]={rows:result.rows,source:{name,url,id:result.source},volume:true,transport:stockTransport};
         } catch { /* Missing candidates remain visible in coverage and are not substituted. */ }
         await delay(150);
       }
@@ -216,20 +216,20 @@ export function createBrowserSectorProvider(configPromise, stockHistory=fetchHis
     await Promise.all([collectStock(),collectStock(),collectStock(),collectSpecial()]);
     return histories;
   }
-  async function base(refresh) {
+  async function base(refresh,read) {
     const [config,calendar]=await Promise.all([configPromise(),pageData("calendar.json")]);
     const bounds=tradingWindow(calendar);
     const now=Date.now();
     if (!reusePending) {
       if (refresh || cached?.end!==bounds.end || now-cached.time>5*60_000) {
-        const histories=await collect(config,calendar,bounds);
+        const histories=await collect(config,calendar,bounds,read);
         if (Object.keys(histories).length) cached={end:bounds.end,time:now,histories};
         return {config,bounds,histories};
       }
       return {config,bounds,histories:cached.histories};
     }
     if (refresh || !cached || cached.end!==bounds.end || now-cached.time>5*60_000) {
-      const pending=collect(config,calendar,bounds);
+      const pending=collect(config,calendar,bounds,read);
       cached={end:bounds.end,time:now,pending};
       pending.then((items)=>{if (!Object.keys(items).length&&cached?.pending===pending) cached=null;},
         ()=>{if (cached?.pending===pending) cached=null;});
@@ -237,11 +237,11 @@ export function createBrowserSectorProvider(configPromise, stockHistory=fetchHis
     return {config,bounds,histories:await cached.pending};
   }
   return {
-    async analyze(fund,{refresh=false}={}) {
+    async analyze(fund,{refresh=false,readText:read=readText}={}) {
       if (!["stock","mixed"].includes(fund.category)||fund.valuation_frequency!=="daily") {
         return {report:sectorAnalysisPayload(fund,{},{},{})};
       }
-      const {config,bounds,histories}=await base(refresh);
+      const {config,bounds,histories}=await base(refresh,read);
       return {report:sectorAnalysisPayload(fund,histories,config,bounds),histories,sessions:bounds.sessions};
     },
     history(fundCode,entry,context) {

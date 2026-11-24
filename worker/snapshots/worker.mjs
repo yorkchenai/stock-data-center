@@ -2,6 +2,7 @@ import { resolveSymbol } from "../../web/engine.mjs";
 import { createSnapshotCompute } from "./compute.mjs";
 import { boundedJson } from "./details.mjs";
 import { analysisService } from "./service.mjs";
+import { initialResult, prepareInitial } from "./compatibility.mjs";
 
 const PROTOCOL = "2026-07-28";
 const symbolSchema={type:"string",description:"六位代码。股票或指数可带 sh/sz 前缀；基金保留前导零。"};
@@ -14,16 +15,17 @@ const detailsFields={
   aggregate:{enum:["max","min"]},field:{type:"string"},period:{enum:["1w","1m","3m","6m","1y","3y","5y","all"]},
   index_code:{type:"string"},
 };
+const voiceWait="收到 building 时，语音告知仍在构建，最多自动续查一次。保留原参数，若返回 after_snapshot_id 则带回该值，省略 refresh。仍在构建即等待用户追问。";
 
 const tools=[
   {
-    name:"get_stock_analysis",description:"股票雷达。将中文逐位代码转为数字。首次返回最近交易日、指标和 snapshot_id；追问使用同一个 ID 调用 get_analysis_details。building 时按代码重试，若返回 after_snapshot_id 须带回该值。传 refresh:true 请求新快照。",
+    name:"get_stock_analysis",description:"股票雷达。将中文逐位代码转为数字。首次只播报来源、最后交易日、主要指标和数据状态；用相同 snapshot_id 回答追问。"+voiceWait,
     inputSchema:{type:"object",required:["symbol"],additionalProperties:false,properties:{
       symbol:symbolSchema,start:dates.start,end:dates.end,kind:{enum:["stock","index","auto"]},refresh:{type:"boolean"},after_snapshot_id:afterSnapshot,
     }},
   },
   {
-    name:"get_fund_analysis",description:"基金雷达。将中文逐位代码转为数字，保留前导零。首次返回确认净值日期、收益摘要和 snapshot_id；后续用该 ID 查询。building 时按基金代码重试，若返回 after_snapshot_id 须带回该值。缺少行业指数时如实说明。",
+    name:"get_fund_analysis",description:"基金雷达。将中文逐位代码转为数字，保留前导零。首次播报来源、确认净值日期、收益和风险摘要。保留 snapshot_id 供追问，并如实说明缺项。"+voiceWait,
     inputSchema:{type:"object",required:["symbol"],additionalProperties:false,
       properties:{symbol:symbolSchema,refresh:{type:"boolean"},after_snapshot_id:afterSnapshot}},
   },
@@ -41,7 +43,7 @@ calls=CASE WHEN excluded.minute>analysis_snapshot_limits.minute THEN 1 ELSE anal
 WHERE excluded.minute>analysis_snapshot_limits.minute OR analysis_snapshot_limits.calls<?
 RETURNING calls`;
 
-async function limit(db, slot, count) {
+export async function limitSnapshotCalls(db, slot, count) {
   try {
     return await db.prepare(LIMIT_SQL).bind(slot,count).first() ? null : "rate_limited";
   } catch {
@@ -100,29 +102,30 @@ const statusCode = (status) => ({
   rate_limited:429,cache_unavailable:503,data_unavailable:502,
 })[status]??200;
 
-export function createSnapshotWorker({calendar,config,modelVersion,authorize=()=>false,compute,clock,observe}) {
+export function createSnapshotWorker({calendar,config,modelVersion,authorize=()=>false,authorizePage=()=>false,
+  compute,clock=()=>new Date(),observe}) {
   const log=observe??((event)=>console.log(JSON.stringify(event)));
   const service=analysisService({calendar,modelVersion,clock,observe:log,
-    compute:compute??createSnapshotCompute({calendar,config,clock,
-      observe:(trace)=>log({event:"snapshot_upstream",...trace})})});
+    compute:compute??createSnapshotCompute({calendar,config,clock})});
   return {
     async fetch(request,env,ctx) {
       const url=new URL(request.url);
       const waitUntil=ctx?.waitUntil?.bind(ctx);
+      const requestId=crypto.randomUUID();
       if (request.method==="GET" && url.pathname==="/api/analysis") {
         const args=Object.fromEntries(url.searchParams);
         if (args.limit) args.limit=Number(args.limit);
         let cors;
-        try {cors=publicAccess(request,env,args);} catch {cors=null;}
+        try {if (await authorizePage(request,env)) cors=publicAccess(request,env,args);} catch {cors=null;}
         if (!cors) return json({status:"access_denied"},403);
         // Public readers have no force-refresh option and share a bounded quota.
         delete args.refresh;
         delete args.after_snapshot_id;
-        const blocked=await limit(env.DB,"page",60);
+        const blocked=await limitSnapshotCalls(env.DB,"page",60);
         if (blocked) return json({status:blocked},statusCode(blocked),cors);
         const output=args.snapshot_id
-          ? await service.details(env.DB,args,{browser:true})
-          : await service.initial(env.DB,args,{waitUntil});
+          ? await service.details(env.DB,args,{browser:true,requestId})
+          : await service.initial(env.DB,args,{waitUntil,requestId});
         return json(output,statusCode(output.status),cors);
       }
       if (request.method!=="POST" || url.pathname!=="/mcp") {
@@ -130,7 +133,7 @@ export function createSnapshotWorker({calendar,config,modelVersion,authorize=()=
       }
       const message=await rpcInput(request);
       const id=message?.id??null;
-      const rpc=(result)=>json({jsonrpc:"2.0",id,result});
+      const rpc=(result)=>json({jsonrpc:"2.0",id,result},200,{"x-analysis-request-id":requestId});
       const fail=(code,message)=>json({jsonrpc:"2.0",id,error:{code,message}});
       if (message?.jsonrpc!=="2.0") return fail(-32600,"Invalid Request");
       if (message.id===undefined) return new Response(null,{status:202});
@@ -143,20 +146,39 @@ export function createSnapshotWorker({calendar,config,modelVersion,authorize=()=
       const name=message.params?.name;
       const definition=tools.find((entry)=>entry.name===name);
       if (!definition) return fail(-32602,"Unknown tool");
-      const pack=(payload)=>rpc({content:[{type:"text",text:boundedJson(payload)}],structuredContent:payload,
-        isError:!["complete","partial","building"].includes(payload.status)});
-      if (!await authorize(request,env)) return pack({status:"unauthorized"});
+      const detail=name==="get_analysis_details";
+      const assetType=name==="get_stock_analysis"?"stock":"fund";
+      const pack=(payload)=>{
+        const structuredContent=detail?payload:initialResult(assetType,payload);
+        const {rows,...summary}=structuredContent;
+        return rpc({content:[{type:"text",text:boundedJson(summary)}],structuredContent,
+          isError:!["complete","partial","building","ok","stale","suspended"].includes(structuredContent.status)});
+      };
+      const finish=(payload)=>{
+        log({event:"snapshot_request",request_id:requestId,tool:name,status:payload.status,
+          snapshot_id:payload.snapshot_id,cache:payload.cache});
+        return pack(payload);
+      };
+      if (!await authorize(request,env)) return pack({schema_version:1,status:"unauthorized"});
       const args=message.params.arguments;
       if (!args || typeof args!=="object" || !definition.inputSchema.required.every((key)=>typeof args[key]==="string") ||
           Object.keys(args).some((key)=>!Object.hasOwn(definition.inputSchema.properties,key)) ||
           (Object.hasOwn(args,"after_snapshot_id") && typeof args.after_snapshot_id!=="string") ||
-          (Object.hasOwn(args,"refresh") && typeof args.refresh!=="boolean")) return pack({status:"invalid_arguments"});
-      const detail=name==="get_analysis_details";
-      const blocked=await limit(env.DB,detail?"owner_details":"owner_initial",detail?30:6);
-      if (blocked) return pack({status:blocked});
-      if (detail) return pack(await service.details(env.DB,args));
-      const asset_type=name==="get_stock_analysis"?"stock":"fund";
-      return pack(await service.initial(env.DB,{...args,asset_type},{waitUntil}));
+          (Object.hasOwn(args,"refresh") && typeof args.refresh!=="boolean")) return pack({schema_version:1,status:"invalid_arguments"});
+      let initial;
+      if (!detail) {
+        try {initial=prepareInitial(assetType,args,calendar,clock());}
+        catch (error) {return pack({schema_version:1,status:"invalid_arguments",message:error.message});}
+      }
+      const blocked=await limitSnapshotCalls(env.DB,detail?"owner_details":"owner_initial",detail?30:6);
+      if (blocked) return pack({schema_version:1,status:blocked});
+      if (detail) return finish(await service.details(env.DB,args,{requestId}));
+      const output=await service.initial(env.DB,initial.args,{waitUntil,requestId,present:initial.present});
+      if (output.status==="building") {
+        output.max_voice_auto_retries=1;
+        log({event:"snapshot_building",request_id:requestId,symbol:output.symbol});
+      }
+      return finish(output);
     },
   };
 }

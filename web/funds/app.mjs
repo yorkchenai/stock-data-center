@@ -121,6 +121,11 @@ async function loadOnlineFund(code, snapshotId) {
   if (snapshotsEnabled) {
     try {
       const snapshot=await getPageSnapshot({asset_type:"fund",symbol:code},snapshotId);
+      if (!snapshot.data.risk?.windows?.["1y"]?.metrics) throw new Error("共享快照缺少基金风险结果。");
+      if (!snapshotId && snapshot.data.fund.valuation_frequency==="daily" &&
+          Date.parse(shanghaiToday())-Date.parse(snapshot.data_as_of)>7*86_400_000) {
+        throw new Error("共享快照净值日期已超过 7 天。");
+      }
       if (!snapshotId && ["stock","mixed"].includes(snapshot.data.fund.category)) {
         const coverage=snapshot.data.association?.index_coverage;
         const covered=coverage?.available??0;
@@ -131,7 +136,7 @@ async function loadOnlineFund(code, snapshotId) {
       return {raw:snapshot.data.fund,snapshot};
     } catch (error) {
       if (snapshotId) throw error;
-      snapshotFallback.set(code,error.message);
+      snapshotFallback.set(code,error.name==="TimeoutError"?"共享快照加载超时":error.message);
     }
   } else if (snapshotId) throw new Error("此页面未配置该共享快照服务。");
   return {raw:await fetchFund(code,await fetchPageConfig()),snapshot:null};
@@ -381,10 +386,7 @@ function renderAnalysis(requestedStart, requestedEnd) {
   renderNav(fund,...navRange);
   const shared=sharedSnapshots.get(selectedCode);
   const precomputed=!requestedStart && !requestedEnd && shared?.data.risk?.windows[rangeKey];
-  const canCompute=!shared || shared.model_version===browserModelVersion;
-  const analysis=precomputed || analyzePerformance(fund,canCompute?range:{
-    error:"当前页面的模型版本与快照不同，自定义统计不可用。",rows:[],
-  });
+  const analysis=precomputed || analyzePerformance(fund,range);
   const interval = range.start ? `${range.start} 至 ${range.end}` : "—";
   $("range-status").textContent = range.error ?? `统计范围 ${interval} · 已载入净值 ${fund.rows[0].date} 至 ${latest}`;
   $("core-metrics").replaceChildren(...coreDefinitions.map(([id,label,format,description])=>{

@@ -11,7 +11,7 @@ import { marketTransport } from "./providers.mjs";
 
 export const STOCK_START = "2025-01-01";
 
-function currentMarketWindow(calendar, now) {
+export function currentMarketWindow(calendar, now) {
   const shanghai = new Date(now.getTime()+8*3_600_000).toISOString();
   const today = shanghai.slice(0,10);
   if (today>calendar.end) throw new Error("交易日历尚未覆盖今天。");
@@ -60,8 +60,7 @@ function fundPerformance(fund) {
 
 export function createSnapshotCompute({calendar,config,fetcher=fetch,observe,clock=()=>new Date()}) {
   let directory;
-  const text=marketTransport(fetcher,observe);
-  const getDirectory=async()=>{
+  const getDirectory=async(text)=>{
     if (directory && directory.expires > clock().getTime()) return directory.catalog;
     const catalog=parseDirectory(assignment(await text("https://fund.eastmoney.com/js/fundcode_search.js"),"r"));
     directory={expires:clock().getTime()+86_400_000,catalog};
@@ -70,9 +69,10 @@ export function createSnapshotCompute({calendar,config,fetcher=fetch,observe,clo
   const sectors=createBrowserSectorProvider(async()=>config,fetchHistory,async(file)=>{
     if (file==="calendar.json") return calendar;
     throw new Error("没有配置特殊指数快照。");
-  },{readText:text,timeout:23_000,priorityMarkets:true,reusePending:false});
+  },{timeout:23_000,priorityMarkets:true,reusePending:false,stockTransport:"worker-https"});
 
-  return async function compute(query,{refresh=false}={}) {
+  return async function compute(query,{refresh=false,onUpstream=observe}={}) {
+    const text=marketTransport(fetcher,onUpstream);
     if (query.asset_type==="stock") {
       const deadline=AbortSignal.timeout(18_000);
       const getJSON=async(url)=>JSON.parse(await text(url,{signal:deadline,timeout:4_500}));
@@ -93,7 +93,7 @@ export function createSnapshotCompute({calendar,config,fetcher=fetch,observe,clo
     }
 
     const url=navURL(query.symbol);
-    const [assignments,catalog]=await Promise.all([text(url),getDirectory().catch(()=>null)]);
+    const [assignments,catalog]=await Promise.all([text(url),getDirectory(text).catch(()=>null)]);
     const raw=fundFromAssignments(readNavAssignments(assignments),query.symbol,{
       metadata:catalog?.get(query.symbol),evidence:config.events?.[query.symbol],benchmark:config.benchmarks?.[query.symbol],
       retrievedAt:clock(),
@@ -104,7 +104,7 @@ export function createSnapshotCompute({calendar,config,fetcher=fetch,observe,clo
     const last=fund.rows.at(-1);
     let association, charts={}, indexInputs={};
     try {
-      const context=await sectors.analyze(fund,{refresh});
+      const context=await sectors.analyze(fund,{refresh,readText:text});
       association=context.report;
       // Keep the exact inputs supplied to the ranking engine without storing
       // another copy of all stock-indicator columns not used by that model.

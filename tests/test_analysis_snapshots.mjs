@@ -10,7 +10,7 @@ import { calculateIndicators } from "../web/engine.mjs";
 
 const migration=readFileSync(new URL("../worker/snapshots/migrations/0001_analysis_snapshots.sql",import.meta.url),"utf8");
 const now=Date.parse("2026-09-30T11:00:00Z");
-const sessions=Array.from({length:120},(_,i)=>new Date(now-(119-i)*86_400_000).toISOString().slice(0,10))
+const sessions=Array.from({length:200},(_,i)=>new Date(now-(199-i)*86_400_000).toISOString().slice(0,10))
   .filter((d)=>[1,2,3,4,5].includes(new Date(d).getUTCDay()));
 const calendar={start:"2025-01-01",end:"2026-12-31",sessions};
 const query={asset_type:"stock",symbol:"300078"};
@@ -158,23 +158,41 @@ test("refresh failure never masquerades as an earlier cached result",async()=>{
   assert.equal((await later.initial(connection(),poll)).status,"refresh_not_found");
 });
 
-test("browser authorization and MCP use the same ID and values", async()=>{
+test("browser authorization, legacy stock fields and snapshot details use the same ID and values", async()=>{
   const {connection}=database();
   const db=connection();
+  const events=[];
   const app=createSnapshotWorker({calendar,config:{},modelVersion:"model-a",clock:()=>new Date(now),
-    authorize:(request)=>request.headers.get("Authorization")==="testing",compute:async()=>data,observe:()=>{}});
+    authorize:(request)=>request.headers.get("Authorization")==="testing",
+    authorizePage:(request)=>request.headers.get("Authorization")==="page-testing",
+    compute:async(args,{onUpstream})=>{
+      assert.equal(args.start,"2025-01-01");
+      onUpstream({provider:"fixture",http:200});
+      return data;
+    },observe:(event)=>events.push(event)});
   const mcp=(name,args,auth="testing")=>app.fetch(new Request("https://preview.invalid/mcp",{
     method:"POST",headers:{Authorization:auth},
     body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",params:{name,arguments:args}}),
   }),{DB:db}).then((p)=>p.json()).then((p)=>p.result.structuredContent);
-  const page=(args,auth="https://allowed.invalid")=>app.fetch(new Request(
-    "https://preview.invalid/api/analysis?"+new URLSearchParams(args),{headers:{Origin:auth}}),{
+  const page=(args,origin="https://allowed.invalid",auth="page-testing")=>app.fetch(new Request(
+    "https://preview.invalid/api/analysis?"+new URLSearchParams(args),{headers:{Origin:origin,Authorization:auth}}),{
     DB:db,SNAPSHOT_PUBLIC_ORIGIN:"https://allowed.invalid",SNAPSHOT_PUBLIC_SYMBOLS:"stock:sz300078",
   });
   assert.equal((await mcp("get_stock_analysis",{symbol:"300078"},"invalid")).status,"unauthorized");
   const summary=await mcp("get_stock_analysis",{symbol:"300078"});
   assert.equal(summary.latest.MA5,indicators.at(-1).MA5);
+  assert.equal(summary.status,"ok");
+  assert.equal(summary.snapshot_status,"complete");
+  assert.equal(summary.source,"test");
+  assert.deepEqual(summary.rows,indicators.slice(-60));
+  const historicalPage=await mcp("get_stock_analysis",{symbol:"300078",start:sessions[0]});
+  assert.equal(historicalPage.snapshot_id,summary.snapshot_id);
+  assert.deepEqual(historicalPage.rows,indicators.slice(-120));
+  assert.equal(historicalPage.more,true);
+  assert.ok(historicalPage.next_end<historicalPage.rows[0].date);
+  assert.equal(historicalPage.units.volume_lots,"手");
   assert.equal((await page(query,"https://wrong.invalid")).status,403);
+  assert.equal((await page(query,"https://allowed.invalid","missing-identity")).status,403);
   const res=await page({...detail(summary,"page")});
   assert.equal(res.headers.get("Access-Control-Allow-Origin"),"https://allowed.invalid");
   const view=await res.json();
@@ -182,7 +200,42 @@ test("browser authorization and MCP use the same ID and values", async()=>{
   assert.equal(view.snapshot_id,followup.snapshot_id);
   assert.deepEqual(view.data.rows,indicators);
   assert.equal(view.data.rows.at(-1).ADX14,followup.data.rows[0].ADX14);
+  const source=events.filter((event)=>event.event==="snapshot_upstream");
+  const reads=events.filter((event)=>event.event==="snapshot_read");
+  assert.equal(source.length,1);
+  assert.equal(source[0].request_id,events.find((event)=>event.event==="snapshot_publish").request_id);
+  assert.equal(reads.length,2);
+  assert.ok(reads.every((event)=>event.upstream_requests===0&&event.request_id!==source[0].request_id));
   assert.equal((await page({...detail(summary,"page"),symbol:"600519"})).status,403);
+});
+
+test("fund keeps the v10 summary with a separate partial snapshot status and no history in speech", async()=>{
+  const {connection}=database();
+  const source={name:"test fund provider",method:"confirmed_nav",retrieved_at:new Date(now).toISOString()};
+  const drawdown={value:-.15,reason:null};
+  const fund={...data,status:"partial",source,quality:{freshness:"已确认披露"},
+    models:{risk:{windows:{"1y":{start:sessions[0],end:sessions.at(-1)}}},
+      sectors:{report:{model_as_of:sessions.at(-1),sectors:[{code:"399997",rank:1}]}}},
+    summary:{name:"test fund",category:"stock",last_confirmed_nav_date:sessions.at(-1),latest_nav:2.5,
+      returns:{"1y":{value:0.2,reason:null}},max_drawdown:drawdown,sector_status:"ok",
+      sectors:[{code:"399997",name:"test sector",last_index_trade_date:sessions.at(-2)}]}};
+  const worker=createSnapshotWorker({calendar,modelVersion:"model-a",clock:()=>new Date(now),
+    authorize:()=>true,compute:async()=>fund,observe:()=>{}});
+  const response=await worker.fetch(new Request("https://preview.invalid/mcp",{method:"POST",
+    body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"get_fund_analysis",arguments:{symbol:"110022"}}}),
+  }),{DB:connection()});
+  const {result}=await response.json();
+  const summary=result.structuredContent;
+  assert.equal(result.isError,false);
+  assert.equal(summary.status,"partial");
+  assert.equal(summary.snapshot_status,"partial");
+  assert.equal(summary.freshness,"已确认披露");
+  assert.deepEqual(summary.max_drawdown,{...drawdown,start:sessions[0],end:sessions.at(-1)});
+  assert.deepEqual(summary.source,source);
+  assert.equal(summary.sectors[0].rank,1);
+  assert.equal(summary.sectors[0].last_index_trade_date,sessions.at(-2));
+  assert.notEqual(summary.last_confirmed_nav_date,summary.sectors[0].last_index_trade_date);
+  assert.equal(Object.hasOwn(JSON.parse(result.content[0].text),"rows"),false);
 });
 
 test("records enforce raw limit and multi-chunk reads preserve exact numbers",async()=>{

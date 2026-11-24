@@ -4,7 +4,7 @@
 
 ## 读取与更新
 
-- MCP 第一问仍用 `get_stock_analysis` 或 `get_fund_analysis`。成功返回摘要、`snapshot_id`、数据日期及模型版本。Worker 内等待超过 7 秒时返回 `building` 并用 `waitUntil` 继续运行。客户端实际等待还受网关耗时影响。若返回 `after_snapshot_id`，以同一组查询参数带回该字段并省略 `refresh`，直至新快照就绪。续查不会启动另一轮取数，刷新失败会明确返回。结果缺失时不会发布假快照。
+- MCP 第一问仍用 `get_stock_analysis` 或 `get_fund_analysis`。向后兼容的摘要另附 `snapshot_id`、数据日期和模型版本。Worker 内等待超过 7 秒时返回 `building` 并用 `waitUntil` 继续运行。客户端实际等待还受网关耗时影响。语音工具说明最多自动续查一次，再等待用户追问。若返回 `after_snapshot_id`，续查保留同一组参数、带回该字段并省略 `refresh`。续查不会启动另一轮取数，刷新失败会明确返回。
 - `get_analysis_details` 接收 `asset_type`、`symbol`、`snapshot_id` 和 `category`。历史与指标支持指定日期、最近 1–120 条、区间分页及指定字段最大最小值。风险支持常用区间，关联分析可按指数代码读取模型和对应日期。
 - D1 每次从主库启动独立会话。快照头及压缩分片在一个事务中插入，提交后才返回 ID。每个分片上限 450,000 字节，每个快照至多 12 个分片，原始序列整体上限 20 MB，单次 JSON 响应上限 4 MB。持续时间最长 45 秒的数据库锁防止多个 Worker 重复构建同一代码、日期和模型版本。
 - 股票默认从 2025-01-01 计算，保留指定历史计算起点。当前窗口完整快照最多保留 4 小时有效期，并且不会跨过下一次预期收盘行情发布；历史窗口 24 小时。基金完整快照有效 30 分钟，部分结果 10 分钟。冷启动停留在 `building` 时可按同一代码查询，不传 `refresh`。显式刷新生成新 ID，旧 ID 到原定更新时间前仍可读取。过期内容不可作为当前数据提供，物理清理保留时间为过期后 7 天，并在之后的成功写入时批量执行。
@@ -22,12 +22,33 @@ node scripts/test_snapshot_stage.mjs --fixture
 node scripts/test_snapshot_stage.mjs
 ```
 
-普通构建省略 `--snapshot-service`，继续使用浏览器独立模式。隔离浏览器可打开 `index.html?symbol=300078&snapshot_id=…` 或 `funds.html?fund=110022&snapshot_id=…`。显式指定 ID 查不到时页面报错，避免无标记替换。普通查询失败或主动股票／混合基金的共享快照少于已验证的 14 条指数时，页面回退整套浏览器独立分析，并展示独立来源、日期与版本。
+普通构建省略 `--snapshot-service`，继续使用浏览器独立模式。隔离浏览器可打开 `index.html?symbol=300078&snapshot_id=…` 或 `funds.html?fund=110022&snapshot_id=…`。显式指定 ID 查不到时页面显示错误，可通过普通查询继续。普通查询最多给快照 11 秒，最多发起 3 次初次查询请求。来源故障、编号或标的不一致、快照过期、模型版本不匹配、股票尾部缺失及基金共享指数少于已验证的 14 条时，执行对应的整套浏览器分析。页面展示独立来源、日期、版本及回退原因。共享模式从快照读取标准风险区间数据；自定义区间只对同版本的快照输入运行同一套函数。
+
+## 第 10 版兼容性
+
+| 调用面 | 保留的字段与行为 |
+| --- | --- |
+| 股票首次结构化结果 | 原 `source` 字符串、`status`、`requested_start/end`、固定计算起点、日线日期、单位、质量字段及 `more/next_end` 保留。默认 60 条，显式日期请求最多 120 条。显式起点只改变返回切片。 |
+| 基金首次结构化结果 | 原 `source` 对象、`freshness`、近 1 月/3 月/1 年收益、最大回撤和起止日期、关联指数排名及指数交易日继续可用。基金缺少利率或其他输入时 `snapshot_status` 保持 `partial`，旧 `status` 亦标记为 `partial`。 |
+| 语音与详情 | 语音文本省略股票日线数组，结构化对象保留旧分页。`snapshot_status`、`snapshot_id`、`model_version`、`data_as_of`、`cache` 等为增量字段。详情读取固定 ID 和现有 D1 内容。 |
+
+正式入口接入时保留现有 Site、插件、网关注入的所有者鉴权、旧限流表及原 `stock_voice_probe` 路由；隔离快照包本身只包含两个雷达及详情工具，不能直接覆盖正式入口。工具在现有 ChatGPT 插件可见仍需正式批准后验证。
+
+## 私有线上复算和日志
+
+现有测试站点的验收页可下载同一 ID 的所有者复算档案。档案保留真实日期及缺失状态，过期档案只用于历史核验。请在获准的个人环境使用，与同一测试部署的日历配置配对。复算输出只列差值、计数、排名和缺失原因。
+
+```sh
+python -m scripts.audit_hosted_snapshot --calendar path/to/calendar.json \
+  --config path/to/fund-config.json path/to/snapshot-audit.json
+```
+
+验收页的 `request_id` 对应 Worker 的 `snapshot_request`、`snapshot_hit`、`snapshot_read` 等事件。冷构建的 `snapshot_upstream` 及 `snapshot_publish` 共享初始请求编号。日志分别记录上游请求个数、构建、写入和 D1 读取及解码时间。详情日志可确认 D1 固定 ID 读取及零回源。基金关联指数仍保留逐条实际覆盖状态，无风险利率缺失时保留夏普空值。
 
 ## 权限和上线边界
 
 快照存储使用现有 D1 类型与绑定，不需要 KV。KV 在跨地区通常为最终一致，新 ID 的立即读取受其全局传播限制。生产 D1 迁移须在获得发布授权后对原有绑定执行。Cloudflare D1 免费方案的公开限额包括每库 500 MB、账户 5 GB 以及每账户每日 10 万行写入和 500 万行读取。实际容量取决于压缩率、标的数和刷新频率，平台另外按请求和数据库操作设限。[D1 限额](https://developers.cloudflare.com/d1/platform/limits/) · [D1 定价](https://developers.cloudflare.com/d1/platform/pricing/) · [KV 一致性](https://developers.cloudflare.com/kv/concepts/how-kv-works/) · [D1 Sessions API](https://developers.cloudflare.com/d1/worker-api/d1-database/#withsession)
 
-网页接口默认关闭。隔离测试仅显式允许指定来源和五只标的，网页端不携带插件凭证。CORS 限制浏览器读取，不能验证调用者身份。公开发布前须确认每个行情源的再分发权限，决定使用受验证账户访问还是启用有限标的公开服务，并核实实际托管的站点网关、独立配额和跨地区按 ID 读取。现有私有站点的网关权限保持启用。正式插件上线还需在同一份已验收 Worker 上验证认证、既有兼容工具、工具发现及 iPhone Live 连续追问。
+网页接口默认关闭。Worker 只有在入口显式注入独立网页授权政策，且来源和标的限制通过时，才会开放网页接口。仅设置 CORS 和五标的白名单不足以开放接口。公开发布前须确认每个行情源的再分发权限，核实站点网关、独立配额和跨地区按 ID 读取。私有测试 Site 依赖现有所有者网关，始终关闭公共 API。正式插件上线还需验证认证、既有兼容工具、工具发现及 iPhone Live 连续追问。
 
 CI 归档仅含请求状态、时间、计数和校验结果。实盘路径失败直接报告；fixture 结果单独生成。

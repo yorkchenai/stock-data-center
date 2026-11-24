@@ -20,6 +20,7 @@ export function marketTransport(fetcher = fetch, observe = () => {}) {
     const trace = {provider:url.hostname, path:url.pathname,
       symbol:url.searchParams.get("secid") ?? url.searchParams.get("indexCode") ??
         url.searchParams.get("param")?.split(",")[0] ?? null};
+    const started=performance.now();
     try {
       const response = await fetcher(url.href,{signal:combined,redirect:"manual",cache:"no-store"});
       trace.http = response.status;
@@ -53,7 +54,7 @@ export function marketTransport(fetcher = fetch, observe = () => {}) {
       trace.error=error.name==="TimeoutError" || error.name==="AbortError" ? "timeout" : error.message;
       throw error;
     } finally {
-      observe(trace);
+      observe({...trace,duration_ms:Math.round(performance.now()-started)});
     }
   };
 }

@@ -1,5 +1,51 @@
 # 关联板块指数成交量 · 第八阶段补充
 
+## 最终核验
+
+2026-11-24 核验结论为 **0/24 条达到 A 级**。中证白酒、全指通信、全指医药为 B 级。其余 21 条已有原始字段覆盖，缺少各自的同日单位或字段映射证据，按 C 级待核实。真实成交量和 VOL 继续使用现有空状态。
+
+### CIIS 正式字段及样本
+
+CIIS《Historical Data Product Manual》v20260819 第 6.5.1 节将 CSI Snapshot 股票指数 `Volume` 的单位列为股。该节的 `Amount` 单位是万元。第 6.5.2 节在 `CSI/Day/<Date>/Day.csv` 列出 `SecurityID`、交易日 `DateTime`、`Volume` 和 `Amount`，未单列该日线表的成交量与成交额单位，也未引用中证网页 `index-perf`。这是一条明确的同编制机构快照单位证据。快照、日线文件和网页三者仍需同代码、同交易日比对。[CIIS 手册，第 6.5.1–6.5.2 节](https://www.ciis.com.hk/hongkong/tc/uploadfiles/202608/24/2026082405074912924005.pdf)
+
+CIIS 公开目录列有 `20221206_Sample_CSI_Day.xlsx`。本轮用默认 HTTPS 验证尝试英、简、繁三个官方目录，工作区代理均返回 403，云端桌面的浏览器控制也未加载目录。前轮 GitHub runner 在请求官方目录时报告 `SSLCertVerificationError`。样本工作簿未取得，实际代码、日期、表头和数值均未读取。下表中的 2022-12-06 是已留存的外部对照日期，样本文件名仅提示可优先检查该日。[官方样本目录](https://www.ciis.com.hk/hongkong/en/historicaldata1/sampledata/index.shtml) · [前轮样本请求日志摘要](https://github.com/yorkchenai/stock-data-center/actions/runs/45318406464/artifacts/14886198171)
+
+### 同日字段对照与分级
+
+用前次留存的 7 组记录离线复算。每组的指数代码、交易日及 OHLC 一致。最大绝对差为 31 股和 354,440 元，均在东方财富整数手及中证网页两位小数亿元所对应的半个舍入单位内。差值按网页 `tradingVol − f56 × 100` 计算。对照文件中的 `f56` 单位依据是东方财富指数 K 线适配文档。CIIS 样本列为空意味着正式日线映射未核验。[七组原始对照与方法](https://github.com/yorkchenai/stock-data-center/actions/runs/45317731769/artifacts/14886641565) · [东方财富指数 K 线适配字段](https://github.com/akfamily/akshare/blob/main/docs/data/index/index.md#历史行情数据-通用)
+
+| 指数 | 交易日 | 网页 `tradingVol` | 东方财富 `f56`（手） | 按股计的差值 | CIIS 日线 `Volume` |
+| --- | --- | ---: | ---: | ---: | --- |
+| 399997 | 2022-12-06 | 299,347,876 | 2,993,479 | −24 | 未取得 |
+| 399997 | 2024-06-28 | 128,378,003 | 1,283,780 | 3 | 未取得 |
+| 399997 | 2026-11-23 | 186,420,722 | 1,864,207 | 22 | 未取得 |
+| 000994 | 2022-12-06 | 4,996,620,431 | 49,966,204 | 31 | 未取得 |
+| 000994 | 2024-06-28 | 2,228,822,376 | 22,288,224 | −24 | 未取得 |
+| 000994 | 2026-11-23 | 3,272,754,026 | 32,727,540 | 26 | 未取得 |
+| 000991 | 2022-12-06 | 5,287,026,400 | 52,870,264 | 0 | 未取得 |
+
+| 指数 | 等级 | 单位判断及剩余证据 |
+| --- | --- | --- |
+| 399997 中证白酒 | B | 三日支持按股解释。样本是与白酒生产业务相关的上市证券，日线字段映射、成交范围和许可待确认。 |
+| 000994 中证全指通信服务 | B | 三日支持按股解释。官方 2026-10-30 单张显示上海、深圳通信服务样本，日线字段映射、成交范围和许可待确认。 |
+| 000991 中证全指医药卫生 | B | 仅一日精确对上 100 倍，其他两日对照请求断连。官方同期单张显示上海、深圳、北京医药卫生样本，日线字段映射、成交范围和许可待确认。 |
+| 其余 21 条 | C | 有原始字段，缺少本轮所需的逐指数单位或同日映射证据。 |
+
+三只指数的样本证券集合和交易所分布有差异。现有资料未说明网页累计量是否按相同规则纳入盘后、大宗和各交易所交易，历史口径是否变更也未确认。股换算成手在数学上是乘 `0.01`，保留小数即可复核。只有相应指数和历史区间的来源单位、统计口径及用途均确认后，才可按现有合同用于特定获准展示模式。[399997 编制方案](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/20231208175434-399997_Index_Methodology_cn.pdf) · [000994 指数单张](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000994factsheet.pdf) · [000991 指数单张](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000991factsheet.pdf)
+
+### 按用途核查授权
+
+CIIS 当前下载目录列出 2026-01-01 修订的《上交所和中国指数市场行情政策和指引》。第 4 节免批核的日终行情指香港时间午夜后转发、每天至多更新一次的开高低收数据，条文未列成交量或 VOL。第 5 节规定，经 CIIS 书面同意的直连信息商可在订户获预批并完成订购后向其转发历史数据，限内部使用。该文本未给本项目从中证公开网页自动取数和展示的许可。[CIIS 当前文件目录](https://www.ciis.com.hk/hongkong/en/productsandservices/documentdownloads/index.shtml) · [2026-01-01 版，第 4–5 节](https://www.ciis.com.hk/hongkong/sc/uploadfiles/202601/09/2026010917282255474308.pdf)
+
+| 用途 | 核验结果 |
+| --- | --- |
+| 个人本地查询与绘图 | 正式历史产品有内部使用订购渠道。网页接口自动读取历史成交量、个人本地绘图的许可尚未确认。 |
+| 本地缓存历史数据 | 手册提及交付平台的下载和留存窗口。未取得网页历史数据的本地缓存期限、长期留存或更新授权。 |
+| 公开网站展示每日成交量及 VOL | 日终价格免批核条款未明确覆盖这两项。原始成交量展示和可反映成交量的派生指标都需要适用许可。 |
+| 公共仓库分发完整历史 | 内部使用条件未授予公开发布或再分发权限，本项目也未取得单独授权。 |
+
+可向 CIIS (`hd@ciis.com.hk`) 或中证 (`csindex@sse.com.cn`) 核对三项：代表性同日记录及 `tradingVol` 字段与正式产品的对应关系，各指数含盘后和大宗的统计规则及历史变更，所需展示模式的书面许可和缓存期限。获得样本后，以工作簿实际 `SecurityID` 和 `DateTime` 定位匹配行，逐条比对 `Volume` 与网页原值并记录单位、差值和是否舍入。样本覆盖不到的指数仍需逐只求证。[CIIS 历史数据产品](https://www.ciis.com.hk/hongkong/en/historicaldata1/his_introduction/index.shtml)
+
 ## 字段依据和许可
 
 中证指数官网的 `index-perf` 日频响应分别提供 `tradingVol` 与 `tradingValue`。2026-11-24 实测访问中证白酒详情页，页面能看到「成交量」，公开资料仍缺少该网页日频 JSON 字段的单位和成分证券统计边界。`tradingValue` 在核对中保留原值，成交额无需参与 VOL 计算。[中证白酒详情页](https://www.csindex.com.cn/#/indices/family/detail?indexCode=399997) · [中证日线接口示例](https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode=399997&startDate=20261123&endDate=20261123)

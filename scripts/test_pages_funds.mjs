@@ -128,6 +128,10 @@ try {
     await page.screenshot({path:path.join(output,`funds-list-${width}.png`),fullPage:true});
     await page.getByRole("link",{name:first.name}).click();
     await page.locator("#returns-chart canvas").first().waitFor();
+    await page.locator("#nav-chart canvas").first().waitFor();
+    assert.equal(await page.locator("#nav-chart").evaluate((chart)=>
+      [...chart.childNodes].some((node)=>node.nodeType===3&&node.textContent.trim())),false);
+    assert.match(await page.locator("#returns-source").innerText(),/基金净值来源.*最新确认/);
     assert.ok(page.url().endsWith("/funds.html?fund=000001"));
     assert.equal(await page.locator("#core-metrics article").count(),6);
     const grid = await page.locator("#core-metrics").evaluate((el)=>getComputedStyle(el).gridTemplateColumns.split(" ").length);

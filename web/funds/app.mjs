@@ -341,6 +341,8 @@ function renderAnalysis(requestedStart, requestedEnd) {
   $("risk-assumptions").textContent = "日收益波动率与日超额收益夏普均按 252 个净值观察日年化。索提诺目标为 0%。" + riskLabel + "。";
   const comparison = analysis.comparison;
   const benchmark = fund?.benchmark;
+  $("returns-source").hidden = !fund;
+  $("returns-source").textContent = fund ? `基金净值来源 ${fund.source.name} · 最新确认 ${latest}` : "";
   const benchmarkStatus = {
     complete:"基准完整，两条曲线以相同实际日期归零。",
     partial:"基准部分可用，曲线截止于首个缺口前。",
@@ -372,7 +374,7 @@ function renderNav(fund,start,end) {
       ? (anchors.length ? `分段复权，每段以 ${anchors[0]}${anchors.length>1?` 等 ${anchors.length} 个锚点`:""}的单位净值为起点，按总回报指数比例换算。`
         : "所选区间暂无可核验的复权净值。")
       : "基金确认的原始单位净值。";
-    $("nav-basis").textContent=basis+provenance;
+    $("nav-basis").textContent=basis+(fund?" 净值按每份显示。":"")+provenance;
     $("nav-gaps").hidden=!adjusted||!gaps.length;
     if (!$("nav-gaps").hidden) {
       $("nav-gaps").querySelector("summary").textContent=`${gaps.length} 个复权净值缺口`;

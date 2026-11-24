@@ -60,6 +60,7 @@ export function createFundCharts() {
     }
     const {chart,lines} = ready.get(name) ?? initialize(name,config);
     for (const [key,line] of lines) line.setData(points[key]);
+    document.getElementById(config.readout).textContent = "";
     chart.timeScale().fitContent();
   }
 

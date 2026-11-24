@@ -38,7 +38,22 @@ python -m http.server 8765 --bind 127.0.0.1 --directory work/pages-site
 
 基金详情默认显示近一年。历史净值支持原始与复权切换，另有独立的累计收益与官方基准图。适用的主动权益基金可用回环服务自动加载统计关联指数及独立日K图。静态模式保留原净值 JSON 导入，也支持按数据许可导入一份包含关联分析与指数历史的图表包。操作方法、数据口径、真实样本和截图见[第八阶段验收](docs/off-market-funds-phase8.md)。
 
-关联指数成交量和 VOL5/10 需要可核实的单位、样本范围及本地使用依据。中证原始字段、24 条指数的覆盖及可展示状态见[成交量补充验收](docs/off-market-funds-volume.md)。
+基金关联指数的日 K、MA 和 VOL 复用现有股票引擎。[行情覆盖与数据口径](docs/off-market-funds-stock-chart.md)
+
+### 查看三只验收基金
+
+在 `feat/off-market-fund-analysis` 分支的仓库根目录启动本地服务，无需 Node 或前端构建。
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m stock_analysis.web --port 8765
+```
+
+- [110022 易方达消费行业](http://127.0.0.1:8765/funds.html?fund=110022)
+- [006751 富国互联科技](http://127.0.0.1:8765/funds.html?fund=006751)
+- [003095 中欧医疗健康](http://127.0.0.1:8765/funds.html?fund=003095)
+
+首次计算关联板块可能需要几分钟。可在 Draft PR #5 查看 GitHub Actions 的真实行情截图。`full-*` 为完整页面，`detail-*` 为关联板块区域特写，`*-switched-*` 记录切换后的指数。 [Draft PR #5](https://github.com/yorkchenai/stock-data-center/pull/5)
 
 ## 交互式技术分析界面
 

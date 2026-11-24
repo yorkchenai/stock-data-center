@@ -117,13 +117,13 @@ export function createSectorChart(element, readout, toggles, volumeNote, history
       const format = {type:"volume"};
       const bars = pane.addSeries(LC.HistogramSeries,{...options,visible:checked.get("volume"),priceFormat:format});
       bars.setData(rows.map((row)=>row.volume==null?{time:row.date}:{
-        time:row.date,value:row.volume,color:row.open==null?"#8296a5":row.close>=row.open?UP:DOWN,
+        time:row.date,value:row.volume,color:row.open==null?"#8296a5":(row.close>=row.open?UP:DOWN)+"80",
       }));
       lines.set("volume",[bars]);
       button("volume",history.volume_unit,toggles[1]);
       for (const key of VOLUMES.slice(1)) {
         lines.set(key,seriesSpans(rows,key).map((span)=>{
-          const line=pane.addSeries(LC.LineSeries,{...options,visible:checked.get(key),color:COLORS[key],lineWidth:1,
+          const line=pane.addSeries(LC.LineSeries,{...options,visible:checked.get(key),color:COLORS[key],lineWidth:2,
             priceFormat:format,pointMarkersVisible:span.length===1});
           line.setData(span);
           return line;

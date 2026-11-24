@@ -39,14 +39,66 @@ async function open(page,code) {
   await page.locator(chartCanvas).first().waitFor({timeout:300_000});
 }
 
+async function verifyLayout(page, width, mobile) {
+  await page.evaluate(()=>new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  const dimensions=await page.evaluate(()=>{
+    const ids=["nav-chart","returns-chart","drawdown-chart","sector-chart"];
+    const charts=ids.map((id)=>{
+      const node=document.getElementById(id);
+      const rect=node.getBoundingClientRect();
+      return {id, width:rect.width, left:rect.left, right:rect.right,
+        fits:Array.from(node.querySelectorAll("canvas")).every((canvas)=>{
+          const bounds=canvas.getBoundingClientRect();
+          return bounds.right<=rect.right+1 && bounds.bottom<=rect.bottom+1;
+        })};
+    });
+    const panes=[...document.querySelectorAll("#sector-chart table tr")]
+      .map((row)=>row.getBoundingClientRect().height).filter((height)=>height>30);
+    const columns=getComputedStyle(document.getElementById("core-metrics")).gridTemplateColumns.split(" ").length;
+    const targets=[...document.querySelectorAll("#sector-tabs button,#sector-periods button,#fund-periods button")];
+    return {width:innerWidth,scrollWidth:document.documentElement.scrollWidth,charts,panes,columns,
+      minimumTarget:Math.min(...targets.map((button)=>button.getBoundingClientRect().height)),
+      tabLabelFits:[...document.querySelectorAll("#sector-tabs button")].every((tab)=>tab.scrollWidth<=tab.clientWidth),
+      navTextNodes:[...document.getElementById("nav-chart").childNodes].some((node)=>node.nodeType===3&&node.textContent.trim())};
+  });
+  assert.equal(dimensions.width,width);
+  assert.ok(dimensions.scrollWidth<=width+1,JSON.stringify(dimensions));
+  assert.ok(dimensions.charts.every(({width,left,right,fits})=>width>0&&left>=0&&right<=dimensions.width+1&&fits),
+    JSON.stringify(dimensions));
+  assert.equal(dimensions.navTextNodes,false,"loading or empty-state text must not cover the live NAV chart");
+  assert.equal(dimensions.columns,mobile?2:3);
+  assert.equal(dimensions.tabLabelFits,true);
+  assert.ok(dimensions.minimumTarget>=(mobile?44:36));
+  assert.equal(dimensions.panes.length,2,JSON.stringify(dimensions.panes));
+  assert.ok(Math.abs(dimensions.panes[1]/(dimensions.panes[0]+dimensions.panes[1])-.3)<.04,
+    JSON.stringify(dimensions.panes));
+  return dimensions.panes;
+}
+
+async function hoverMiddle(page, selector) {
+  const target=page.locator(selector);
+  await target.scrollIntoViewIfNeeded();
+  const bounds=await target.boundingBox();
+  await page.mouse.move(bounds.x+bounds.width*.53,bounds.y+bounds.height*.45);
+}
+
 try {
   for (const [code,target] of cases) {
     const page=await browser.newPage({viewport:{width:1440,height:1000}});
     const errors=[];
     page.on("pageerror",(error)=>errors.push(error.message));
     await open(page,code);
+    const fund=await lookup(code);
+    const latestFund=fund.rows.at(-1);
     assert.equal(await page.locator("#core-metrics .metric").count(),6);
     assert.equal(await page.locator("#returns-chart canvas").count()>0,true);
+    assert.equal(await page.locator("#drawdown-chart canvas").count()>0,true);
+    assert.match(await page.locator("#fund-identity").textContent(),new RegExp(code));
+    assert.equal(await page.locator("#fund-nav-date").textContent(),latestFund.date);
+    assert.ok((await page.locator("#returns-source").textContent()).includes(latestFund.date));
+    assert.ok((await page.locator("#returns-source").textContent()).includes(fund.source.name));
+    const headings=await page.locator("#fund-detail h2").allTextContents();
+    assert.deepEqual(headings.slice(0,4),["基金历史净值","基金累计收益与业绩比较基准","风险分析","强关联板块指数分析"]);
     const model=await lookup(`${code}/sectors`);
     const slots=await page.locator("#sector-tabs button").count();
     assert.equal(slots,model.sectors.length);
@@ -59,6 +111,7 @@ try {
       await page.locator(chartCanvas).first().waitFor();
     }
     const price=await lookup(`${code}/sectors/${index.code}`);
+    assert.equal(await page.locator("#sector-index-title").textContent(),`${index.name} ${index.code}`);
     const ma=checkAverages(price,"close","MA",[5,10,20,60]);
     const vol=checkAverages(price,"volume","VOL",[5,10]);
     assert.equal(Object.keys(vol).length,2);
@@ -74,17 +127,50 @@ try {
     assert.match(await page.locator("#sector-metrics").textContent(),/60\/120 日/);
     if (code==="110022") assert.match(await page.locator("#sector-evidence").textContent(),/直接支持/);
     const incoming=await page.locator("#nav-hover").textContent();
+    assert.match(incoming,/^最新可见 \d{4}-\d{2}-\d{2} · \d+\.\d{4}$/);
+    assert.match(await page.locator("#nav-basis").textContent(),/净值按每份显示/);
     await page.locator("#nav-raw").click();
     assert.match(await page.locator("#nav-basis").textContent(),/原始单位净值/);
     assert.ok(await page.locator("#nav-chart canvas").count()>0);
     const rawNav=(await page.locator("#nav-hover").textContent()).match(/(\d{4}-\d{2}-\d{2}) · (\d+\.\d+)/);
-    assert.ok(rawNav && Number(rawNav[2])>0);
+    assert.ok(rawNav);
+    assert.equal(rawNav[1],latestFund.date);
+    assert.equal(rawNav[2],latestFund.unit_nav.toFixed(4));
+    await hoverMiddle(page,"#nav-chart");
+    const navHover=(await page.locator("#nav-hover").textContent()).match(/^(\d{4}-\d{2}-\d{2}) · (\d+\.\d{4})$/);
+    assert.ok(navHover);
+    assert.equal(navHover[2],fund.rows.find((row)=>row.date===navHover[1]).unit_nav.toFixed(4));
     await page.locator("#nav-adjusted").click();
     assert.equal(await page.locator("#nav-hover").textContent(),incoming);
+    const benchmarkStatus=await page.locator("#benchmark-status").textContent();
+    const benchmarkCurve=await page.locator("#benchmark-line").isEnabled();
+    if (!benchmarkCurve) assert.match(benchmarkStatus,/暂无|无法核验|尚不可用|缺少|未验证/);
+    await hoverMiddle(page,"#returns-chart");
+    const returnHover=await page.locator("#hover-values").textContent();
+    assert.match(returnHover,/^\d{4}-\d{2}-\d{2} · 基金 -?\d+\.\d{2}%/);
+    assert.ok(fund.rows.some((row)=>row.date===returnHover.slice(0,10)));
+    if (!benchmarkCurve) assert.ok(!returnHover.includes("基准"));
+    const firstFundRange=await page.locator("#fund-visible-range").textContent();
+    await page.locator('#fund-periods [data-period="3m"]').click();
+    assert.notEqual(await page.locator("#fund-visible-range").textContent(),firstFundRange);
+    assert.equal(await page.locator("#hover-values").textContent(),"");
+    await page.locator('#fund-periods [data-period="1y"]').click();
+    assert.equal(await page.locator("#fund-visible-range").textContent(),firstFundRange);
+    const navGaps=fund.rows.filter((row)=>row.return_index==null);
+    if (navGaps.length) {
+      await page.locator('#fund-periods [data-period="all"]').click();
+      assert.equal(await page.locator("#nav-gaps").isVisible(),true);
+      const gaps=await page.locator("#nav-gap-list li").allTextContents();
+      assert.deepEqual(gaps.map((item)=>item.slice(0,10)),navGaps.map((row)=>row.date));
+      await page.locator('#fund-periods [data-period="1y"]').click();
+    }
     await page.locator('[data-indicator="MA5"]').uncheck();
     await page.locator("#sector-chart").scrollIntoViewIfNeeded();
     const chart=await page.locator("#sector-chart").boundingBox();
     const hoverX=chart.x+chart.width*.55;
+    let intervalRequests=0;
+    const countSectorRequests=(request)=>{if (new URL(request.url()).pathname.includes("/sectors/")) intervalRequests++;};
+    page.on("request",countSectorRequests);
     await page.mouse.move(hoverX,chart.y+chart.height*.37);
     await page.waitForTimeout(150);
     const hover=await page.locator("#sector-ohlc").textContent();
@@ -125,23 +211,42 @@ try {
     await page.locator("#sector-from").fill(price.last.slice(0,7)+"-01");
     await page.locator("#sector-range button").click();
     assert.match(await page.locator("#sector-range-status").textContent(),/显示/);
+    assert.equal(await page.locator('[data-readout="VOL10"]').textContent(),locale.format(vol.VOL10));
+    assert.equal(intervalRequests,0);
+    page.off("request",countSectorRequests);
     if (slots>1) {
       const other=model.sectors.find((item)=>item.code!==index.code);
       await page.locator(`[data-index="${other.code}"]`).click();
       await page.locator(chartCanvas).first().waitFor();
       const alternate=await lookup(`${code}/sectors/${other.code}`);
       assert.ok((await page.locator("#sector-index-meta").textContent()).includes(alternate.source.name));
+      assert.equal(await page.locator("#sector-index-title").textContent(),`${other.name} ${other.code}`);
+      const lastRow=alternate.rows.at(-1);
+      const expectedOHLC=[alternate.last,...["open","high","low","close"].map((field,i)=>
+        `${["开","高","低","收"][i]} ${lastRow[field]==null?"—":locale.format(lastRow[field])}`)].join(" · ");
+      assert.equal(await page.locator("#sector-ohlc").textContent(),expectedOHLC);
+      if (code==="110022") {
+        await page.locator('.sector-panel').screenshot({path:`${output}/detail-${code}-switched-${other.code}.png`});
+        report.switchScreenshot={fund:code,index:other.code};
+      }
       if (await page.locator("#sector-chart").getAttribute("data-chart-mode")==="close") report.closeOnly={fund:code,index:other.code};
       await page.locator(`[data-index="${index.code}"]`).click();
       await page.locator(chartCanvas).first().waitFor();
     }
     await page.locator('#sector-periods [data-period="1y"]').click();
     await page.mouse.move(0,0);
-    await page.screenshot({path:`${output}/${code}-desktop.png`,fullPage:true});
+    const viewports={};
+    for (const width of [1440,1920]) {
+      await page.setViewportSize({width,height:1000});
+      viewports[width]=await verifyLayout(page,width,false);
+      await page.screenshot({path:`${output}/full-${code}-desktop-${width}.png`,fullPage:true});
+    }
+    await page.locator(".sector-panel").screenshot({path:`${output}/detail-${code}-index-${index.code}.png`});
     assert.deepEqual(errors,[]);
     report.funds[code]={selected:index.code,quality:price.quality,first:price.first,last:price.last,
-      nav:{date:rawNav[1],unit_nav:Number(rawNav[2]),adjusted_readout:incoming},
-      mode:chartMode,ohlc:(({date,open,high,low,close})=>({date,open,high,low,close}))(price.rows.at(-1)),
+      nav:{date:rawNav[1],unit_nav:Number(rawNav[2]),adjusted_readout:incoming,gapCount:navGaps.length},
+      mode:chartMode,viewports,benchmark:{curve:benchmarkCurve,status:benchmarkStatus},
+      ohlc:(({date,open,high,low,close})=>({date,open,high,low,close}))(price.rows.at(-1)),
       ma,vol,volume:price.rows.at(-1).volume,source:price.source.id,model_index_as_of:price.model_index_as_of,
       volume_unit:price.volume_unit,volume_status:price.quality.volume_status,ranked:model.sectors.map((item)=>({
         code:item.code,quality:item.quality,rank:item.rank,beta:item.beta,stability:item.stability,
@@ -174,6 +279,9 @@ try {
     const bounds=await phone.locator("#sector-chart").boundingBox();
     const x=bounds.x+bounds.width*.48,y=bounds.y+bounds.height*.5;
     const cdp=await phone.context().newCDPSession(phone);
+    const touch=(type,x,y)=>cdp.send("Input.dispatchTouchEvent",{
+      type,touchPoints:type==="touchEnd"?[]:[{x,y,id:1}],
+    });
     const base=await phone.locator("#sector-chart").getAttribute("data-visible-from");
     const send=(type,margin)=>cdp.send("Input.dispatchTouchEvent",{type,touchPoints:margin==null?[]:[
       {x:x-margin,y,id:1},{x:x+margin,y,id:2},
@@ -184,9 +292,26 @@ try {
     await phone.waitForTimeout(300);
     const pinch=await phone.locator("#sector-chart").getAttribute("data-visible-from");
     assert.notEqual(pinch,base,"pinch zoom should change the visible first date");
-    await phone.locator('#sector-periods [data-period="1y"]').tap();
-    assert.equal(await phone.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-    await phone.screenshot({path:`${output}/${code}-mobile.png`,fullPage:true});
+    await touch("touchStart",x,y);
+    for (let d=12;d<=84;d+=12) await touch("touchMove",x+d,y);
+    await touch("touchEnd",x+84,y);
+    await phone.waitForFunction((first)=>document.getElementById("sector-chart").dataset.visibleFrom!==first,pinch);
+    await touch("touchStart",x,y);
+    await phone.waitForFunction((last)=>!document.getElementById("sector-ohlc").textContent.startsWith(last),price.last);
+    const touchReadout=await phone.locator("#sector-ohlc").textContent();
+    const touched=price.rows.find((row)=>row.date===touchReadout.slice(0,10));
+    assert.ok(touched);
+    assert.equal(await phone.locator('[data-readout="volume"]').textContent(),locale.format(touched.volume));
+    await touch("touchEnd",x,y);
+    await phone.locator('#sector-periods [data-period="3m"]').tap();
+    assert.match(await phone.locator("#sector-range-status").textContent(),/显示 \d{4}-\d{2}-\d{2}/);
+    for (const width of [390,430]) {
+      await phone.setViewportSize({width,height:844});
+      await phone.locator('#sector-periods [data-period="1y"]').tap();
+      viewports[width]=await verifyLayout(phone,width,true);
+      await phone.screenshot({path:`${output}/full-${code}-mobile-${width}.png`,fullPage:true});
+    }
+    report.funds[code].touch=touchReadout;
     report.funds[code].pinch=true;
     await phone.close();
   }
@@ -202,12 +327,13 @@ try {
       await page.locator('#sector-chart[data-chart-mode="close"]').waitFor();
       assert.match(await page.locator("#sector-history-note").textContent(),/收盘价/);
       report.closeOnly={fund:"519674",index:item.code,quality:data.quality};
-      await page.screenshot({path:`${output}/close-only-desktop.png`,fullPage:true});
+      await page.screenshot({path:`${output}/full-519674-desktop-1440-close-only.png`,fullPage:true});
       break;
     }
     await page.close();
   }
   assert.ok(report.closeOnly,"a real close-only index must exercise the downgrade");
+  assert.ok(report.switchScreenshot,"a switched real index must be captured");
 } finally {
   await writeFile(`${output}/observations.json`,JSON.stringify(report,null,2));
   await browser.close();

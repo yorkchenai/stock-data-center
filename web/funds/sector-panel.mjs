@@ -30,7 +30,7 @@ export function createSectorPanel() {
     graph.clear();
     delete container.dataset.chartMode;
     hide("sector-display",true);
-    for (const id of ["sector-metrics","sector-index-meta","sector-evidence","sector-range-status"]) text(id,"");
+    for (const id of ["sector-metrics","sector-index-title","sector-index-meta","sector-evidence","sector-range-status"]) text(id,"");
   }
   function clear() {
     generation++;
@@ -82,9 +82,10 @@ export function createSectorPanel() {
   }
   function renderIndex(data) {
     history=data;
+    text("sector-index-title",`${data.name} ${data.code}`);
     hide("sector-display",false);
     const about=$("sector-index-meta");
-    about.replaceChildren(`价格指数 · 点 · ${history.first} 至 ${history.last} · `,
+    about.replaceChildren(`指数行情 · 点 · ${history.first} 至 ${history.last} · `,
       newLink(history.source.name,history.source.url));
     if (history.model_index_as_of !== history.last) about.append(` · 关联模型指数数据截至 ${history.model_index_as_of}`);
     const gaps=history.quality?.internal_gaps;

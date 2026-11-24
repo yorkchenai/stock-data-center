@@ -33,6 +33,7 @@ export function createNavChart(element, readout) {
     }
     if (!chart) {
       element.classList.remove("empty");
+      element.replaceChildren();
       const LC = globalThis.LightweightCharts;
       chart = LC.createChart(element, {
         autoSize:true, layout:{background:{color:"#fff"},textColor:"#536579",attributionLogo:true},

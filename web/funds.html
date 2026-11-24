@@ -99,15 +99,23 @@
         <details id="nav-gaps" hidden><summary>复权数据缺口</summary><ul id="nav-gap-list" class="fund-note"></ul></details>
       </section>
       <section class="fund-panel chart-panel" aria-labelledby="returns-title">
-        <div class="panel-heading"><h2 id="returns-title">累计收益</h2><span id="fund-visible-range" class="fund-note"></span></div>
+        <div class="panel-heading"><h2 id="returns-title">基金累计收益与业绩比较基准</h2><span id="fund-visible-range" class="fund-note"></span></div>
         <div class="fund-chart-legend">
           <label><input type="checkbox" id="fund-line" checked><i class="line-fund"></i>基金总回报</label>
           <label><input type="checkbox" id="benchmark-line" checked><i class="line-benchmark"></i><span id="benchmark-label">业绩比较基准</span></label>
         </div>
         <div id="returns-chart" class="fund-chart" role="img" aria-label="基金和基准累计收益曲线"></div>
         <p id="hover-values" class="fund-note chart-description" aria-live="off"></p>
+        <p id="returns-source" class="fund-note" hidden></p>
         <p id="benchmark-status" class="fund-note"></p>
         <a class="fund-note" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">图表由 TradingView Lightweight Charts™ 提供</a>
+      </section>
+      <section class="fund-panel chart-panel" aria-labelledby="risk-title">
+        <h2 id="risk-title">风险分析</h2>
+        <div id="risk-metrics" class="risk-grid"></div>
+        <div id="drawdown-chart" class="fund-chart drawdown-chart" role="img" aria-label="区间历史回撤曲线"></div>
+        <p id="drawdown-values" class="fund-note chart-description"></p>
+        <p id="risk-assumptions" class="fund-note"></p>
       </section>
       <section class="fund-panel sector-panel" aria-labelledby="sector-title">
         <div class="panel-heading">
@@ -120,6 +128,7 @@
         <p id="sector-metrics" class="sector-metrics"></p>
         <p id="sector-evidence" class="fund-note"></p>
         <div id="sector-display" hidden>
+          <h3 id="sector-index-title"></h3>
           <p id="sector-index-meta" class="fund-note"></p>
           <div id="sector-periods" class="fund-controls" role="group" aria-label="指数显示区间"></div>
           <form id="sector-range" class="fund-controls" hidden>
@@ -135,13 +144,6 @@
           <p id="sector-history-note" class="fund-note"></p>
           <p id="sector-volume-note" class="fund-note"></p>
         </div>
-      </section>
-      <section class="fund-panel chart-panel" aria-labelledby="risk-title">
-        <h2 id="risk-title">风险分析</h2>
-        <div id="risk-metrics" class="risk-grid"></div>
-        <div id="drawdown-chart" class="fund-chart drawdown-chart" role="img" aria-label="区间历史回撤曲线"></div>
-        <p id="drawdown-values" class="fund-note chart-description"></p>
-        <p id="risk-assumptions" class="fund-note"></p>
       </section>
       <section class="fund-panel" aria-labelledby="holdings-title">
         <h2 id="holdings-title">持仓与投资风格</h2>

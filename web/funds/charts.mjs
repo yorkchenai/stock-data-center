@@ -25,7 +25,7 @@ export function createFundCharts() {
     const chart = LC.createChart(target, isFund ? {
       ...options, crosshair:{mode:LC.CrosshairMode.Magnet},
       rightPriceScale:{...options.rightPriceScale,minimumWidth:74},
-      localization:{...options.localization,priceFormatter:format},
+      localization:{...options.localization,dateFormat:"yyyy-MM-dd",priceFormatter:format},
     } : options);
     const line = chart.addSeries(LC.LineSeries,{
       color,lineWidth:2,priceLineVisible:false,lastValueVisible:false,
@@ -63,6 +63,7 @@ export function createFundCharts() {
     }
     const {chart,line} = ready.get(name) ?? initialize(name,config);
     line.setData(points);
+    if (name === "fund") chart.clearCrosshairPosition();
     document.getElementById(config.readout).textContent = "";
     chart.timeScale().fitContent();
   }

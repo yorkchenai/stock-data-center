@@ -45,6 +45,7 @@ try {
   const context=await browser.newContext({viewport:{width:1440,height:1000}});
   await serveAssets(context);
   const page=await context.newPage();
+  const touchSession=await context.newCDPSession(page);
   const pageErrors=[];
   const localRequests=[];
   page.on("pageerror",(error)=>pageErrors.push(error.message));
@@ -77,6 +78,10 @@ try {
       nav_rows:result.fund.rows.length,coverage:result.report.index_coverage,model_date:result.report.model_as_of,
       ranked:result.report.sectors.map(({code})=>code),sector_status:result.report.status,
       latest_chart:result.chart?.last??null};
+    result.visible_metrics=await page.locator("#core-metrics .metric").evaluateAll((items)=>
+      Object.fromEntries(items.map((item)=>[item.dataset.metric,item.querySelector("strong").textContent])));
+    observed.return_1y=result.visible_metrics.return;
+    observed.drawdown_1y=result.visible_metrics.drawdown;
     summary.funds[code]=observed;
     parity.funds[code]=result;
     if (await entry.count()) {
@@ -99,11 +104,28 @@ try {
     }
     for (const [width,height] of [[1440,1000],[1920,1000],[390,844],[430,932]]) {
       await page.setViewportSize({width,height});
+      await touchSession.send("Emulation.setTouchEmulationEnabled",{enabled:width<500,maxTouchPoints:2});
       await page.evaluate(()=>new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
       await page.screenshot({path:path.join(output,`fund-${code}-${width}.png`),fullPage:true});
+      if (await entry.count() && width===(code==="006751"?430:390)) {
+        const chart=page.locator("#sector-chart");
+        await chart.scrollIntoViewIfNeeded();
+        const box=await chart.boundingBox();
+        const x=box.x+box.width*.46,y=box.y+box.height*.42;
+        const before=await chart.getAttribute("data-visible-from");
+        const pinch=(type,d)=>touchSession.send("Input.dispatchTouchEvent",{type,touchPoints:d?[
+          {x:x-d,y,id:1},{x:x+d,y,id:2},
+        ]:[]});
+        await pinch("touchStart",16);
+        for (const distance of [26,36,46,56,66,76]) await pinch("touchMove",distance);
+        await pinch("touchEnd",0);
+        await page.waitForFunction((before)=>document.getElementById("sector-chart").dataset.visibleFrom!==before,before);
+        observed.mobile_pinch=width;
+      }
     }
     await page.setViewportSize({width:1440,height:1000});
+    await touchSession.send("Emulation.setTouchEmulationEnabled",{enabled:false});
   }
   await page.locator("#back-to-funds").click();
   await page.locator("#search-term").fill("富国互联科技");

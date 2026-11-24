@@ -37,6 +37,24 @@ def verify_nav(item, metadata, code):
     return py
 
 
+def verify_risk(item, nav, code):
+    rows = nav["rows"]
+    start = (pd.Timestamp(rows[-1]["date"]) - pd.DateOffset(years=1)).date().isoformat()
+    selected = rows[next(i for i in range(len(rows)-1,-1,-1) if rows[i]["date"] <= start):]
+    level = pd.Series([row["return_index"] for row in selected],dtype=float)
+    metrics = item["visible_metrics"]
+    if level.isna().any():
+        equal(metrics["return"],"—",f"{code} return missing")
+        equal(metrics["drawdown"],"—",f"{code} drawdown missing")
+    else:
+        expected = {"return": level.iloc[-1]/level.iloc[0]-1,
+                    "drawdown": (level/level.cummax()-1).min(),
+                    "volatility": level.pct_change().dropna().std() * (252**.5)}
+        for key,value in expected.items():
+            equal(float(metrics[key].strip("%")),float(f"{value*100:.2f}"),f"{code} {key}")
+    return {key:metrics[key] for key in ("return","drawdown","volatility")}
+
+
 def verify_rank(item, fund, code):
     actual = item["report"]
     if not item.get("sessions") or not item.get("histories"):
@@ -104,6 +122,7 @@ def main():
         nav=verify_nav(item,metadata,code)
         report[code]={"nav":{"rows":len(nav["rows"]),"first":nav["rows"][0]["date"],"last":nav["rows"][-1]["date"],
                             "latest":nav["rows"][-1]["unit_nav"],"gaps":sum(row["return_index"] is None for row in nav["rows"])},
+                      "risk_1y":verify_risk(item,nav,code),
                       "ranking":verify_rank(item,nav,code),"chart":verify_chart(item,code)}
     if set(report)!={"110022","006751","003095"}:
         raise ValueError("Incomplete three-fund browser run")

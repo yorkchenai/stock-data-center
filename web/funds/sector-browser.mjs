@@ -161,7 +161,8 @@ export function sectorAnalysisPayload(fund,histories,config,bounds,computed=new 
   const used=new Set([...markets,...candidates]);
   return {...base,status:result.status,model_as_of:result.as_of??null,markets,candidate_count:candidates.length,
     index_coverage:{available:used.size,total:Object.keys(indices).length,
-      missing:Object.keys(indices).filter((index)=>!used.has(index)),price_source:"股票行情引擎 / 中证"},
+      missing:Object.keys(indices).filter((index)=>!used.has(index)),
+      price_sources:[...new Set([...used].map((index)=>histories[index].source.name))]},
     model_age_sessions:sessions.filter((day)=>day>result.as_of).length,
     sectors:result.ranked.map((item,i)=>({code:item.code,name:indices[item.code].name,rank:i+1,quality:item.quality,
       beta:item.beta,stability:item.positive_fraction,windows:item.windows,index_as_of:histories[item.code].rows.at(-1).date,
@@ -169,12 +170,12 @@ export function sectorAnalysisPayload(fund,histories,config,bounds,computed=new 
         source:evidence.source??null,weight_pct_nav:item.holdings_evidence?.known_weight_pct_nav??null}}))};
 }
 
-export function createBrowserSectorProvider(configPromise, stockHistory=fetchHistory) {
+export function createBrowserSectorProvider(configPromise, stockHistory=fetchHistory, pageData=readPageData) {
   let cached;
   async function collect(config,calendar,bounds) {
     const histories={};
     const sessionSet=new Set(bounds.sessions);
-    const snapshot=config.index_snapshot?await readPageData(config.index_snapshot).catch(()=>null):null;
+    const snapshot=config.index_snapshot?await pageData(config.index_snapshot).catch(()=>null):null;
     const items=Object.values(config.indices);
     const special=items.filter((item)=>{
       try {resolveSymbol(item.code,"index");return false;}
@@ -213,7 +214,7 @@ export function createBrowserSectorProvider(configPromise, stockHistory=fetchHis
     return histories;
   }
   async function base() {
-    const [config,calendar]=await Promise.all([configPromise(),readPageData("calendar.json")]);
+    const [config,calendar]=await Promise.all([configPromise(),pageData("calendar.json")]);
     const bounds=tradingWindow(calendar);
     const now=Date.now();
     if (!cached || cached.end!==bounds.end || now-cached.time>5*60_000) {

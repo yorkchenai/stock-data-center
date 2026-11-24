@@ -94,7 +94,7 @@ try {
     const short = tbody.locator("tr",{hasText:second.name});
     assert.equal(await long.locator("td").nth(10).textContent() === "—",false);
     assert.equal(await short.locator("td").nth(10).textContent(),"—");
-    await page.locator("#search-term").fill("000001");
+    await page.locator("#search-term").fill(first.name);
     await page.getByRole("button",{name:"搜索",exact:true}).click();
     assert.match(await page.locator("#search-result").innerText(),/已添加/);
     await page.locator("#search-term").fill("短历史债券");

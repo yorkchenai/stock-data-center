@@ -22,7 +22,7 @@ node scripts/test_snapshot_stage.mjs --fixture
 node scripts/test_snapshot_stage.mjs
 ```
 
-普通构建省略 `--snapshot-service`，继续使用浏览器独立模式。隔离浏览器可打开 `index.html?symbol=300078&snapshot_id=…` 或 `funds.html?fund=110022&snapshot_id=…`。显式指定 ID 查不到时页面报错，避免无标记替换。普通查询失败会使用浏览器独立取数，并展示独立来源、日期与版本。
+普通构建省略 `--snapshot-service`，继续使用浏览器独立模式。隔离浏览器可打开 `index.html?symbol=300078&snapshot_id=…` 或 `funds.html?fund=110022&snapshot_id=…`。显式指定 ID 查不到时页面报错，避免无标记替换。普通查询失败或主动股票／混合基金的共享快照少于已验证的 14 条指数时，页面回退整套浏览器独立分析，并展示独立来源、日期与版本。
 
 ## 权限和上线边界
 

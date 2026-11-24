@@ -542,8 +542,8 @@ elements["locate-form"].addEventListener("submit", (event) => {
   setStatus(`已定位 ${row.date}，右侧显示该交易日原始指标数值。`);
 });
 if (isPages) elements.demo.textContent = "查看存档样本";
-const requestedPage=new URLSearchParams(location.search);
-if (isPages && requestedPage.has("snapshot_id")) {
+const requestedPage=isPages?new URLSearchParams(location.search):null;
+if (requestedPage?.has("snapshot_id")) {
   runLoad(async()=>displayDataset(await loadPagesAnalysis({
     symbol:requestedPage.get("symbol"),kind:requestedPage.get("kind")??"auto",
   },requestedPage.get("snapshot_id"))),"正在读取指定快照…");

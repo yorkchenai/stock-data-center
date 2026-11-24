@@ -130,6 +130,10 @@ async function pageSnapshot(type,symbol,snapshot_id) {
   assert.equal(response.headers.get("Access-Control-Allow-Origin"),origin);
   return response.json();
 }
+async function latestSnapshot(type,symbol) {
+  const params=new URLSearchParams({asset_type:type,symbol});
+  return fetch(service+"/api/analysis?"+params,{headers:{Origin:origin}}).then((response)=>response.json());
+}
 const report=()=>({sample:sample?"deterministic fixture":"live vendor",stage:"local workerd + persisted D1",
   model_version:version,results,
   upstream:coldEvents.filter((event)=>event.event==="snapshot_upstream"),
@@ -153,6 +157,11 @@ try {
     try {
       const {type,symbol,snapshot_id}=row;
       const args={asset_type:type,symbol,snapshot_id};
+      const lookupStarted=performance.now();
+      const cached=await latestSnapshot(type,symbol);
+      row.hit_ms=Math.round(performance.now()-lookupStarted);
+      assert.equal(cached.cache,"hit");
+      assert.equal(cached.snapshot_id,snapshot_id);
       const snapshot=await pageSnapshot(type,symbol,snapshot_id);
       assert.equal(snapshot.model_version,version);
       assert.equal(snapshot.snapshot_id,snapshot_id);
@@ -192,16 +201,27 @@ try {
         page.on("pageerror",(error)=>requestFailures.push(error.message));
         const url=isStock?"/index.html?symbol="+symbol:"/funds.html?fund="+symbol;
         const pageResponse=page.waitForResponse((response)=>response.url().includes("category=page"));
+        const firstSector=snapshot.data.association?.sectors[0];
+        const indexResponse=firstSector? page.waitForResponse((response)=>response.url().includes("category=index")):null;
         await page.goto(origin+url+"&snapshot_id="+snapshot_id);
         const view=await (await pageResponse).json();
         assert.deepEqual(view,snapshot);
         await page.waitForFunction(({selector,id})=>document.querySelector(selector)?.textContent.includes(id),
           {selector:isStock?"#status":"#fund-source",id:snapshot_id},{timeout:8_000});
+        if (indexResponse) {
+          const index=await (await indexResponse).json();
+          const model=await rpc("get_analysis_details",{...args,category:"sectors",index_code:firstSector.code,limit:1});
+          assert.equal(index.snapshot_id,snapshot_id);
+          assert.equal(index.data.last,model.data.chart.last_index_trade_date);
+          assert.deepEqual(index.data.rows.slice(-1),model.data.chart.rows);
+          row.sector_index={code:firstSector.code,last:index.data.last};
+        }
         assert.deepEqual(requestFailures,[]);
       } finally {await page.close();}
       row.browser_mcp_identical=true;
       row.rows=stored.length;
       row.sector_status=snapshot.data.association?.status;
+      row.rank_codes=snapshot.data.association?.sectors.map((sector)=>sector.code);
     } catch (error) {row.error=error.message;}
   }
   await wait(250);

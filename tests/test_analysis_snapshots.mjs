@@ -68,6 +68,8 @@ test("D1 publication is immutable, pinned details use primary, latest hits avoid
     ["history",{limit:20},(v)=>assert.deepEqual(v.data.rows,rows.slice(-20))],
     ["history",{date:rows[2].date},(v)=>assert.deepEqual(v.data.rows,[rows[2]])],
     ["history",{limit:20,field:"high",aggregate:"max"},(v)=>assert.equal(v.data.extreme.value,rows.at(-1).high)],
+    ["history",{start:rows[0].date,end:rows.at(-1).date,field:"low",aggregate:"min"},(v)=>
+      assert.deepEqual(v.data.extreme,{date:rows[0].date,value:rows[0].low})],
     ["indicators",{date:rows.at(-1).date},(v)=>assert.equal(v.data.rows[0].MACD_hist,indicators.at(-1).MACD_hist)],
     ["model",{},(v)=>assert.equal(v.data.models.technical_analysis.status,"complete")],
   ];

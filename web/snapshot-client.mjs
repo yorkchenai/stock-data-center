@@ -1,5 +1,6 @@
-const endpoint=document.documentElement.dataset.analysisOrigin;
-const ownVersion=document.documentElement.dataset.analysisModel??"local-unversioned";
+const options=globalThis.document?.documentElement?.dataset;
+const endpoint=options?.analysisOrigin;
+const ownVersion=options?.analysisModel??"local-unversioned";
 export const browserModelVersion=ownVersion;
 export const snapshotsEnabled=Boolean(endpoint);
 const ready=new Set(["complete","partial"]);
@@ -47,5 +48,7 @@ export async function getSnapshotIndex(snapshot,indexCode) {
 }
 
 export function snapshotNote(snapshot) {
-  return `共享快照 ${snapshot.snapshot_id} · ${snapshot.model_version} · 数据截至 ${snapshot.data_as_of}${snapshot.status==="partial"?" · 部分数据缺失":""}`;
+  const expires=new Intl.DateTimeFormat("zh-CN",{timeZone:"Asia/Shanghai",dateStyle:"short",
+    timeStyle:"short",hourCycle:"h23"}).format(new Date(snapshot.expires_at));
+  return `共享快照 ${snapshot.snapshot_id} · ${snapshot.model_version} · 数据截至 ${snapshot.data_as_of} · 有效期至 ${expires}（上海）${snapshot.status==="partial"?" · 部分数据缺失":""}`;
 }

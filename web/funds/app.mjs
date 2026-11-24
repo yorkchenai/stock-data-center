@@ -30,6 +30,8 @@ const loaded = new Map();
 const catalog = new Map();
 const beingLoaded = new Map();
 const sharedSnapshots = new Map();
+const snapshotFallback = new Map();
+const verifiedWebCoverage = 14;
 const columns = [
   ["name","基金名称 / 代码"],["type","基金类型"],["nav","最新单位净值"],["date","净值日期"],...PERIODS,
   ["source","来源"],["actions","操作"],
@@ -115,12 +117,21 @@ async function readApi(path) {
   return data;
 }
 async function loadOnlineFund(code, snapshotId) {
+  snapshotFallback.delete(code);
   if (snapshotsEnabled) {
     try {
       const snapshot=await getPageSnapshot({asset_type:"fund",symbol:code},snapshotId);
+      if (!snapshotId && ["stock","mixed"].includes(snapshot.data.fund.category)) {
+        const coverage=snapshot.data.association?.index_coverage;
+        const covered=coverage?.available??0;
+        if (covered<verifiedWebCoverage) {
+          throw new Error(`共享快照指数覆盖 ${covered}/${coverage?.total??24}，低于网页已验证的 ${verifiedWebCoverage} 条。`);
+        }
+      }
       return {raw:snapshot.data.fund,snapshot};
     } catch (error) {
       if (snapshotId) throw error;
+      snapshotFallback.set(code,error.message);
     }
   } else if (snapshotId) throw new Error("此页面未配置该共享快照服务。");
   return {raw:await fetchFund(code,await fetchPageConfig()),snapshot:null};
@@ -313,7 +324,8 @@ function renderIdentity(code,fund) {
   $("fund-nav-date").textContent = latest?.date ?? "—";
   const shared = fund && sharedSnapshots.get(code);
   const origin = shared ? snapshotNote(shared) : online && fund ?
-    `网页独立数据 · 截至 ${latest.date} · ${browserModelVersion}` : "";
+    `网页独立数据 · 截至 ${latest.date} · ${browserModelVersion}${snapshotFallback.has(code)
+      ? " · " + snapshotFallback.get(code):""}` : "";
   $("fund-source").textContent = "来源 " + (fund?.source.name ?? "—") + (origin?" · "+origin:"");
   $("fund-freshness").textContent = "状态 " + (fund ? fundFreshness(fund) : "未载入");
   const benchmark = fund?.benchmark_disclosure ?? fund?.benchmark;
@@ -505,6 +517,7 @@ async function importFiles(event) {
       const {fund:dataset,bundle}=normalizeChartFile(raw);
       if (mode==="detail-status" && dataset.code!==selectedCode) throw new Error("文件基金代码与当前详情不一致。");
       sharedSnapshots.delete(dataset.code);
+      snapshotFallback.delete(dataset.code);
       recordFund(dataset);
       if (bundle) bundles.set(dataset.code,bundle);
       else bundles.delete(dataset.code);

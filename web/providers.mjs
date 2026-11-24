@@ -172,9 +172,10 @@ export async function fetchHistory(options, calendar, getJSON = requestJSON, {pr
           VOL10: "手",
           turnover_cny: "元",
         },
-        rows: calculateIndicators(rows),
+        rows,
       };
-      if (!preferComplete || !validation.unverified_missing_sessions.length) return result;
+      if (!preferComplete || !validation.unverified_missing_sessions.length)
+        return {...result,rows:calculateIndicators(rows)};
       const last=rows.at(-1).date, previous=best?.rows.at(-1).date;
       if (!best || last>previous || last===previous &&
         validation.unverified_missing_sessions.length<best.validation.unverified_missing_sessions.length) {
@@ -184,7 +185,7 @@ export async function fetchHistory(options, calendar, getJSON = requestJSON, {pr
       attempts.push({ source, status: "failed", error: error.message });
     }
   }
-  if (best) return best;
+  if (best) return {...best,rows:calculateIndicators(best.rows)};
   throw new Error(
     `行情加载失败，未使用存档替代：${attempts.map((a) => `${a.source}: ${a.error}`).join("；")}`,
   );

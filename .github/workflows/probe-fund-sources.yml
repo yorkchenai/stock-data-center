@@ -12,6 +12,7 @@ on:
       - "scripts/probe_fund_sources.py"
       - "scripts/probe_fund_browser.mjs"
       - "scripts/probe_fund_script_isolation.mjs"
+      - "scripts/probe_fund_pages_transport.mjs"
       - ".github/workflows/probe-fund-sources.yml"
   workflow_dispatch:
 
@@ -41,6 +42,8 @@ jobs:
       - name: Probe direct browser endpoints from the published project origin
         run: |
           export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          node scripts/probe_fund_pages_transport.mjs > work/fund-probe/pages-transport.json
+          cat work/fund-probe/pages-transport.json
           node scripts/probe_fund_browser.mjs > work/fund-probe/browser.json
           cat work/fund-probe/browser.json
       - name: Cross-check fund comparisons and Sharpe without retaining histories

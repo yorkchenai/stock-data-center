@@ -1,4 +1,4 @@
-"""Cross-check the rendered last bar through the stock engine's selected provider."""
+"""Cross-check the rendered last bar through a fresh stock engine request."""
 from argparse import ArgumentParser
 from datetime import date, timedelta
 import json
@@ -17,7 +17,11 @@ def main():
         ohlc, code = fund["ohlc"], fund["selected"]
         day = ohlc["date"]
         start = (date.fromisoformat(day) - timedelta(days=14)).isoformat()
-        frame, report = fetch_daily(resolve_symbol(code, kind="index"), start, day, source=fund["source"])
+        def validate_latest(frame):
+            if frame.date.iloc[-1].date().isoformat() != day:
+                raise ValueError(f"Missing comparison session: {code} {day}")
+
+        frame, report = fetch_daily(resolve_symbol(code, kind="index"), start, day, validator=validate_latest)
         original = frame.set_index("date").loc[day]
         for key in ("open", "high", "low", "close"):
             if float(original[key]) != ohlc[key]:
@@ -25,6 +29,7 @@ def main():
         if report["volume_unit"] != "100-share lots" or float(original.volume_lots) != fund["volume"]:
             raise SystemExit(f"Source mismatch: {code} {day} volume")
         fund["verified_last_ohlcv_against_provider"] = True
+        fund["recheck_source"] = report["source"]
     args.observations.write_text(json.dumps(data, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
 
 

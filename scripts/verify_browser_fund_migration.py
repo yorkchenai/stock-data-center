@@ -11,6 +11,7 @@ from stock_analysis import funds
 from stock_analysis.fund_charts import rank_fund
 from stock_analysis.indicators import calculate_indicators
 from stock_analysis.sector_data import read_catalog
+from stock_analysis.sector_model import FUND, alignment, correlations
 from stock_analysis.sector_signals import valid_runs
 
 
@@ -71,6 +72,9 @@ def verify_rank(item, fund, code):
         equal(actual[key],expected[key],f"{code} rank {key}")
     equal([r["code"] for r in actual["sectors"]],[r["code"] for r in expected["sectors"]],f"{code} order")
     checks=0
+    aligned = alignment(fund,hist,sessions)
+    if aligned[FUND].last_valid_index() is not None:
+        aligned = aligned.loc[:aligned[FUND].last_valid_index()]
     for a,b in zip(actual["sectors"],expected["sectors"]):
         for key in ("beta","stability","quality","holdings"):
             if key=="holdings":
@@ -79,7 +83,8 @@ def verify_rank(item, fund, code):
             else:
                 equal(a[key],b[key],f"{code} sector {a['code']} {key}")
             checks+=1
-        for window,stats in b["windows"].items():
+        short = correlations(aligned,a["code"],expected["markets"],20)
+        for window,stats in {20:short,**b["windows"]}.items():
             for field,value in stats.items():
                 equal(a["windows"][str(window)][field],value,f"{code} {a['code']} {window} {field}")
                 checks+=1

@@ -3,6 +3,7 @@ import test from "node:test";
 import { fundFromAssignments, parseDirectory, readNavAssignments } from "../web/funds/nav-source.mjs";
 import { indexChartPayload, tradingWindow } from "../web/funds/sector-browser.mjs";
 import { readFundText } from "../web/funds/providers.mjs";
+import { fundFreshness } from "../web/funds/data.mjs";
 
 const epoch=(date)=>Date.parse(date+"T00:00:00+08:00");
 const retrievedAt=new Date("2025-01-10T00:00:00Z");
@@ -59,4 +60,11 @@ test("calendar cutoff and explicit provider failures",async()=>{
   assert.equal(tradingWindow(calendar,new Date("2025-01-07T07:00:00Z")).end,"2025-01-07");
   await assert.rejects(readFundText("https://example.test",{fetcher:async()=>new Response(null,{status:403})}),/403/);
   await assert.rejects(readFundText("https://example.test",{fetcher:async()=>new Response("a".repeat(4_000_001))}),/超出限制/);
+  const cancellation=new AbortController();
+  cancellation.abort(new DOMException("deadline","TimeoutError"));
+  await assert.rejects(readFundText("https://example.test",{
+    signal:cancellation.signal,fetcher:async(_,options)=>options.signal.throwIfAborted(),
+  }),{name:"TimeoutError"});
+  assert.equal(fundFreshness({normalFrequency:true,rows:[{date:"2025-01-02"}]},"2025-01-10"),
+    "净值日期已超过 7 天");
 });

@@ -246,17 +246,17 @@ test("private same-origin access requires identity and has a separate D1 quota",
   assert.equal(builds,1);
 });
 
-test("anonymous stock and fund views share MCP snapshots and bound cold work and licensed output",async()=>{
+test("anonymous stock and fund views share MCP snapshots and bound cold work without grant configuration",async()=>{
   const {db,connection}=database();
   const origin="https://example.github.io";
-  const env={DB:connection(),SNAPSHOT_PUBLIC_ENABLED:"1",SNAPSHOT_PUBLIC_ORIGIN:origin,
-    SNAPSHOT_PUBLIC_DISPLAY_GRANTS:"stock:test,fund:fund-feed,sector-model:index-feed,sector-chart:index-feed"};
+  const env={DB:connection(),SNAPSHOT_PUBLIC_ENABLED:"1",SNAPSHOT_PUBLIC_ORIGIN:origin};
   const fundRows=[{date:sessions.at(-1),unit_nav:1.2}];
   const fundRisk={windows:{"1y":{metrics:{drawdown:{value:-0.15}}}}};
   const association={index_coverage:{price_sources:["index-feed"]},sectors:[]};
   const chart={source:{name:"index-feed"},volume_unit:"手",rows:[{close:100,volume:123}]};
   const fund={status:"complete",data_as_of:fundRows[0].date,source:{name:"fund-feed"},quality:{},
-    raw_data:{history:fundRows,fund:{code:"110022"}},models:{risk:fundRisk,sectors:{report:association,charts:{"399997":chart}}},summary:{}};
+    raw_data:{history:fundRows,fund:{code:"110022",risk_free:{rows:[{date:sessions.at(-1),rate:0.01}]},
+      benchmark:{rows:[{date:sessions.at(-1),close:100}]}}},models:{risk:fundRisk,sectors:{report:association,charts:{"399997":chart}}},summary:{}};
   const events=[];
   let releaseStock,stockStarted;
   const started=new Promise((resolve)=>{stockStarted=resolve;});
@@ -280,7 +280,7 @@ test("anonymous stock and fund views share MCP snapshots and bound cold work and
     return (await response.json()).result.structuredContent;
   };
   assert.equal((await web(query,{...env,SNAPSHOT_PUBLIC_ENABLED:"0"})).status,403);
-  assert.equal((await web(query,{...env,DB:null,SNAPSHOT_PUBLIC_DISPLAY_GRANTS:""})).status,403);
+  assert.equal((await web(query,{...env,DB:null})).status,503);
   const rejected=await web(query,env,{headers:{Origin:"https://other.example"}});
   assert.equal(rejected.status,403);
   assert.equal(rejected.headers.has("Access-Control-Allow-Origin"),false);
@@ -317,15 +317,14 @@ test("anonymous stock and fund views share MCP snapshots and bound cold work and
     assert.match(read.model_version,/model-a/);
   }
   const pinnedFund={...fundQuery,snapshot_id:fundSnap.snapshot_id,category:"page"};
-  const noSector={...env,SNAPSHOT_PUBLIC_DISPLAY_GRANTS:"fund:fund-feed"};
-  const limitedView=await (await web(pinnedFund,noSector)).json();
-  assert.equal(limitedView.data.association,null);
-  assert.match(limitedView.data.association_message,/公开展示许可/);
+  const publicView=await (await web(pinnedFund)).json();
+  assert.deepEqual(publicView.data.association,association);
+  assert.equal(publicView.data.fund.risk_free,undefined);
+  assert.equal(publicView.data.fund.benchmark,undefined);
   const index={...pinnedFund,category:"index",index_code:"399997"};
-  assert.equal((await web(index)).status,403);
-  const indexAllowed={...env,SNAPSHOT_PUBLIC_DISPLAY_GRANTS:env.SNAPSHOT_PUBLIC_DISPLAY_GRANTS+",sector-volume:index-feed"};
-  assert.deepEqual((await (await web(index,indexAllowed)).json()).data,chart);
-  assert.equal((await web(pinnedFund,{...env,SNAPSHOT_PUBLIC_DISPLAY_GRANTS:"fund:other-feed"})).status,403);
+  assert.deepEqual((await (await web(index)).json()).data,chart);
+  const legacy=await (await web(pinnedFund,{...env,SNAPSHOT_PUBLIC_DISPLAY_GRANTS:"fund:other-feed"})).json();
+  assert.equal(legacy.snapshot_id,fundSnap.snapshot_id);
   db.exec("UPDATE analysis_snapshots SET expires_at=0 WHERE asset_type='fund'");
   assert.equal((await web(pinnedFund)).status,410);
   db.exec("UPDATE analysis_snapshot_limits SET calls=24 WHERE slot='public_build_day'");

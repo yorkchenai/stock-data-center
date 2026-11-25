@@ -27,7 +27,9 @@ jobs:
       - run: python -m pip install -r requirements.txt
       - run: npm ci --ignore-scripts
       - run: npm install --prefix /tmp/analysis-snapshot-tools --no-save esbuild@0.28.1 miniflare@4.20260730.0
-      - run: python -m stock_analysis.pages --output work/snapshot-stage-pages --snapshot-service http://127.0.0.1:8787
+      - run: >-
+          python -m stock_analysis.pages --output work/snapshot-stage-pages
+          --snapshot-service http://127.0.0.1:8787 --snapshot-runtime-output work/snapshot-stage-runtime
       - run: node --test tests/test_analysis_snapshots.mjs
       - name: Verify fixed test data, D1 persistence and landscape browser wiring
         run: |

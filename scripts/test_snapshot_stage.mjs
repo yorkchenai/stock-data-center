@@ -17,6 +17,7 @@ const {Miniflare}=require("miniflare");
 const {build}=require("esbuild");
 const root=resolve(".");
 const pages=resolve(process.env.SNAPSHOT_TEST_PAGES??"work/snapshot-stage-pages");
+const runtime=resolve(process.env.SNAPSHOT_TEST_RUNTIME??"work/snapshot-stage-runtime");
 const output=resolve(process.env.SNAPSHOT_TEST_REPORT??"work/snapshot-stage-summary.json");
 const sample=process.argv.includes("--fixture");
 const storage=await mkdtemp(join(tmpdir(),"snapshot-stage-"));
@@ -25,9 +26,12 @@ const symbols=[["stock","300078","sz300078"],["stock","600519","sh600519"],
   ["fund","110022","110022"],["fund","006751","006751"],["fund","003095","003095"]];
 const secret=randomUUID();
 let coldEvents=[];
-const calendar=await readFile(join(pages,"calendar.json"),"utf8");
-const fundConfig=await readFile(join(pages,"fund-config.json"),"utf8");
-const {analysis_model_version:version}=JSON.parse(await readFile(join(pages,"build-info.json"),"utf8"));
+for (const file of ["calendar.json","fund-config.json","build-info.json"]) {
+  assert.deepEqual(await readFile(join(pages,file)),await readFile(join(runtime,"assets",file)));
+}
+const calendar=await readFile(join(runtime,"assets","calendar.json"),"utf8");
+const fundConfig=await readFile(join(runtime,"assets","fund-config.json"),"utf8");
+const {analysis_model_version:version}=JSON.parse(await readFile(join(runtime,"assets","build-info.json"),"utf8"));
 const fixedFixture=`
 async function replay(input) {
   const url=new URL(input);
@@ -49,8 +53,8 @@ async function replay(input) {
 }
 `;
 const source=`
-import { createSnapshotWorker } from ${JSON.stringify(join(root,"worker/snapshots/worker.mjs"))};
-import { createSnapshotCompute } from ${JSON.stringify(join(root,"worker/snapshots/compute.mjs"))};
+import { createSnapshotWorker } from ${JSON.stringify(join(runtime,"worker/snapshots/worker.mjs"))};
+import { createSnapshotCompute } from ${JSON.stringify(join(runtime,"worker/snapshots/compute.mjs"))};
 const calendar=${calendar}, config=${fundConfig}, modelVersion=${JSON.stringify(version)};
 ${sample?fixedFixture:""}
 const events=[];
@@ -304,6 +308,16 @@ try {
         assert.deepEqual(view,snapshot);
         await page.waitForFunction(({selector,id})=>document.querySelector(selector)?.textContent.includes(id),
           {selector:isStock?"#status":"#fund-source",id:snapshot_id},{timeout:8_000});
+        if (!isStock) {
+          const annual=snapshot.data.risk.windows["1y"];
+          const formatted=(value)=>value==null?"—":(100*value).toFixed(2)+"%";
+          assert.equal(await page.locator('#core-metrics [data-metric="drawdown"] strong').textContent(),
+            formatted(annual.metrics.drawdown.value));
+          if (annual.start) {
+            assert.deepEqual(await page.locator('#core-metrics [data-metric="return"] time').allTextContents(),
+              [annual.start,annual.end]);
+          }
+        }
         if (indexResponse) {
           const index=await (await indexResponse).json();
           const model=await rpc("get_analysis_details",{...args,category:"sectors",index_code:firstSector.code,limit:1});

@@ -1,5 +1,5 @@
 import { analysisQuery, currentMarketWindow, STOCK_START } from "./compute.mjs";
-import { snapshotMetadata } from "./details.mjs";
+import { snapshotMetadata, summarizeTradingWindow } from "./details.mjs";
 
 const stockOrder=["价格定位置","均线判趋势","成交量看配合","MACD看动量变化","RSI看相对强弱"];
 const ready=new Set(["complete","partial"]);
@@ -27,6 +27,8 @@ function stockSummary(snapshot,cache,window) {
   const audit=snapshot.quality;
   const suspensions=audit.confirmed_suspension_sessions??[];
   const gaps=audit.unverified_missing_sessions??[];
+  const recent=summarizeTradingWindow(rows,20);
+  if (recent) recent.unverified_gap_count=gaps.filter((date)=>date>=recent.first&&date<=recent.last).length;
   const stale=Boolean(audit.stale);
   const status=!rows.length ? "no_daily_data" : stale ? "stale" : snapshot.status==="partial" ? "partial" :
     snapshot.data_as_of<window.session ? "suspended" : "ok";
@@ -46,6 +48,7 @@ function stockSummary(snapshot,cache,window) {
       (item.source===snapshot.source.name && ["stale","partial"].includes(status)?status:"ok") :
       (item.status==="failed"?"upstream_error":item.status)})),
     returned_rows:rows.length,more,next_end:more?previousDate(rows[0].date):null,
+    recent_20_trading_days:recent,
     analysis_order:stockOrder,supplementary_indicator:"ADX14",rows,latest:rows.at(-1)??null};
 }
 

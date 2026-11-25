@@ -8,20 +8,21 @@ const PROTOCOL = "2026-07-28";
 const symbolSchema={type:"string",description:"六位代码。股票或指数可带 sh/sz 前缀；基金保留前导零。"};
 const afterSnapshot={type:"string",description:"仅续查刷新时使用。传回 building 响应的 after_snapshot_id，并省略 refresh。"};
 const dates=Object.fromEntries(["start","end","date","before"].map((key)=>[key,{type:"string",format:"date"}]));
+const choice=(...values)=>({type:"string",enum:values});
 const detailsFields={
-  asset_type:{enum:["stock","fund"]},symbol:symbolSchema,snapshot_id:{type:"string"},
-  kind:{enum:["stock","index","auto"]},category:{enum:["history","indicators","risk","sectors","model"]},
+  asset_type:choice("stock","fund"),symbol:symbolSchema,snapshot_id:{type:"string"},
+  kind:choice("stock","index","auto"),category:choice("history","indicators","risk","sectors","model"),
   ...dates,limit:{type:"integer",minimum:1,maximum:120},
-  aggregate:{enum:["max","min"]},field:{type:"string"},period:{enum:["1w","1m","3m","6m","1y","3y","5y","all"]},
+  aggregate:choice("max","min"),field:{type:"string"},period:choice("1w","1m","3m","6m","1y","3y","5y","all"),
   index_code:{type:"string"},
 };
 const voiceWait="收到 building 时，语音告知仍在构建，最多自动续查一次。保留原参数，若返回 after_snapshot_id 则带回该值，省略 refresh。仍在构建即等待用户追问。";
 
-const tools=[
+export const tools=[
   {
     name:"get_stock_analysis",description:"股票雷达。将中文逐位代码转为数字。首次只播报来源、最后交易日、主要指标和数据状态；用相同 snapshot_id 回答追问。"+voiceWait,
     inputSchema:{type:"object",required:["symbol"],additionalProperties:false,properties:{
-      symbol:symbolSchema,start:dates.start,end:dates.end,kind:{enum:["stock","index","auto"]},refresh:{type:"boolean"},after_snapshot_id:afterSnapshot,
+      symbol:symbolSchema,start:dates.start,end:dates.end,kind:choice("stock","index","auto"),refresh:{type:"boolean"},after_snapshot_id:afterSnapshot,
     }},
   },
   {
@@ -30,7 +31,7 @@ const tools=[
       properties:{symbol:symbolSchema,refresh:{type:"boolean"},after_snapshot_id:afterSnapshot}},
   },
   {
-    name:"get_analysis_details",description:"按上一条结果的 snapshot_id 查询。历史与指标支持日期或最近若干条、区间内最高或最低值。风险和关联板块读取已计算结果。快照过期时依照用户要求刷新。",
+    name:"get_analysis_details",description:"股票和基金雷达的连续追问。使用上一条摘要的 symbol 和 snapshot_id，读取同一快照。history 支持逐日净值或行情，indicators 支持历史指标，risk 支持回撤峰值和谷底日期，sectors 支持 Pearson 相关系数及指定关联指数的逐日行情。",
     inputSchema:{type:"object",required:["asset_type","symbol","snapshot_id","category"],additionalProperties:false,
       properties:detailsFields},
   },
@@ -103,7 +104,7 @@ const statusCode = (status) => ({
 })[status]??200;
 
 export function createSnapshotWorker({calendar,config,modelVersion,authorize=()=>false,authorizePage=()=>false,
-  compute,clock=()=>new Date(),observe}) {
+  initialRateLimit=(db)=>limitSnapshotCalls(db,"owner_initial",6),compute,clock=()=>new Date(),observe}) {
   const log=observe??((event)=>console.log(JSON.stringify(event)));
   const service=analysisService({calendar,modelVersion,clock,observe:log,
     compute:compute??createSnapshotCompute({calendar,config,clock})});
@@ -170,7 +171,7 @@ export function createSnapshotWorker({calendar,config,modelVersion,authorize=()=
         try {initial=prepareInitial(assetType,args,calendar,clock());}
         catch (error) {return pack({schema_version:1,status:"invalid_arguments",message:error.message});}
       }
-      const blocked=await limitSnapshotCalls(env.DB,detail?"owner_details":"owner_initial",detail?30:6);
+      const blocked=detail?await limitSnapshotCalls(env.DB,"owner_details",30):await initialRateLimit(env.DB);
       if (blocked) return pack({schema_version:1,status:blocked});
       if (detail) return finish(await service.details(env.DB,args,{requestId}));
       const output=await service.initial(env.DB,initial.args,{waitUntil,requestId,present:initial.present});

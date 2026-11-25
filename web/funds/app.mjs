@@ -171,7 +171,11 @@ function tableValue(id, row, fund) {
   if (id==="nav") return {value:latest.unit_nav,format:nav};
   if (id==="date") return {value:latest.date};
   if (id==="source") return {value:fund.source.name};
-  return {...periodReturn(fund,id),format:pct,percent:true};
+  const snapshot = sharedSnapshots.get(row.code);
+  const result = snapshot
+    ? snapshot.data.risk?.returns?.[id] ?? {value:null,reason:"共享快照缺少该周期收益。"}
+    : periodReturn(fund,id);
+  return {...result,format:pct,percent:true};
 }
 function visibleColumns() { return columns.filter(([id])=>!state.hidden.includes(id) || ["name","actions"].includes(id)); }
 function renderList() {
@@ -387,14 +391,16 @@ function renderAnalysis(requestedStart, requestedEnd) {
   const shared=sharedSnapshots.get(selectedCode);
   const precomputed=!requestedStart && !requestedEnd && shared?.data.risk?.windows[rangeKey];
   const analysis=precomputed || analyzePerformance(fund,range);
-  const interval = range.start ? `${range.start} 至 ${range.end}` : "—";
-  $("range-status").textContent = range.error ?? `统计范围 ${interval} · 已载入净值 ${fund.rows[0].date} 至 ${latest}`;
+  const {start: statsStart, end: statsEnd} = precomputed || range;
+  const interval = statsStart ? `${statsStart} 至 ${statsEnd}` : "—";
+  const unavailable = precomputed ? (statsStart ? null : precomputed.metrics.return.reason) : range.error;
+  $("range-status").textContent = unavailable ?? `统计范围 ${interval} · 已载入净值 ${fund.rows[0].date} 至 ${latest}`;
   $("core-metrics").replaceChildren(...coreDefinitions.map(([id,label,format,description])=>{
     const article = tag("article",null,{class:"metric","data-metric":id,title:description});
     const metric = analysis.metrics[id];
     const note = tag("small",metric.reason ?? interval);
-    if (!metric.reason && range.start) {
-      note.replaceChildren(tag("time",range.start,{datetime:range.start})," 至 ",tag("time",range.end,{datetime:range.end}));
+    if (!metric.reason && statsStart) {
+      note.replaceChildren(tag("time",statsStart,{datetime:statsStart})," 至 ",tag("time",statsEnd,{datetime:statsEnd}));
     }
     article.append(tag("h3",label),tag("strong",shown(metric.value,format)),note);
     return article;

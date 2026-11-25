@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from stock_analysis.indicators import calculate_indicators
-from stock_analysis.pages import build_pages
+from stock_analysis.pages import build_pages, analysis_model_version, MODEL_MODULES
 from stock_analysis.web import INDICATOR_FIELDS, ROOT
 from stock_analysis.symbols import resolve_symbol
 from scripts.verify_pages_live import parse_browser_responses
@@ -79,7 +79,11 @@ class PagesBuildTests(TestCase):
 
     def test_relative_site_calendar_real_snapshot_and_no_overwrite(self):
         with TemporaryDirectory() as temporary:
-            output = build_pages(Path(temporary) / "site", calendar_end="2026-11-30")
+            root = Path(temporary)
+            runtime = root / "runtime"
+            with self.assertRaises(ValueError):
+                build_pages(root / "site", snapshot_runtime_output=root / "site" / "runtime")
+            output = build_pages(root / "site", calendar_end="2026-11-30", snapshot_runtime_output=runtime)
             html = (output / "index.html").read_text()
             self.assertIn('data-mode="pages"', html)
             self.assertIn('src="./app.mjs"', html)
@@ -94,5 +98,15 @@ class PagesBuildTests(TestCase):
             self.assertTrue(payload['snapshot'])
             self.assertFalse(payload['live_analysis'])
             self.assertEqual(len(payload['rows']), 1551)
+            for filename in ("calendar.json", "fund-config.json", "build-info.json"):
+                self.assertEqual((output / filename).read_bytes(), (runtime / "assets" / filename).read_bytes())
+            for name in MODEL_MODULES:
+                self.assertEqual((runtime / name).read_bytes(), (output / Path(name).relative_to("web")).read_bytes())
+            self.assertEqual((runtime / "worker/snapshots/compute.mjs").read_bytes(),
+                             (ROOT / "worker/snapshots/compute.mjs").read_bytes())
+            self.assertFalse((output / "worker").exists())
+            self.assertFalse((runtime / "api").exists())
+            self.assertNotEqual(analysis_model_version({"calendar":["2026-11-23"]}),
+                                analysis_model_version({"calendar":["2026-11-24"]}))
             with self.assertRaises(FileExistsError):
                 build_pages(output, calendar_end="2026-11-30")

@@ -40,6 +40,29 @@ function extreme(rows, field, mode) {
   return best;
 }
 
+export function summarizeTradingWindow(rows, limit) {
+  const {rows:selected,count,first,last} = filterRows(rows,{limit});
+  if (!count) return null;
+  return {requested_count:limit,count,first,last,
+    highest_intraday:extreme(selected,"high","max"),
+    lowest_intraday:extreme(selected,"low","min")};
+}
+
+function drawdownDates(metrics, points) {
+  const value = metrics.drawdown?.value;
+  const declineDays = metrics.drawdownDays?.value;
+  if (!(value < 0) || !Number.isInteger(declineDays) || declineDays < 0) return null;
+  const trough = points?.drawdown?.find((point) => point.value === value)?.time;
+  if (!trough) return null;
+  const offset = (days) => new Date(Date.parse(trough) + days * 86_400_000).toISOString().slice(0,10);
+  const recoveryDays = metrics.recoveryDays?.value;
+  return {
+    peak_date:offset(-declineDays),
+    trough_date:trough,
+    recovery_date:Number.isInteger(recoveryDays) && recoveryDays > 0 ? offset(recoveryDays) : null,
+  };
+}
+
 export function selectDetails(snapshot, args, {browser=false}={}) {
   const {category} = args;
   if (!CATEGORIES.has(category) || (!browser && ["page","index"].includes(category))) {
@@ -67,7 +90,7 @@ export function selectDetails(snapshot, args, {browser=false}={}) {
     const risk=snapshot.models.risk;
     if (risk) {
       const {points,...window}=risk.windows[period];
-      result={...window,period,observations_per_year:risk.observations_per_year,
+      result={...window,period,drawdown_dates:drawdownDates(window.metrics,points),observations_per_year:risk.observations_per_year,
         return_basis:risk.return_basis,sortino_target:risk.sortino_target};
     }
   } else if (category==="sectors") {

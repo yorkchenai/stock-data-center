@@ -1,5 +1,6 @@
 import { COLORS, PANELS, dateKey, formatValue, seriesData } from "./data.mjs";
 import { fetchHistory } from "./providers.mjs";
+import { STOCK_ANALYSIS_START } from "./engine.mjs";
 import { browserModelVersion, getPageSnapshot, snapshotNote, snapshotsEnabled } from "./snapshot-client.mjs";
 
 const isPages = document.documentElement?.dataset?.mode === "pages";
@@ -359,7 +360,7 @@ function displayDataset(dataset) {
   elements.start.value = dataset.requested_start;
   elements.end.value = dataset.requested_end;
   if (isPages && snapshotsEnabled && dataset.snapshot) {
-    elements.start.value = "2025-01-01";
+    elements.start.value = STOCK_ANALYSIS_START;
     elements.end.value = new Date(Date.now()+8*3_600_000).toISOString().slice(0,10);
   }
   elements["source-label"].textContent =
@@ -408,12 +409,20 @@ async function loadDemo() {
   return response.json();
 }
 
+function selectStockDisplay(dataset, {start,end}) {
+  const rows=dataset.rows.filter((row)=>(!start||row.date>=start)&&(!end||row.date<=end));
+  if (!rows.length) throw new Error("所选区间没有行情记录");
+  return {...dataset,requested_start:start||dataset.requested_start,requested_end:end||dataset.requested_end,
+    rows};
+}
+
 async function loadPagesAnalysis(options, snapshotId) {
   let fallback;
   if (snapshotsEnabled) {
     try {
       const snapshot=await getPageSnapshot({asset_type:"stock",...options},snapshotId);
-      return {...snapshot.data,analysis_label:snapshotNote(snapshot)};
+      const seed=snapshot.data.calculation_start??snapshot.data.requested_start;
+      return {...selectStockDisplay(snapshot.data,options),analysis_label:snapshotNote(snapshot)+` · 指标起算 ${seed}`};
     } catch (error) {
       if (snapshotId) throw error;
       fallback=error.name==="TimeoutError"?"共享快照加载超时":error.message;
@@ -421,8 +430,13 @@ async function loadPagesAnalysis(options, snapshotId) {
   } else if (snapshotId) {
     throw new Error("此页面未配置该共享快照服务。");
   }
-  const data=await fetchHistory(options,await loadCalendar());
+  const display={...options,start:options.start||STOCK_ANALYSIS_START,
+    end:options.end||new Date(Date.now()+8*3_600_000).toISOString().slice(0,10)};
+  const start=snapshotsEnabled&&display.start>STOCK_ANALYSIS_START?STOCK_ANALYSIS_START:display.start;
+  const result=await fetchHistory({...display,start},await loadCalendar());
+  const data=selectStockDisplay(result,display);
   const label=["网页独立取数",data.source,`截至 ${data.rows.at(-1).date}`,browserModelVersion,fallback];
+  if (snapshotsEnabled) label.push(`指标起算 ${start}`);
   return {...data,analysis_label:label.filter(Boolean).join(" · ")};
 }
 
@@ -544,8 +558,10 @@ elements["locate-form"].addEventListener("submit", (event) => {
 });
 if (isPages) elements.demo.textContent = "查看存档样本";
 const requestedPage=isPages?new URLSearchParams(location.search):null;
-if (requestedPage?.has("snapshot_id")) {
+const privateSymbol=Boolean(document.documentElement?.dataset?.analysisPath && requestedPage?.has("symbol"));
+if (requestedPage?.has("snapshot_id") || privateSymbol) {
   runLoad(async()=>displayDataset(await loadPagesAnalysis({
     symbol:requestedPage.get("symbol"),kind:requestedPage.get("kind")??"auto",
-  },requestedPage.get("snapshot_id"))),"正在读取指定快照…");
+    start:requestedPage.get("start")??undefined,end:requestedPage.get("end")??undefined,
+  },requestedPage.get("snapshot_id"))),"正在读取共享行情快照…");
 } else runLoad(async () => displayDataset(await loadDemo()));

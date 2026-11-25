@@ -200,6 +200,13 @@ test("browser authorization, legacy stock fields and snapshot details use the sa
   assert.equal(view.snapshot_id,followup.snapshot_id);
   assert.deepEqual(view.data.rows,indicators);
   assert.equal(view.data.rows.at(-1).ADX14,followup.data.rows[0].ADX14);
+  const shortStart=sessions.at(-20);
+  assert.equal((await (await page({...query,start:shortStart,end:sessions.at(-1)})).json()).snapshot_id,summary.snapshot_id);
+  const short=await mcp("get_stock_analysis",{symbol:"300078",start:shortStart,end:sessions.at(-1)});
+  assert.equal(short.snapshot_id,summary.snapshot_id);
+  assert.deepEqual(short.rows,indicators.slice(-20));
+  assert.equal(short.recent_20_trading_days.lowest_intraday.date,shortStart);
+  assert.equal((await page({...query,start:"2024-12-31"})).status,400);
   const source=events.filter((event)=>event.event==="snapshot_upstream");
   const reads=events.filter((event)=>event.event==="snapshot_read");
   assert.equal(source.length,1);
@@ -237,6 +244,27 @@ test("private same-origin access requires identity and has a separate D1 quota",
       params:{name:"get_stock_analysis",arguments:{symbol:"300078"}}})}),env);
   assert.equal((await rpc.json()).result.structuredContent.snapshot_id,snapshot_id);
   assert.equal(builds,1);
+});
+
+test("different closing dates share the fixed preheat and agree on overlapping indicators",async()=>{
+  const {connection}=database();
+  const computation=[];
+  const service=make(async(args)=>{
+    computation.push(args);
+    const history=rows.filter((row)=>row.date>=args.start&&row.date<=args.end);
+    return {...data,data_as_of:history.at(-1).date,raw_data:{...data.raw_data,history},
+      indicators:{rows:calculateIndicators(history)}};
+  });
+  const current=await service.initial(connection(),query);
+  const end=sessions.at(-12),start=sessions.at(-21);
+  const earlier=await service.initial(connection(),{...query,start,end});
+  assert.notEqual(current.snapshot_id,earlier.snapshot_id);
+  assert.deepEqual(computation.map(({start})=>start),["2025-01-01","2025-01-01"]);
+  const first=await service.details(connection(),detail(current,"indicators",{start,end}));
+  const second=await service.details(connection(),detail(earlier,"indicators",{start,end}));
+  assert.deepEqual(first.data.rows,second.data.rows);
+  assert.ok(Number.isFinite(second.data.rows[0].ADX14));
+  assert.ok(Number.isFinite(second.data.rows[0].MACD_hist));
 });
 
 test("fund keeps the v10 summary with a separate partial snapshot status and no history in speech", async()=>{

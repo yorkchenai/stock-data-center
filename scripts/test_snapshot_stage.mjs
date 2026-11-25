@@ -186,7 +186,8 @@ async function verifyFallback(type,mode) {
     const page=await context.newPage();
     const isStock=type==="stock";
     const code=isStock?"300078":"110022";
-    const sessions=JSON.parse(calendar).sessions.filter((d)=>d>="2025-01-01"&&d<="2026-11-23");
+    const firstSession=mode==="before-preheat"?"2024-11-01":"2025-01-01";
+    const sessions=JSON.parse(calendar).sessions.filter((d)=>d>=firstSession&&d<="2026-11-23");
     const headers={"Access-Control-Allow-Origin":"*"};
     let sourceRequests=0;
     await page.route(service+"/api/analysis?*",async(route)=>{
@@ -198,7 +199,8 @@ async function verifyFallback(type,mode) {
         const body=await response.json();
         if (body.detail_status==="available") body.model_version="incompatible-model";
         await route.fulfill({response,json:body});
-      } else await route.fulfill({status:503,headers,json:{status:"cache_unavailable",message:"测试服务暂不可用"}});
+      } else if (mode==="before-preheat") await route.continue();
+      else await route.fulfill({status:503,headers,json:{status:"cache_unavailable",message:"测试服务暂不可用"}});
     });
     await page.route("https://push2his.eastmoney.com/**",(route)=>{
       const p=new URL(route.request().url()).searchParams;
@@ -222,7 +224,7 @@ async function verifyFallback(type,mode) {
       await page.locator("#load").waitFor();
       await page.locator("#symbol").fill(code);
       await page.locator("#kind").selectOption("stock");
-      await page.locator("#start").fill("2025-01-01");
+      await page.locator("#start").fill(mode==="before-preheat"?"2024-11-01":"2025-01-01");
       await page.locator("#end").fill("2026-11-23");
       await page.locator("#load").click();
     } else await page.goto(origin+"/funds.html?fund="+code);
@@ -232,7 +234,8 @@ async function verifyFallback(type,mode) {
     assert.ok(sourceRequests>0);
     assert.match(label,/2026-11-23/);
     assert.ok(label.includes(version));
-    assert.match(label,mode==="version"?/版本不兼容/:mode==="timeout"?/加载超时/:/服务暂不可用/);
+    assert.match(label,mode==="version"?/版本不兼容/:mode==="timeout"?/加载超时/:
+      mode==="before-preheat"?/指标起算日为 2025-01-01.*指标起算 2024-11-01/:/服务暂不可用/);
     assert.doesNotMatch(label,/共享快照 [a-f0-9]{8}-/);
     assert.equal(await page.locator(isStock?".pane-legend":"#core-metrics article").count(),isStock?5:6);
     return {type,mode,passed:true};
@@ -268,6 +271,25 @@ try {
       const isStock=type==="stock";
       const stored=isStock?snapshot.data.rows:snapshot.data.fund.rows;
       const field=isStock?"high":"unit_nav";
+      if (isStock) {
+        const start=stored.at(-20).date;
+        const range=new URLSearchParams({asset_type:type,symbol,start});
+        const narrow=await fetch(service+"/api/analysis?"+range,{headers:{Origin:origin}}).then((res)=>res.json());
+        assert.equal(narrow.snapshot_id,snapshot_id,"A later display start must reuse the calculation and preheat.");
+        const window={};
+        for (const [key,field,mode] of [["highest_intraday","high","max"],["lowest_intraday","low","min"]]) {
+          const detailed=await rpc("get_analysis_details",{...args,category:"history",limit:20,field,aggregate:mode});
+          assert.equal(detailed.snapshot_id,snapshot_id);
+          assert.equal(detailed.model_version,version);
+          assert.equal(detailed.data.count,20);
+          assert.equal(detailed.data.first,start);
+          assert.equal(detailed.data.last,row.data_as_of);
+          const price=Math[mode](...stored.slice(-20).map((entry)=>entry[field]));
+          assert.deepEqual(detailed.data.extreme,{date:stored.slice(-20).find((entry)=>entry[field]===price).date,value:price});
+          window[key]=detailed.data.extreme;
+        }
+        row.stock_window={calculation_start:snapshot.data.calculation_start,first:start,last:row.data_as_of,count:20,...window};
+      }
       const checks=[
         {category:"history",date:row.data_as_of},
         {category:"history",limit:20},
@@ -283,12 +305,17 @@ try {
         assert.equal(value.snapshot_id,snapshot_id);
         assert.equal(value.model_version,version);
         if (i===0) assert.equal(value.data.rows.at(-1)[field],stored.at(-1)[field]);
-        if (i===1) assert.deepEqual(value.data.rows.map(r=>r.date),stored.slice(-20).map(r=>r.date));
+        if (i===1) {
+          assert.deepEqual(value.data.rows.map(r=>r.date),stored.slice(-20).map(r=>r.date));
+          if (isStock) {
+            assert.deepEqual(value.data.rows,stored.slice(-20).map((entry)=>
+              Object.fromEntries(FIELDS.map((key)=>[key,entry[key]]))));
+          }
+        }
         if (i===2) assert.equal(value.data.extreme.value,Math.max(...stored.slice(-20).map(r=>r[field])));
         if (i===3 && isStock) {
-          for (const name of ["MA5","MACD_hist","RSI14","ADX14","VOL5"]) {
-            assert.equal(value.data.rows[0][name],stored.at(-1)[name]);
-          }
+          assert.deepEqual(value.data.rows[0],Object.fromEntries(Object.entries(stored.at(-1))
+            .filter(([key])=>key==="date"||!FIELDS.includes(key))));
           const input=stored.map((r)=>Object.fromEntries(FIELDS.map((key)=>[key,r[key]])));
           assert.deepEqual(stored,calculateIndicators(input));
         }
@@ -308,6 +335,17 @@ try {
         assert.deepEqual(view,snapshot);
         await page.waitForFunction(({selector,id})=>document.querySelector(selector)?.textContent.includes(id),
           {selector:isStock?"#status":"#fund-source",id:snapshot_id},{timeout:8_000});
+        if (isStock) {
+          assert.equal(await page.locator(".pane-legend").count(),5);
+          const subset=stored.slice(-20);
+          const narrowed=page.waitForResponse((response)=>response.url().includes("category=page"));
+          await page.goto(origin+url+"&snapshot_id="+snapshot_id+"&start="+subset[0].date+"&end="+subset.at(-1).date);
+          const trimmed=await (await narrowed).json();
+          assert.equal(trimmed.snapshot_id,snapshot_id);
+          assert.deepEqual(trimmed.data.rows,stored);
+          await page.waitForFunction((count)=>document.querySelector("#history-label")?.textContent.includes(count),
+            String(subset.length));
+        }
         if (!isStock) {
           const annual=snapshot.data.risk.windows["1y"];
           const formatted=(value)=>value==null?"—":(100*value).toFixed(2)+"%";
@@ -343,6 +381,7 @@ try {
     fallbackChecks.push(...await Promise.all([
       verifyFallback("stock","failure"),verifyFallback("fund","timeout"),
       verifyFallback("stock","version"),verifyFallback("fund","version"),
+      verifyFallback("stock","before-preheat"),
     ]));
   }
   independentAudit=await verifyIndependentAudit();

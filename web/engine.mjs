@@ -1,4 +1,6 @@
 // Portable daily-data/indicator engine. Formulas match stock_analysis/indicators.py.
+export const STOCK_ANALYSIS_START = "2025-01-01";
+
 export const FIELDS = [
   "date",
   "open",

@@ -120,7 +120,8 @@ export function selectDetails(snapshot, args, {browser=false}={}) {
   } else if (category==="index") {
     result=snapshot.models.sectors?.charts[args.index_code];
   } else if (stock) {
-    result={...snapshot.raw_data.stock,rows:snapshot.indicators.rows};
+    result={...snapshot.raw_data.stock,calculation_start:snapshot.models.technical_analysis.calculation_start,
+      rows:snapshot.indicators.rows};
   } else {
     result={fund:{...snapshot.raw_data.fund,rows:snapshot.raw_data.history},
       risk:snapshot.models.risk,association:snapshot.models.sectors.report};

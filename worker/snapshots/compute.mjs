@@ -1,4 +1,4 @@
-import { FIELDS, resolveSymbol, validDate } from "../../web/engine.mjs";
+import { FIELDS, resolveSymbol, STOCK_ANALYSIS_START as STOCK_START, validDate } from "../../web/engine.mjs";
 import { fetchHistory } from "../../web/providers.mjs";
 import { FUND_CODE, fundFreshness, normalizeFund } from "../../web/funds/data.mjs";
 import {
@@ -9,7 +9,7 @@ import { PERIODS, analyzePerformance, periodReturn, periodStart, selectWindow } 
 import { createBrowserSectorProvider } from "../../web/funds/sector-browser.mjs";
 import { marketTransport } from "./providers.mjs";
 
-export const STOCK_START = "2025-01-01";
+export { STOCK_START };
 
 export function currentMarketWindow(calendar, now) {
   const shanghai = new Date(now.getTime()+8*3_600_000).toISOString();
@@ -32,10 +32,12 @@ export function analysisQuery(args, calendar, now = new Date()) {
   const instrument=resolveSymbol(args.symbol,args.kind??"auto");
   const market=currentMarketWindow(calendar,now);
   const start=validDate(args.start??STOCK_START), end=validDate(args.end??market.end);
-  if (start<calendar.start || start>end || end>market.today) throw new Error("股票日期超出有效查询区间。");
+  if (start<STOCK_START) throw new Error(`共享股票快照的指标起算日为 ${STOCK_START}。`);
+  if (STOCK_START<calendar.start || start>end || end>market.today) throw new Error("股票日期超出有效查询区间。");
   const queryEnd=calendar.sessions.findLast((day)=>day<=end && day<=market.end);
   if (!queryEnd || start>queryEnd) throw new Error("查询区间内没有已完成交易日。");
-  return {asset_type:"stock",symbol:instrument.market+instrument.code,kind:instrument.kind,start,end:queryEnd};
+  // The user-facing start selects a view, not a different EMA/RSI/ADX seed.
+  return {asset_type:"stock",symbol:instrument.market+instrument.code,kind:instrument.kind,start:STOCK_START,end:queryEnd};
 }
 
 export function snapshotExpiry(query, data, calendar, now) {

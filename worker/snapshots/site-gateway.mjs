@@ -2,7 +2,7 @@ const headers = {"Cache-Control":"private, no-store","X-Content-Type-Options":"n
 
 export function mountSnapshotSite({analysis, legacy}) {
   return {
-    fetch(request, env={}, ctx) {
+    async fetch(request, env={}, ctx) {
       const {pathname}=new URL(request.url);
       const expected=env.SNAPSHOT_MCP_OWNER_EMAIL?.trim().toLowerCase();
       if (pathname==="/api/analysis" && env.SNAPSHOT_PUBLIC_ENABLED==="1" && expected) {

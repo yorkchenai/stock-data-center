@@ -1,0 +1,413 @@
+{
+  "schema_version": 1,
+  "reports": [
+    {
+      "share_codes": [
+        "110022"
+      ],
+      "period_end": "2026-06-30",
+      "disclosed_on": "2026-07-21",
+      "source": "https://www.hongdianfund.com/FundAnnouncement/Detail/110022/0000000000001r8ejk",
+      "evidence_level": "report_selected_positions",
+      "stock_weight_pct_total_assets": 86.1,
+      "top": [
+        {
+          "symbol": "sh600519",
+          "weight_pct_nav": 9.77
+        },
+        {
+          "symbol": "sh600809",
+          "weight_pct_nav": 8.5
+        }
+      ],
+      "industries": [
+        {
+          "taxonomy": "报告原分类",
+          "name": "制造业",
+          "weight_pct_nav": 85.95
+        }
+      ]
+    },
+    {
+      "share_codes": [
+        "110022"
+      ],
+      "period_end": "2026-09-30",
+      "disclosed_on": "2026-10-27",
+      "source": "https://www.hongdianfund.com/FundAnnouncement/Detail/110022/0000000000001sk1ig",
+      "evidence_level": "report",
+      "stock_weight_pct_total_assets": 90.2,
+      "top": [
+        {
+          "symbol": "sh600519",
+          "weight_pct_nav": 9.96
+        },
+        {
+          "symbol": "sz000333",
+          "weight_pct_nav": 9.48
+        },
+        {
+          "symbol": "sz002594",
+          "weight_pct_nav": 8.64
+        },
+        {
+          "symbol": "sh600809",
+          "weight_pct_nav": 8.62
+        },
+        {
+          "symbol": "sh600660",
+          "weight_pct_nav": 8.02
+        },
+        {
+          "symbol": "sz000596",
+          "weight_pct_nav": 6.84
+        },
+        {
+          "symbol": "sh603129",
+          "weight_pct_nav": 6.09
+        },
+        {
+          "symbol": "sh601058",
+          "weight_pct_nav": 5.61
+        },
+        {
+          "symbol": "sz000568",
+          "weight_pct_nav": 5.35
+        },
+        {
+          "symbol": "sh603288",
+          "weight_pct_nav": 3.84
+        }
+      ],
+      "industries": [
+        {
+          "taxonomy": "报告原分类",
+          "name": "制造业",
+          "weight_pct_nav": 88.4
+        },
+        {
+          "taxonomy": "报告原分类",
+          "name": "农林牧渔业",
+          "weight_pct_nav": 1.1
+        },
+        {
+          "taxonomy": "报告原分类",
+          "name": "租赁和商务服务业",
+          "weight_pct_nav": 0.95
+        },
+        {
+          "taxonomy": "报告原分类",
+          "name": "信息软件",
+          "weight_pct_nav": 0.01
+        }
+      ]
+    },
+    {
+      "share_codes": [
+        "001714"
+      ],
+      "period_end": "2026-09-30",
+      "disclosed_on": "2026-10-27",
+      "source": "https://static.howbuy.com/gkxx/ggfile/2026/2026-10/2026-10-27/5621453.pdf",
+      "evidence_level": "report",
+      "stock_weight_pct_total_assets": 92.58,
+      "top": [
+        {
+          "symbol": "sz000333",
+          "weight_pct_nav": 8.82
+        },
+        {
+          "symbol": "sh600887",
+          "weight_pct_nav": 8.41
+        },
+        {
+          "symbol": "sz300413",
+          "weight_pct_nav": 8.2
+        },
+        {
+          "symbol": "sz002027",
+          "weight_pct_nav": 7.5
+        },
+        {
+          "symbol": "sz002602",
+          "weight_pct_nav": 6.39
+        },
+        {
+          "symbol": "sz002475",
+          "weight_pct_nav": 6.36
+        },
+        {
+          "symbol": "sh600519",
+          "weight_pct_nav": 5.41
+        },
+        {
+          "symbol": "sh600941",
+          "weight_pct_nav": 5.23
+        },
+        {
+          "symbol": "sh601098",
+          "weight_pct_nav": 4.62
+        },
+        {
+          "symbol": "sz002517",
+          "weight_pct_nav": 3.25
+        }
+      ],
+      "industries": []
+    },
+    {
+      "share_codes": [
+        "003095"
+      ],
+      "period_end": "2026-09-30",
+      "disclosed_on": "2026-10-27",
+      "source": "https://www.zofund.com/2026/wsnotice/20261027/ebc7404b0b5b47b8a35e82b4fc5607f6.pdf",
+      "evidence_level": "report",
+      "stock_weight_pct_total_assets": 94.69,
+      "top": [
+        {
+          "symbol": "sh603259",
+          "weight_pct_nav": 10.15
+        },
+        {
+          "symbol": "sz300759",
+          "weight_pct_nav": 10.06
+        },
+        {
+          "symbol": "sz002821",
+          "weight_pct_nav": 9.83
+        },
+        {
+          "symbol": "sz002422",
+          "weight_pct_nav": 9.09
+        },
+        {
+          "symbol": "sh600276",
+          "weight_pct_nav": 8.16
+        },
+        {
+          "symbol": "sh688506",
+          "weight_pct_nav": 7.72
+        },
+        {
+          "symbol": "sz002653",
+          "weight_pct_nav": 7.34
+        },
+        {
+          "symbol": "sz300347",
+          "weight_pct_nav": 6.81
+        },
+        {
+          "symbol": "sh688578",
+          "weight_pct_nav": 3.5
+        },
+        {
+          "symbol": "sh688690",
+          "weight_pct_nav": 2.13
+        }
+      ],
+      "industries": []
+    },
+    {
+      "share_codes": [
+        "006751"
+      ],
+      "period_end": "2026-09-30",
+      "disclosed_on": "2026-10-27",
+      "source": "https://www.fullgoal.com.cn/noticedetails/108819/index.html",
+      "evidence_level": "report",
+      "stock_weight_pct_total_assets": 93.34,
+      "top": [],
+      "industries": []
+    },
+    {
+      "share_codes": [
+        "519674"
+      ],
+      "period_end": "2026-09-30",
+      "disclosed_on": "2026-10-24",
+      "source": "https://hongdianfund.com/FundAnnouncement/Detail/519674/0000000000001sivlu",
+      "evidence_level": "report",
+      "stock_weight_pct_total_assets": 91.14,
+      "top": [],
+      "industries": []
+    },
+    {
+      "share_codes": [
+        "163406"
+      ],
+      "period_end": "2026-09-30",
+      "disclosed_on": "2026-10-27",
+      "source": "https://static.cninfo.com.cn/finalpage/2026-10-27/1225627309.PDF",
+      "evidence_level": "report_selected_positions",
+      "stock_weight_pct_total_assets": 89.87,
+      "top": [
+        {
+          "symbol": "sh688702",
+          "weight_pct_nav": 2.99
+        }
+      ],
+      "industries": []
+    },
+    {
+      "share_codes": [
+        "005827"
+      ],
+      "period_end": "2026-09-30",
+      "disclosed_on": "2026-10-27",
+      "source": "https://qcloud.fund.eastmoney.com/gonggao/005827,AN202610271830959239.html",
+      "evidence_level": "report_link",
+      "stock_weight_pct_total_assets": null,
+      "top": [],
+      "industries": []
+    },
+    {
+      "share_codes": [
+        "024808"
+      ],
+      "period_end": "2026-09-30",
+      "disclosed_on": "2026-10-27",
+      "source": "https://www.chinaamc.com/c/2026-10-27/1014605.shtml",
+      "evidence_level": "report_link",
+      "stock_weight_pct_total_assets": null,
+      "top": [],
+      "industries": []
+    },
+    {
+      "share_codes": [
+        "001643"
+      ],
+      "period_end": "2026-09-30",
+      "disclosed_on": "2026-10-27",
+      "source": "https://fundf10.eastmoney.com/jjgg_001643.html",
+      "evidence_level": "disclosure_listing_only",
+      "stock_weight_pct_total_assets": null,
+      "top": [],
+      "industries": []
+    },
+    {
+      "share_codes": [
+        "000751"
+      ],
+      "period_end": "2026-09-30",
+      "disclosed_on": "2026-10-27",
+      "source": "https://fundf10.eastmoney.com/jjgg_000751.html",
+      "evidence_level": "disclosure_listing_only",
+      "stock_weight_pct_total_assets": null,
+      "top": [],
+      "industries": []
+    }
+  ],
+  "classifications": {
+    "sh600519": [
+      {
+        "indices": [
+          "399997"
+        ],
+        "effective_from": "2026-06-30",
+        "effective_to": "2026-06-30",
+        "published_on": "2026-07-21",
+        "source": "https://static.cninfo.com.cn/finalpage/2026-07-21/1225433611.PDF",
+        "mapping_kind": "tracking_fund_index_positions"
+      },
+      {
+        "indices": [
+          "399997"
+        ],
+        "effective_from": "2026-09-30",
+        "effective_to": "2026-09-30",
+        "published_on": "2026-10-27",
+        "source": "https://static.cninfo.com.cn/finalpage/2026-10-27/1225626357.PDF",
+        "mapping_kind": "tracking_fund_index_positions"
+      }
+    ],
+    "sh600809": [
+      {
+        "indices": [
+          "399997"
+        ],
+        "effective_from": "2026-06-30",
+        "effective_to": "2026-06-30",
+        "published_on": "2026-07-21",
+        "source": "https://static.cninfo.com.cn/finalpage/2026-07-21/1225433611.PDF",
+        "mapping_kind": "tracking_fund_index_positions"
+      },
+      {
+        "indices": [
+          "399997"
+        ],
+        "effective_from": "2026-09-30",
+        "effective_to": "2026-09-30",
+        "published_on": "2026-10-27",
+        "source": "https://static.cninfo.com.cn/finalpage/2026-10-27/1225626357.PDF",
+        "mapping_kind": "tracking_fund_index_positions"
+      }
+    ],
+    "sz000596": [
+      {
+        "indices": [
+          "399997"
+        ],
+        "effective_from": "2026-06-30",
+        "effective_to": "2026-06-30",
+        "published_on": "2026-07-21",
+        "source": "https://static.cninfo.com.cn/finalpage/2026-07-21/1225433611.PDF",
+        "mapping_kind": "tracking_fund_index_positions"
+      },
+      {
+        "indices": [
+          "399997"
+        ],
+        "effective_from": "2026-09-30",
+        "effective_to": "2026-09-30",
+        "published_on": "2026-10-27",
+        "source": "https://static.cninfo.com.cn/finalpage/2026-10-27/1225626357.PDF",
+        "mapping_kind": "tracking_fund_index_positions"
+      }
+    ],
+    "sz000568": [
+      {
+        "indices": [
+          "399997"
+        ],
+        "effective_from": "2026-06-30",
+        "effective_to": "2026-06-30",
+        "published_on": "2026-07-21",
+        "source": "https://static.cninfo.com.cn/finalpage/2026-07-21/1225433611.PDF",
+        "mapping_kind": "tracking_fund_index_positions"
+      },
+      {
+        "indices": [
+          "399997"
+        ],
+        "effective_from": "2026-09-30",
+        "effective_to": "2026-09-30",
+        "published_on": "2026-10-27",
+        "source": "https://static.cninfo.com.cn/finalpage/2026-10-27/1225626357.PDF",
+        "mapping_kind": "tracking_fund_index_positions"
+      }
+    ],
+    "sz000858": [
+      {
+        "indices": [
+          "399997"
+        ],
+        "effective_from": "2026-06-30",
+        "effective_to": "2026-06-30",
+        "published_on": "2026-07-21",
+        "source": "https://static.cninfo.com.cn/finalpage/2026-07-21/1225433611.PDF",
+        "mapping_kind": "tracking_fund_index_positions"
+      },
+      {
+        "indices": [
+          "399997"
+        ],
+        "effective_from": "2026-09-30",
+        "effective_to": "2026-09-30",
+        "published_on": "2026-10-27",
+        "source": "https://static.cninfo.com.cn/finalpage/2026-10-27/1225626357.PDF",
+        "mapping_kind": "tracking_fund_index_positions"
+      }
+    ]
+  }
+}

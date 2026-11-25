@@ -24,7 +24,9 @@ def eastmoney(instrument, start, end):
     })
     payload = request_json(url)
     data = payload.get("data") or {}
-    if data.get("code", instrument.code) != instrument.code:
+    market = data.get("market")
+    if (data.get("code", instrument.code) != instrument.code or
+            (instrument.kind == "index" and market is not None and market != int(instrument.secid.split(".")[0]))):
         raise ValueError("Eastmoney returned a different instrument")
     rows = []
     for item in data.get("klines") or []:

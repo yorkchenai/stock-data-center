@@ -1,0 +1,39 @@
+name: Fund benchmark discovery
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/fund-benchmark-discovery.yml"
+      - "stock_analysis/fund_benchmark*.py"
+      - "stock_analysis/fund_benchmark*.json"
+      - "scripts/audit_fund_benchmark*.py"
+      - "tests/fixtures/fund_generalization_panel.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fund-benchmark-discovery-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -r requirements.txt
+      - name: Baseline profile audit
+        run: python -m scripts.audit_fund_benchmark_sources --output work/benchmark-discovery/candidates.json
+      - name: Parse and verify benchmark definitions
+        run: python -m scripts.audit_fund_benchmark_identification work/benchmark-discovery/candidates.json --output work/benchmark-discovery/identification.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-discovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: work/benchmark-discovery/
+          retention-days: 14
+          if-no-files-found: error

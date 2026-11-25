@@ -30,6 +30,31 @@ python -m http.server 8765 --bind 127.0.0.1 --directory work/pages-site
 
 实现依据、精确测试范围、网络限制和免费Actions快照替代设计见 [第三阶段验收记录](docs/github-pages-validation.md)。实际Pages可用性验证失败时，不能声称已支持任意代码在线取数。本阶段保留全部Python后端、CLI和已有数据及PNG。
 
+## 场外基金
+
+顶部新增「场外基金」与「场内 ETF」入口。场外列表支持搜索、排序、筛选、自选及列设置。详情包含六个区间指标、累计收益和基准、独立风险及持仓说明。场内 ETF 入口显示尚未接入。
+
+Pages 构建版可输入六位基金代码直接查询，也可按名称搜索。天天基金净值文件及目录在普通跨域请求不可读时由隔离 iframe 加载。浏览器按原总回报口径校验和计算。数据缺少基准、总回报或无风险利率时显示 —。原回环服务仍可用于本地查询和 Python 对照。[浏览器取数与验证](docs/off-market-funds-browser.md) · [本地查询及导入](docs/off-market-funds.md)
+
+基金详情默认显示近一年。历史净值支持原始与复权切换。基金累计收益率图以区间起点归零，官方业绩比较基准在标题下显示为文字。适用的主动权益基金在浏览器计算板块排名，并用股票页已有的接口绘制关联指数日 K、MA、成交量及 VOL。页面会列出未纳入的指数代码。原净值 JSON 和图表包导入仍可用于离线查询。[基金图表口径](docs/off-market-funds-phase8.md)
+
+基金关联指数的日 K、MA 和 VOL 复用现有股票引擎。[行情覆盖与数据口径](docs/off-market-funds-stock-chart.md)
+
+### 查看三只验收基金
+
+在 `feat/off-market-fund-analysis` 分支的仓库根目录启动本地服务，无需 Node 或前端构建。
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m stock_analysis.web --port 8765
+```
+
+- [110022 易方达消费行业](http://127.0.0.1:8765/funds.html?fund=110022)
+- [006751 富国互联科技](http://127.0.0.1:8765/funds.html?fund=006751)
+- [003095 中欧医疗健康](http://127.0.0.1:8765/funds.html?fund=003095)
+
+首次计算关联板块可能需要几分钟。可在 Draft PR #5 查看 GitHub Actions 的真实行情截图。`full-*` 为完整页面，`detail-*` 为关联板块区域特写，`*-switched-*` 记录切换后的指数。 [Draft PR #5](https://github.com/yorkchenai/stock-data-center/pull/5)
+
 ## 交互式技术分析界面
 
 从仓库根目录启动本地服务，运行时使用已有 Python 依赖。图表库随仓库保存，启动科创50演示可离线完成，无需 Node 或前端构建步骤。

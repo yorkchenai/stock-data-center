@@ -1,0 +1,39 @@
+name: Fund sector research
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/fund-sector-research.yml"
+      - "research/**"
+      - "scripts/audit_fund_sector*.py"
+      - "stock_analysis/sector_*.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fund-sector-research-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  feasibility:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -r requirements.txt
+      - name: Run the in-memory study and write aggregate results
+        env:
+          OPENBLAS_NUM_THREADS: "1"
+        run: python -m scripts.audit_fund_sector_study --public-probe --output sector-study.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sector-study-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sector-study.json
+          retention-days: 14
+          if-no-files-found: error

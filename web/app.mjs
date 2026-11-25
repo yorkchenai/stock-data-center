@@ -1,5 +1,7 @@
 import { COLORS, PANELS, dateKey, formatValue, seriesData } from "./data.mjs";
 import { fetchHistory } from "./providers.mjs";
+import { STOCK_ANALYSIS_START } from "./engine.mjs";
+import { browserModelVersion, getPageSnapshot, snapshotNote, snapshotsEnabled } from "./snapshot-client.mjs";
 
 const isPages = document.documentElement?.dataset?.mode === "pages";
 let calendarPromise;
@@ -357,6 +359,10 @@ function displayDataset(dataset) {
   elements.kind.value = instrument.kind;
   elements.start.value = dataset.requested_start;
   elements.end.value = dataset.requested_end;
+  if (isPages && snapshotsEnabled && dataset.snapshot) {
+    elements.start.value = STOCK_ANALYSIS_START;
+    elements.end.value = new Date(Date.now()+8*3_600_000).toISOString().slice(0,10);
+  }
   elements["source-label"].textContent =
     `来源 ${{ repository_csv: "仓库真实历史样本", local_csv: "已保存行情", eastmoney: "东方财富", tencent: "腾讯" }[dataset.source] || dataset.source} · 不复权`;
   elements["history-label"].textContent =
@@ -375,9 +381,7 @@ function displayDataset(dataset) {
   elements.end.disabled = !canLoad;
   elements["data-timestamp"].textContent = dataset.snapshot
     ? `存档样本 · 构建于 ${dataset.generated_at_utc}；非最新行情`
-    : dataset.fetched_at_utc
-      ? `取数完成 ${dataset.fetched_at_utc}`
-      : "";
+    : [dataset.analysis_label, dataset.fetched_at_utc && `取数完成 ${dataset.fetched_at_utc}`].filter(Boolean).join(" · ");
   const check = dataset.validation;
   elements["validation-note"].textContent = check
     ? `已确认停牌 ${check.confirmed_suspension_sessions?.length || 0} 日；未核实缺口 ${check.unverified_missing_sessions?.length ?? check.missing_sessions.length} 日；停牌数据冲突 ${check.suspension_data_conflicts?.length || 0} 日。未核实缺口包括上市前或范围边界，不能直接认定为源数据缺失。股票完整性仍需核实。`
@@ -386,7 +390,9 @@ function displayDataset(dataset) {
   setRange("244");
   requestAnimationFrame(positionLegends);
   setStatus(
-    isPages
+    dataset.analysis_label
+      ? dataset.analysis_label + "。调整显示区间只改变视窗。"
+      : isPages
       ? dataset.snapshot
         ? "已展示明确标注日期的存档样本。点击“加载历史行情”向公开行情源取数；调整显示区间只改变视窗。"
         : `已从公开行情源载入历史。${dataset.attempts?.some((a) => a.status === "failed") ? "东方财富请求失败，已使用腾讯备用源。" : ""}调整显示区间只改变视窗。`
@@ -401,6 +407,37 @@ async function loadDemo() {
   if (!response.ok)
     throw new Error(`无法读取演示数据（HTTP ${response.status}）`);
   return response.json();
+}
+
+function selectStockDisplay(dataset, {start,end}) {
+  const rows=dataset.rows.filter((row)=>(!start||row.date>=start)&&(!end||row.date<=end));
+  if (!rows.length) throw new Error("所选区间没有行情记录");
+  return {...dataset,requested_start:start||dataset.requested_start,requested_end:end||dataset.requested_end,
+    rows};
+}
+
+async function loadPagesAnalysis(options, snapshotId) {
+  let fallback;
+  if (snapshotsEnabled) {
+    try {
+      const snapshot=await getPageSnapshot({asset_type:"stock",...options},snapshotId);
+      const seed=snapshot.data.calculation_start??snapshot.data.requested_start;
+      return {...selectStockDisplay(snapshot.data,options),analysis_label:snapshotNote(snapshot)+` · 指标起算 ${seed}`};
+    } catch (error) {
+      if (snapshotId) throw error;
+      fallback=error.name==="TimeoutError"?"共享快照加载超时":error.message;
+    }
+  } else if (snapshotId) {
+    throw new Error("此页面未配置该共享快照服务。");
+  }
+  const display={...options,start:options.start||STOCK_ANALYSIS_START,
+    end:options.end||new Date(Date.now()+8*3_600_000).toISOString().slice(0,10)};
+  const start=snapshotsEnabled&&display.start>STOCK_ANALYSIS_START?STOCK_ANALYSIS_START:display.start;
+  const result=await fetchHistory({...display,start},await loadCalendar());
+  const data=selectStockDisplay(result,display);
+  const label=["网页独立取数",data.source,`截至 ${data.rows.at(-1).date}`,browserModelVersion,fallback];
+  if (snapshotsEnabled) label.push(`指标起算 ${start}`);
+  return {...data,analysis_label:label.filter(Boolean).join(" · ")};
 }
 
 async function runLoad(action, message = "正在读取已保存样本，请稍候…") {
@@ -476,7 +513,7 @@ elements["query-form"].addEventListener("submit", (event) => {
     if (options.start > options.end)
       throw new Error("开始日期不能晚于结束日期");
     if (isPages) {
-      const result = await fetchHistory(options, await loadCalendar());
+      const result = await loadPagesAnalysis(options);
       displayDataset(result);
       return;
     }
@@ -520,4 +557,11 @@ elements["locate-form"].addEventListener("submit", (event) => {
   setStatus(`已定位 ${row.date}，右侧显示该交易日原始指标数值。`);
 });
 if (isPages) elements.demo.textContent = "查看存档样本";
-runLoad(async () => displayDataset(await loadDemo()));
+const requestedPage=isPages?new URLSearchParams(location.search):null;
+const privateSymbol=Boolean(document.documentElement?.dataset?.analysisPath && requestedPage?.has("symbol"));
+if (requestedPage?.has("snapshot_id") || privateSymbol) {
+  runLoad(async()=>displayDataset(await loadPagesAnalysis({
+    symbol:requestedPage.get("symbol"),kind:requestedPage.get("kind")??"auto",
+    start:requestedPage.get("start")??undefined,end:requestedPage.get("end")??undefined,
+  },requestedPage.get("snapshot_id"))),"正在读取共享行情快照…");
+} else runLoad(async () => displayDataset(await loadDemo()));

@@ -1,0 +1,125 @@
+{
+  "163406": {
+    "source": "https://static.cninfo.com.cn/finalpage/2026-10-27/1225627309.PDF",
+    "end": "2026-09-30",
+    "formula": "沪深300指数×80%＋中证国债指数×20%",
+    "periods": {
+      "1y": {
+        "start": "2025-09-30",
+        "return": 0.022799999999999997,
+        "benchmark": -0.0406,
+        "daily_std": 0.0192
+      },
+      "3y": {
+        "start": "2023-09-28",
+        "return": 0.5112,
+        "benchmark": 0.1837,
+        "daily_std": 0.0168
+      },
+      "5y": {
+        "start": "2021-09-30",
+        "return": 0.13970000000000002,
+        "benchmark": -0.0313,
+        "daily_std": 0.0151
+      }
+    }
+  },
+  "161725": {
+    "source": "https://static.cninfo.com.cn/finalpage/2026-10-27/1225626357.PDF",
+    "end": "2026-09-30",
+    "formula": "中证白酒指数收益率×95%＋银行活期存款利率（税后）×5%",
+    "periods": {
+      "1y": {
+        "start": "2025-09-30",
+        "return": -0.3225,
+        "benchmark": -0.3468,
+        "daily_std": 0.015
+      },
+      "3y": {
+        "start": "2023-09-28",
+        "return": -0.49829999999999997,
+        "benchmark": -0.5388000000000001,
+        "daily_std": 0.016200000000000003
+      },
+      "5y": {
+        "start": "2021-09-30",
+        "return": -0.5727,
+        "benchmark": -0.608,
+        "daily_std": 0.0169
+      }
+    },
+    "event": {
+      "date": "2020-12-15",
+      "field": "split_factor",
+      "expected": 1.005444122,
+      "source": "https://static.cninfo.com.cn/finalpage/2020-12-17/1208919465.PDF"
+    }
+  },
+  "003095": {
+    "source": "https://notice.10jqka.com.cn/api/pdf/7b2437b35f261922.pdf",
+    "end": "2026-09-30",
+    "formula": null,
+    "periods": {
+      "1y": {
+        "start": "2025-09-30",
+        "return": -0.027200000000000002,
+        "benchmark": -0.0655,
+        "daily_std": 0.0203
+      },
+      "3y": {
+        "start": "2023-09-28",
+        "return": 0.015,
+        "benchmark": -0.0192,
+        "daily_std": 0.018000000000000002
+      },
+      "5y": {
+        "start": "2021-09-30",
+        "return": -0.4489,
+        "benchmark": -0.2207,
+        "daily_std": 0.0172
+      }
+    }
+  },
+  "000191": {
+    "source": "https://doc.morningstar.com/Document/686781180.msdoc/?clientid=chinateam&key=4ceb1f0a7331680c",
+    "end": "2026-09-30",
+    "formula": "中债企业债总全价指数",
+    "periods": {
+      "1y": {
+        "start": "2025-09-30",
+        "return": 0.0321,
+        "benchmark": -0.0101,
+        "daily_std": 0.0003
+      },
+      "3y": {
+        "start": "2023-09-28",
+        "return": 0.0956,
+        "benchmark": -0.010700000000000001,
+        "daily_std": 0.0004
+      },
+      "5y": {
+        "start": "2021-09-30",
+        "return": 0.174,
+        "benchmark": -0.0044,
+        "daily_std": 0.0004
+      }
+    }
+  },
+  "000286": {
+    "source": "https://epaper.stcn.com/pic/202602/06/cde4f708894742c2b1a2dbdf430fb11c.pdf",
+    "event": {
+      "date": "2026-02-09",
+      "field": "cash_distribution",
+      "expected": 0.005,
+      "source": "https://epaper.stcn.com/pic/202602/06/cde4f708894742c2b1a2dbdf430fb11c.pdf"
+    }
+  },
+  "024808": {
+    "source": "https://static.cninfo.com.cn/finalpage/2026-06-27/1225391047.PDF",
+    "benchmark_change": {
+      "effective_from": "2026-07-27",
+      "before": "沪深300指数收益率×65%＋恒生指数收益率×10%＋中债综合财富指数收益率×25%",
+      "after": "中证800成长指数收益率×70%＋中证港股通综合指数（人民币）收益率×10%＋中债综合财富（总值）指数收益率×20%"
+    }
+  }
+}

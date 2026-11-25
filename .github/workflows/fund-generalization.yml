@@ -1,0 +1,47 @@
+name: Fund generalization audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/fund-generalization.yml"
+      - "scripts/audit_fund_*"
+      - "tests/fixtures/fund_generalization*.json"
+      - "stock_analysis/fund*.py"
+      - "web/funds/*.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fund-generalization-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci --ignore-scripts
+      - name: Compare the pinned engine and review branch on real fund observations
+        run: |
+          mkdir -p work/fund-generalization
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          python -m scripts.audit_fund_panel --output work/fund-generalization/audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fund-generalization-${{ github.run_id }}-${{ github.run_attempt }}
+          path: work/fund-generalization/audit.json
+          retention-days: 14
+          if-no-files-found: error

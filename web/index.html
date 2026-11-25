@@ -6,13 +6,18 @@
     <title>行情研究室 · 股票技术分析</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./style.css" />
+    <link rel="stylesheet" href="./sections.css" />
     <script src="./vendor/lightweight-charts-5.2.0.js" defer></script>
     <script src="./app.mjs" type="module"></script>
   </head>
   <body>
-    <header class="app-header">
+    <header class="app-header section-header">
       <a class="brand" href="./">行情研究室<span>STOCK DATA CENTER</span></a>
-      <span class="header-note">日线技术分析</span>
+      <nav class="section-nav" aria-label="标的类别">
+        <a href="./" aria-current="page">股票 / 指数</a>
+        <a href="./funds.html">场外基金</a>
+        <a href="./etf.html">场内 ETF</a>
+      </nav>
     </header>
     <main>
       <form id="query-form" class="query-bar" aria-label="加载历史行情">

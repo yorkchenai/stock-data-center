@@ -110,7 +110,7 @@ export async function fetchTencent(
   return normalizeDaily(all.filter((r) => r.date >= start && r.date <= end));
 }
 
-export async function fetchHistory(options, calendar, getJSON = requestJSON) {
+export async function fetchHistory(options, calendar, getJSON = requestJSON, {preferComplete=false}={}) {
   const instrument = resolveSymbol(options.symbol, options.kind);
   const start = validDate(options.start),
     end = validDate(options.end);
@@ -120,6 +120,7 @@ export async function fetchHistory(options, calendar, getJSON = requestJSON) {
       `请求日期超出已验证日历 ${calendar.start} — ${calendar.end}`,
     );
   const attempts = [];
+  let best;
   for (const source of ["eastmoney", "tencent"]) {
     try {
       let instrumentName = null;
@@ -150,8 +151,10 @@ export async function fetchHistory(options, calendar, getJSON = requestJSON) {
           : await fetchTencent(instrument, start, end, read);
       if (!rows.length) throw new Error("请求区间内无行情");
       const validation = auditCalendar(rows, instrument, start, end, calendar);
+      if (preferComplete && validation.suspension_data_conflicts.length)
+        throw new Error("行情与已确认停牌冲突");
       attempts.push({ source, status: "success", rows: rows.length });
-      return {
+      const result = {
         schema_version: 1,
         instrument,
         instrument_name: instrumentName,
@@ -169,12 +172,20 @@ export async function fetchHistory(options, calendar, getJSON = requestJSON) {
           VOL10: "手",
           turnover_cny: "元",
         },
-        rows: calculateIndicators(rows),
+        rows,
       };
+      if (!preferComplete || !validation.unverified_missing_sessions.length)
+        return {...result,rows:calculateIndicators(rows)};
+      const last=rows.at(-1).date, previous=best?.rows.at(-1).date;
+      if (!best || last>previous || last===previous &&
+        validation.unverified_missing_sessions.length<best.validation.unverified_missing_sessions.length) {
+        best=result;
+      }
     } catch (error) {
       attempts.push({ source, status: "failed", error: error.message });
     }
   }
+  if (best) return {...best,rows:calculateIndicators(best.rows)};
   throw new Error(
     `行情加载失败，未使用存档替代：${attempts.map((a) => `${a.source}: ${a.error}`).join("；")}`,
   );

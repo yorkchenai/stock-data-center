@@ -1,0 +1,43 @@
+--- a/worker/snapshot-release.mjs
++++ b/worker/snapshot-release.mjs
+@@ -1,0 +2 @@
++import { mountSnapshotSite } from "./snapshot-runtime/worker/snapshots/site-gateway.mjs";
+@@ -32 +33 @@
+-  return {
++  return mountSnapshotSite({analysis:snapshots,legacy:{
+@@ -55 +56 @@
+-  };
++  }});
+--- a/worker/tests/snapshot-release.test.mjs
++++ b/worker/tests/snapshot-release.test.mjs
+@@ -46 +46,2 @@
+-  return {db, env:{DB:connection}};
++  return {db, env:{DB:connection,SNAPSHOT_MCP_OWNER_EMAIL:"owner@example.test",
++    SNAPSHOT_PUBLIC_ORIGIN:"https://yorkchenai.github.io"}};
+@@ -81 +82,2 @@
+-    method:"POST",headers:authenticated?{"oai-authenticated-user-id":"test-owner"}:{},
++    method:"POST",headers:authenticated?{"oai-authenticated-user-id":"test-owner",
++      "oai-authenticated-user-email":"owner@example.test"}:{},
+@@ -83 +85,7 @@
+-  }), env).then((response) => response.json()).then(({result}) => result);
++  }), env).then(async (response) => {
++    if (!authenticated) {
++      assert.equal(response.status,403);
++      return {structuredContent:{status:"unauthorized"}};
++    }
++    return (await response.json()).result;
++  });
+@@ -99 +107 @@
+-  const discovery = await rpc(first, env, "server/discover",undefined,false);
++  const discovery = await rpc(first, env, "server/discover");
+@@ -142,0 +151,10 @@
++  const publicEnv={...env,SNAPSHOT_PUBLIC_ENABLED:"1"};
++  const publicURL="https://private-site.invalid/api/analysis?asset_type=stock&symbol=300078";
++  const web=await first.fetch(new Request(publicURL,{headers:{Origin:env.SNAPSHOT_PUBLIC_ORIGIN}}),publicEnv);
++  assert.equal(web.status,200);
++  assert.equal(web.headers.get("Access-Control-Allow-Origin"),env.SNAPSHOT_PUBLIC_ORIGIN);
++  const shared=await web.json();
++  assert.equal(shared.cache,"hit");
++  assert.equal(shared.snapshot_id,summary.snapshot_id);
++  assert.equal(shared.model_version,summary.model_version);
++  await rpc(first,publicEnv,"tools/call",{name:"get_stock_analysis",arguments:stockArgs},false);

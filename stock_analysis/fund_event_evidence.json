@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "events": {
+    "000001": {
+      "2023-01-12": {
+        "cash_per_share": 0.0018,
+        "document": "华夏成长证券投资基金2023年中期报告，利润分配情况",
+        "source": "https://pdf.dfcfw.com/pdf/H2_AN202308301596809497_1.pdf"
+      }
+    },
+    "161725": {
+      "2020-12-15": {
+        "shares_per_old_share": 1.005444122,
+        "document": "招商中证白酒指数分级证券投资基金定期份额折算结果公告，场外份额新增比例 0.005444122",
+        "source": "https://static.cninfo.com.cn/finalpage/2020-12-17/1208919465.PDF"
+      }
+    }
+  }
+}

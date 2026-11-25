@@ -1,0 +1,93 @@
+"""Local, opt-in adapter for ChinaBond's RMB government yield observations."""
+from datetime import date, datetime, timedelta, timezone
+from io import StringIO
+import math
+import re
+from urllib.error import HTTPError
+from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
+
+import exchange_calendars as xcals
+import pandas as pd
+
+HISTORY_URL = "https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/historyQuery"
+SOURCE_URL = "https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/showHistory?locale=cn_ZH&mark=1"
+CURVE = "中债国债收益率曲线"
+PRIMARY_HOST = "yield.chinabond.com.cn"
+MIRROR_HOST = "indices.chinabond.com.cn"
+SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def fetch_rate_history(url):
+    from .funds import download
+
+    try:
+        return download(url, timeout=15)
+    except HTTPError as error:
+        if error.code not in {502, 503, 504}:
+            raise
+    except OSError:
+        pass
+    return download(url.replace(PRIMARY_HOST, MIRROR_HOST, 1), timeout=15)
+
+
+def parse_yield_history(html, start, end):
+    """Read only the 3-month sovereign curve, in decimal annual units."""
+    tables = pd.read_html(StringIO(html), match="曲线名称", header=0)
+    for table in tables:
+        table.columns = [re.sub(r"\s+", "", str(column)) for column in table.columns]
+    matching = [table for table in tables if {"曲线名称", "日期", "3月"}.issubset(table.columns)]
+    if len(matching) != 1:
+        raise ValueError("中债历史收益率表列名无法核对。")
+    table = matching[0]
+    dates = set()
+    rows = []
+    for day, quote in table.loc[table["曲线名称"] == CURVE, ["日期", "3月"]].itertuples(index=False, name=None):
+        observed = date.fromisoformat(str(day).strip())
+        if not start <= observed <= end or observed in dates:
+            raise ValueError("中债国债收益率日期重复或超出查询区间。")
+        dates.add(observed)
+        if pd.isna(quote) or str(quote).strip() in {"--", "—"}:
+            continue
+        annual_rate = float(str(quote).strip()) / 100
+        if not math.isfinite(annual_rate) or annual_rate <= -1:
+            raise ValueError("中债 3 个月国债收益率数值无效。")
+        rows.append({"date": observed.isoformat(), "annual_rate": annual_rate})
+    return sorted(rows, key=lambda row: row["date"])
+
+
+def load_chinabond_rates(start, end, fetch_html, retrieved_at=None):
+    """Fetch bounded calendar batches. Caller chooses opt-in personal use."""
+    retrieved_at = retrieved_at or datetime.now(timezone.utc)
+    if not date(2006, 3, 1) <= start <= end <= retrieved_at.astimezone(SHANGHAI).date():
+        raise ValueError("利率起止日期超出可查询范围。")
+    rows = []
+    first = max(start - timedelta(days=10), date(2006, 3, 1))
+    while first <= end:
+        last = min(first + timedelta(days=359), end)
+        query = urlencode({"startDate": first.isoformat(), "endDate": last.isoformat(), "gjqx": "0",
+                           "qxId": "hzsylqx", "locale": "cn_ZH", "mark": "1"})
+        rows.extend(parse_yield_history(fetch_html(f"{HISTORY_URL}?{query}"), first, last))
+        first = last + timedelta(days=1)
+    if not rows or rows[-1]["date"] < start.isoformat():
+        raise ValueError("查询区间内没有可用的 3 个月国债收益率。")
+    last_date = rows[-1]["date"]
+    calendar = xcals.get_calendar("XSHG", start=start.isoformat(), end=end.isoformat())
+    expected = set(calendar.sessions_in_range(start.isoformat(), last_date).strftime("%Y-%m-%d"))
+    missing = sorted(expected - {row["date"] for row in rows})
+    return {
+        "name": "中债国债收益率曲线（到期，3 个月）",
+        "source": "中央国债登记结算有限责任公司 / 中债收益率曲线",
+        "source_url": SOURCE_URL,
+        "retrieved_at": retrieved_at.isoformat(),
+        "quote_basis": "人民币 3 个月国债到期收益率，年化百分比转为小数",
+        "convention": "simple_act_365f",
+        "effective_from": start.isoformat(),
+        "effective_to": last_date,
+        "data_date": last_date,
+        "status": "partial" if missing or last_date < end.isoformat() else "complete",
+        "calendar_check": "XSHG trading sessions (minimum required quote dates)",
+        "missing_dates": missing,
+        "max_age_days": 10,
+        "rows": rows,
+    }

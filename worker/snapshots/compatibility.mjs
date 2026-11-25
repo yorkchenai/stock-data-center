@@ -13,8 +13,8 @@ export function prepareInitial(assetType,args,calendar,now) {
   const historical=session<market.end;
   const {start,...params}=args;
   return {args:{...params,asset_type:assetType},present:(snapshot,cache)=>stockSummary(snapshot,cache,{
-    start:start??null,end:args.end??market.today,session,historical,until:market.next ?
-      `${market.next}T09:00:00.000Z` : new Date(Date.parse(calendar.end)+86_400_000).toISOString().slice(0,10)+"T00:00:00+08:00",
+    start:start??null,end:args.end??market.today,session,historical,until:market.nextCompleteAt ??
+      new Date(Date.parse(calendar.end)+86_400_000).toISOString().slice(0,10)+"T00:00:00+08:00",
   })};
 }
 

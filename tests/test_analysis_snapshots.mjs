@@ -4,6 +4,8 @@ import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import { analysisService } from "../worker/snapshots/service.mjs";
 import { createSnapshotWorker } from "../worker/snapshots/worker.mjs";
+import { prepareInitial } from "../worker/snapshots/compatibility.mjs";
+import { analysisQuery, createSnapshotCompute, currentMarketWindow, snapshotExpiry } from "../worker/snapshots/compute.mjs";
 import { mountSnapshotSite } from "../worker/snapshots/site-gateway.mjs";
 import { createRecord, snapshotStore } from "../worker/snapshots/store.mjs";
 import { marketTransport } from "../worker/snapshots/providers.mjs";
@@ -13,7 +15,7 @@ const migration=readFileSync(new URL("../worker/snapshots/migrations/0001_analys
 const now=Date.parse("2026-09-30T11:00:00Z");
 const sessions=Array.from({length:200},(_,i)=>new Date(now-(199-i)*86_400_000).toISOString().slice(0,10))
   .filter((d)=>[1,2,3,4,5].includes(new Date(d).getUTCDay()));
-const calendar={start:"2025-01-01",end:"2026-12-31",sessions};
+const calendar={start:"2025-01-01",end:"2026-12-31",sessions,suspensions:[]};
 const query={asset_type:"stock",symbol:"300078"};
 const rows=sessions.map((date,i)=>({date,open:i+1,close:i+2,high:i+4,low:i+1,volume_lots:1000+i,turnover_cny:10000+i}));
 const indicators=calculateIndicators(rows);
@@ -54,6 +56,61 @@ function database() {
 }
 const make=(compute,modelVersion="model-a",clock=()=>new Date(now))=>analysisService({compute,calendar,modelVersion,clock});
 const detail=(snapshot,category,extra={})=>({...query,snapshot_id:snapshot.snapshot_id,category,...extra});
+
+test("the Shanghai 15:35 cutoff applies only on trading days and caps current stock snapshots",()=>{
+  const before=new Date("2026-09-29T15:34:59+08:00");
+  const cutoff=new Date("2026-09-29T15:35:00+08:00");
+  const prior=analysisQuery(query,calendar,before);
+  assert.equal(prior.end,"2026-09-28");
+  assert.equal(analysisQuery(query,calendar,cutoff).end,"2026-09-29");
+  const weekend=new Date("2026-09-26T15:35:00+08:00");
+  assert.equal(currentMarketWindow(calendar,weekend).end,"2026-09-25");
+  assert.equal(currentMarketWindow(calendar,weekend).nextCompleteAt,"2026-09-28T07:35:00.000Z");
+  for (const status of ["complete","partial"]) {
+    assert.equal(snapshotExpiry(prior,{status},calendar,before),cutoff.getTime());
+    const fund={asset_type:"fund",symbol:"110022"};
+    assert.deepEqual(analysisQuery(fund,calendar,before),analysisQuery(fund,calendar,cutoff));
+    const fundTtl=(status==="complete"?30:10)*60_000;
+    assert.equal(snapshotExpiry(fund,{status},calendar,before),before.getTime()+fundTtl);
+    assert.equal(snapshotExpiry(fund,{status},calendar,cutoff),cutoff.getTime()+fundTtl);
+  }
+});
+
+test("the cutoff advances the snapshot key without treating missing daily data as today's quote",async()=>{
+  const {connection}=database();
+  const cutoff=Date.parse("2026-09-29T15:35:00+08:00");
+  const stockDay="2026-09-29", priorDay="2026-09-28";
+  let time=new Date(cutoff-1_000), vendorLastDay=priorDay;
+  const clock=()=>time;
+  const compute=createSnapshotCompute({calendar,config:{},clock,fetcher:async(input)=>{
+    if (new URL(input).hostname!=="push2his.eastmoney.com") return new Response(null,{status:503});
+    const klines=rows.filter(({date})=>date<=vendorLastDay)
+      .map(({date,open,close,high,low,volume_lots,turnover_cny})=>[date,open,close,high,low,volume_lots,turnover_cny].join(","));
+    return Response.json({data:{code:"300078",market:0,klines}});
+  }});
+  const service=make(compute,"model-a",clock);
+  const read=()=>service.initial(connection(),query,{present:prepareInitial("stock",query,calendar,time).present});
+  const prior=await read();
+  assert.equal(prior.data_as_of,priorDay);
+  assert.equal(prior.freshness_until_utc,"2026-09-29T07:35:00.000Z");
+  time=new Date(cutoff);
+  const pending=await read();
+  assert.notEqual(pending.snapshot_id,prior.snapshot_id);
+  assert.equal(pending.expected_session,stockDay);
+  assert.equal(pending.data_as_of,priorDay);
+  assert.equal(pending.last_trade_date,priorDay);
+  assert.equal(pending.status,"stale");
+  assert.equal(pending.snapshot_status,"partial");
+  assert.deepEqual(pending.quality.recent_unverified_gaps,[stockDay]);
+  assert.equal(pending.freshness_until_utc,"2026-09-30T07:35:00.000Z");
+  assert.equal((await service.details(connection(),detail(prior,"history"))).status,"expired");
+  time=new Date(cutoff+10*60_000);
+  vendorLastDay=stockDay;
+  const confirmed=await read();
+  assert.notEqual(confirmed.snapshot_id,pending.snapshot_id);
+  assert.equal(confirmed.data_as_of,stockDay);
+  assert.equal(confirmed.status,"ok");
+});
 
 test("D1 publication is immutable, pinned details use primary, latest hits avoid all extra builds",async()=>{
   const {connection,sessions}=database();

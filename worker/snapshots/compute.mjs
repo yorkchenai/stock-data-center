@@ -11,15 +11,18 @@ import { marketTransport } from "./providers.mjs";
 
 export { STOCK_START };
 
+const STOCK_COMPLETE_TIME = "15:35";
+
 export function currentMarketWindow(calendar, now) {
   const shanghai = new Date(now.getTime()+8*3_600_000).toISOString();
   const today = shanghai.slice(0,10);
   if (today>calendar.end) throw new Error("交易日历尚未覆盖今天。");
-  const completeToday=shanghai.slice(11,13)>="17";
+  const completeToday=shanghai.slice(11,16)>=STOCK_COMPLETE_TIME;
   const end=calendar.sessions.findLast((date)=>date<today || date===today && completeToday);
   const next=calendar.sessions.find((date)=>date>end);
   if (!end) throw new Error("交易日历没有已完成的交易日。");
-  return {today,end,next};
+  const nextCompleteAt=next ? new Date(`${next}T${STOCK_COMPLETE_TIME}:00+08:00`).toISOString() : null;
+  return {today,end,next,nextCompleteAt};
 }
 
 export function analysisQuery(args, calendar, now = new Date()) {
@@ -43,10 +46,10 @@ export function analysisQuery(args, calendar, now = new Date()) {
 export function snapshotExpiry(query, data, calendar, now) {
   const ms=now.getTime();
   if (query.asset_type==="fund") return ms+(data.status==="complete"?30:10)*60_000;
-  if (data.status==="partial") return ms+10*60_000;
   const market=currentMarketWindow(calendar,now);
-  if (query.end<market.end) return ms+86_400_000;
-  return Math.min(ms+4*3_600_000,market.next?Date.parse(market.next+"T09:00:00Z"):Infinity);
+  const partial=data.status==="partial";
+  if (query.end<market.end) return ms+(partial?10*60_000:86_400_000);
+  return Math.min(ms+(partial?10*60_000:4*3_600_000),market.nextCompleteAt?Date.parse(market.nextCompleteAt):Infinity);
 }
 
 function fundPerformance(fund) {

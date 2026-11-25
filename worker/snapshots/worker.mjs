@@ -3,7 +3,7 @@ import { createSnapshotCompute } from "./compute.mjs";
 import { boundedJson } from "./details.mjs";
 import { analysisService } from "./service.mjs";
 import { initialResult, prepareInitial } from "./compatibility.mjs";
-import { admitPublicBuild, publicError, publicOrigin, publicPresentation, publicQuery } from "./public.mjs";
+import { publicError, publicOrigin, publicPresentation, publicQuery } from "./public.mjs";
 
 const PROTOCOL = "2026-07-28";
 const symbolSchema={type:"string",description:"六位代码。股票或指数可带 sh/sz 前缀；基金保留前导零。"};
@@ -39,15 +39,15 @@ export const tools=[
 ].map((tool)=>({...tool,annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:true}}));
 
 const LIMIT_SQL=`
-INSERT INTO analysis_snapshot_limits(slot,minute,calls) VALUES(?,unixepoch()/CAST(? AS INTEGER),1)
+INSERT INTO analysis_snapshot_limits(slot,minute,calls) VALUES(?,unixepoch()/60,1)
 ON CONFLICT(slot) DO UPDATE SET minute=excluded.minute,
 calls=CASE WHEN excluded.minute>analysis_snapshot_limits.minute THEN 1 ELSE analysis_snapshot_limits.calls+1 END
 WHERE excluded.minute>analysis_snapshot_limits.minute OR analysis_snapshot_limits.calls<?
 RETURNING calls`;
 
-export async function limitSnapshotCalls(db, slot, count, intervalSeconds=60) {
+export async function limitSnapshotCalls(db, slot, count) {
   try {
-    return await db.prepare(LIMIT_SQL).bind(slot,intervalSeconds,count).first() ? null : "rate_limited";
+    return await db.prepare(LIMIT_SQL).bind(slot,count).first() ? null : "rate_limited";
   } catch {
     return "cache_unavailable";
   }
@@ -125,13 +125,9 @@ async function anonymousAnalysis(request, url, env, {service, calendar, clock, m
   if (env.SNAPSHOT_PUBLIC_SYMBOLS && !approvedSymbol(env,args)) {
     return send(publicError("access_denied","该标的不在公开查询范围。"));
   }
-  const budget=(slot,count,seconds)=>limitSnapshotCalls(env.DB,slot,count,seconds);
-  const blocked=await budget("public_page_minute",60) || await budget("public_page_day",2000,86400);
-  if (blocked) return send(publicError(blocked,"公开查询繁忙，请稍后重试。",{retry_after_seconds:60}));
   const {present,select}=publicPresentation(modelVersion);
   const output=args.snapshot_id ? await service.details(env.DB,args,{browser:true,select,requestId}) :
-    await service.initial(env.DB,args,{waitUntil,requestId,present,
-      admitBuild:(store,query,now)=>admitPublicBuild(store,now,()=>budget("public_build_day",24,86400))});
+    await service.initial(env.DB,args,{waitUntil,requestId,present});
   return send(output);
 }
 

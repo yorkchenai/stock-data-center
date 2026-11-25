@@ -24,7 +24,7 @@ MODEL_MODULES = ("web/engine.mjs", "web/providers.mjs", *(
         "risk-free", "sector-browser", "sector-model",
     )
 ))
-SNAPSHOT_TRANSPORT = {"compatibility.mjs", "details.mjs", "public.mjs", "service.mjs", "store.mjs", "worker.mjs"}
+SNAPSHOT_TRANSPORT = {"compatibility.mjs", "details.mjs", "public.mjs", "service.mjs", "site-gateway.mjs", "store.mjs", "worker.mjs"}
 
 
 def snapshot_modules():

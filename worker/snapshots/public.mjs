@@ -4,7 +4,6 @@ import { selectDetails, SNAPSHOT_ID, snapshotMetadata } from "./details.mjs";
 const QUERY_FIELDS = new Set(["asset_type", "symbol", "start", "end", "kind", "snapshot_id", "category", "index_code"]);
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ASSET_TYPES = new Set(["stock", "fund"]);
-const BUILD_SLOT = "public_build_active";
 
 export function publicError(status, message, extra = {}) {
   return {schema_version:1, status, ...(message ? {message} : {}), ...extra};
@@ -69,19 +68,4 @@ export function publicPresentation(version) {
   }
 
   return {select,present:(snapshot,cache)=>check(snapshot)??{...snapshotMetadata(snapshot),cache}};
-}
-
-export async function admitPublicBuild(store, now, takeBudget) {
-  const token = await store.lease(BUILD_SLOT, now);
-  if (!token) return publicError("rate_limited", "公开快照构建队列繁忙，请稍后再试。", {retry_after_seconds:15});
-  const release = () => store.release(BUILD_SLOT, token);
-  try {
-    const status = await takeBudget();
-    if (!status) return release;
-    await release();
-    return publicError(status, "公开快照构建额度暂不可用。", {retry_after_seconds:60});
-  } catch (error) {
-    await release().catch(() => {});
-    throw error;
-  }
 }

@@ -32,12 +32,18 @@ jobs:
           python -m stock_analysis.pages --output work/snapshot-stage-pages
           --snapshot-service http://127.0.0.1:8787 --snapshot-runtime-output work/snapshot-stage-runtime
       - run: node --test tests/test_analysis_snapshots.mjs tests/test_fund_browser_transport.mjs
+      - name: Verify anonymous Pages and authenticated MCP share D1
+        if: github.event_name == 'pull_request'
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          SNAPSHOT_TEST_REPORT=work/snapshot-release-smoke.json node scripts/test_snapshot_stage.mjs --release-smoke
       - name: Verify fixed test data, D1 persistence and landscape browser wiring
+        if: github.event_name == 'workflow_dispatch'
         run: |
           export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
           SNAPSHOT_TEST_REPORT=work/snapshot-fixture-summary.json node scripts/test_snapshot_stage.mjs --fixture
       - name: Verify real market data through the isolated Worker
-        if: always()
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
         run: |
           export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
           node scripts/test_snapshot_stage.mjs
@@ -48,4 +54,5 @@ jobs:
           path: |
             work/snapshot-stage-summary.json
             work/snapshot-fixture-summary.json
+            work/snapshot-release-smoke.json
           if-no-files-found: warn

@@ -20,11 +20,13 @@ const root=resolve(".");
 const pages=resolve(process.env.SNAPSHOT_TEST_PAGES??"work/snapshot-stage-pages");
 const runtime=resolve(process.env.SNAPSHOT_TEST_RUNTIME??"work/snapshot-stage-runtime");
 const output=resolve(process.env.SNAPSHOT_TEST_REPORT??"work/snapshot-stage-summary.json");
-const sample=process.argv.includes("--fixture");
+const smoke=process.argv.includes("--release-smoke");
+const sample=smoke||process.argv.includes("--fixture");
 const storage=await mkdtemp(join(tmpdir(),"snapshot-stage-"));
 const origin="http://127.0.0.1:8767", service="http://127.0.0.1:8787";
-const symbols=[["stock","300078","sz300078"],["stock","600519","sh600519"],
+const targets=[["stock","300078","sz300078"],["stock","600519","sh600519"],
   ["fund","110022","110022"],["fund","006751","006751"],["fund","003095","003095"]];
+const symbols=smoke?targets.filter(([,symbol])=>["300078","110022"].includes(symbol)):targets;
 const secret=randomUUID();
 let coldEvents=[];
 for (const file of ["calendar.json","fund-config.json","build-info.json"]) {
@@ -56,6 +58,8 @@ async function replay(input) {
 const source=`
 import { createSnapshotWorker } from ${JSON.stringify(join(runtime,"worker/snapshots/worker.mjs"))};
 import { createSnapshotCompute } from ${JSON.stringify(join(runtime,"worker/snapshots/compute.mjs"))};
+import { mountSnapshotSite } from ${JSON.stringify(join(runtime,"worker/snapshots/site-gateway.mjs"))};
+import { indexChartPayload } from ${JSON.stringify(join(runtime,"web/funds/sector-browser.mjs"))};
 const calendar=${calendar}, config=${fundConfig}, modelVersion=${JSON.stringify(version)};
 ${sample?fixedFixture:""}
 const events=[];
@@ -64,12 +68,33 @@ const trace=(event)=>{
   console.log(JSON.stringify(event));
 };
 const auth=(request,env)=>request.headers.get("Authorization")==="Bearer "+env.TEST_SECRET;
+${sample?`
+const replayCompute=createSnapshotCompute({calendar,config,fetcher:replay});
+async function compute(query,options) {
+  const result=await replayCompute(query,options);
+  if (!${smoke} || query.asset_type!=="fund") return result;
+  const code="399997",history=result.raw_data.sector_index_history[code];
+  const day=history.rows.at(-1).date;
+  // Supply one ranked index to exercise the anonymous chart without a full ranking audit.
+  const rank={code,name:"Fixture index",rank:1,quality:"strong",beta:0.8,stability:0.9,index_as_of:day,
+    holdings:{status:"unverified"},windows:Object.fromEntries([60,120].map(n=>[n,{pearson:0.8,partial:0.7,count:n,partial_count:n}]))};
+  const report={...result.models.sectors.report,status:"ok",model_as_of:day,sectors:[rank]};
+  result.models.sectors={report,charts:{[code]:indexChartPayload(query.symbol,rank,report,history,calendar.sessions)}};
+  return result;
+}`:''}
 const worker=createSnapshotWorker({calendar,config,modelVersion,observe:trace,
-  ${sample?'compute:createSnapshotCompute({calendar,config,fetcher:replay,observe:(event)=>trace({event:"snapshot_upstream",...event})}),':''}
+  ${sample?'compute,':''}
   authorize:auth,authorizePage:(request)=>new URL(request.url).hostname==="127.0.0.1"});
+const gateway=${smoke?'mountSnapshotSite({analysis:worker,legacy:worker})':'worker'};
 export default {fetch(request,env,ctx) {
   if(auth(request,env) && new URL(request.url).pathname==="/__stage_trace") return Response.json(events);
-  return worker.fetch(request,env,ctx);
+  if (${smoke} && auth(request,env)) {
+    const headers=new Headers(request.headers);
+    headers.set("oai-authenticated-user-id","fixture-owner");
+    headers.set("oai-authenticated-user-email","owner@example.test");
+    request=new Request(request,{headers});
+  }
+  return gateway.fetch(request,env,ctx);
 }};
 `;
 const bundle=await build({stdin:{contents:source,resolveDir:root},bundle:true,format:"esm",
@@ -80,6 +105,7 @@ const opts={modules:true,modulesRoot:storage,scriptPath,cf:false,host:"127.0.0.1
   d1Databases:["DB"],d1Persist:join(storage,"d1"),
   bindings:{TEST_SECRET:secret,SNAPSHOT_PUBLIC_ORIGIN:origin,
     ...(sample?{SNAPSHOT_PUBLIC_ENABLED:"1"}:{}),
+    ...(smoke?{SNAPSHOT_MCP_OWNER_EMAIL:"owner@example.test"}:{}),
     SNAPSHOT_PUBLIC_SYMBOLS:symbols.map(([type,,code])=>type+":"+code).join(",")}};
 const make=()=>new Miniflare(opts);
 let mf=make();
@@ -248,6 +274,12 @@ async function verifyFallback(type,mode) {
   } finally {await context.close();}
 }
 try {
+  if (smoke) {
+    const anonymous=await fetch(service+"/mcp",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"get_stock_analysis",arguments:{symbol:"300078"}}})});
+    assert.equal(anonymous.status,403);
+    assert.equal((await fetch(service+"/__stage_trace")).status,404);
+  }
   for (const [type,symbol] of symbols) {
     try {
       const {result,...elapsed}=await initial(type,symbol);
@@ -330,8 +362,10 @@ try {
         if (i===3 && isStock) {
           assert.deepEqual(value.data.rows[0],Object.fromEntries(Object.entries(stored.at(-1))
             .filter(([key])=>key==="date"||!FIELDS.includes(key))));
-          const input=stored.map((r)=>Object.fromEntries(FIELDS.map((key)=>[key,r[key]])));
-          assert.deepEqual(stored,calculateIndicators(input));
+          if (!smoke) {
+            const input=stored.map((r)=>Object.fromEntries(FIELDS.map((key)=>[key,r[key]])));
+            assert.deepEqual(stored,calculateIndicators(input));
+          }
         }
         if (i===3 && !isStock) assert.deepEqual(value.data.metrics,snapshot.data.risk.windows["1y"].metrics);
         if (i===4 && !isStock) assert.deepEqual(value.data?.sectors??[],snapshot.data.association?.sectors??[]);
@@ -376,6 +410,7 @@ try {
           assert.equal(index.snapshot_id,snapshot_id);
           assert.equal(index.data.last,model.data.chart.last_index_trade_date);
           assert.deepEqual(index.data.rows.slice(-1),model.data.chart.rows);
+          if (smoke) await page.locator("#sector-display").waitFor({state:"visible"});
           row.sector_index={code:firstSector.code,last:index.data.last};
         }
         assert.deepEqual(requestFailures,[]);
@@ -389,7 +424,7 @@ try {
   }
   await wait(250);
   const after=(await traces()).filter((event)=>event.event==="snapshot_upstream").length;
-  if (sample) {
+  if (sample && !smoke) {
     // The injected browser vendor is distinct from the snapshot feed, so the
     // label and request count prove fallback instead of mixing the two modes.
     fallbackChecks.push(...await Promise.all([
@@ -398,14 +433,14 @@ try {
       verifyFallback("stock","before-preheat"),
     ]));
   }
-  independentAudit=await verifyIndependentAudit();
+  independentAudit=smoke?{status:"not_requested"}:await verifyIndependentAudit();
   const summary={...report(),detail_upstream_requests:after};
   await mkdir(resolve(output,".."),{recursive:true});
   await writeFile(output,JSON.stringify(summary,null,2));
   console.log(JSON.stringify(summary));
   assert.equal(after,0,"detail reads must not request vendors");
   assert.ok(results.every(({browser_mcp_identical})=>browser_mcp_identical),"one or more instruments did not pass");
-  assert.equal(independentAudit.status,"passed",independentAudit.reason);
+  if (!smoke) assert.equal(independentAudit.status,"passed",independentAudit.reason);
 } finally {
   if (browser) await browser.close();
   await mf.dispose();

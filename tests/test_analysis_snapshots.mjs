@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import { analysisService } from "../worker/snapshots/service.mjs";
 import { createSnapshotWorker } from "../worker/snapshots/worker.mjs";
+import { mountSnapshotSite } from "../worker/snapshots/site-gateway.mjs";
 import { createRecord, snapshotStore } from "../worker/snapshots/store.mjs";
 import { marketTransport } from "../worker/snapshots/providers.mjs";
 import { calculateIndicators } from "../web/engine.mjs";
@@ -246,10 +247,13 @@ test("private same-origin access requires identity and has a separate D1 quota",
   assert.equal(builds,1);
 });
 
-test("anonymous stock and fund views share MCP snapshots and bound cold work without grant configuration",async()=>{
+test("anonymous Sites views have no shared quota or build lock and reuse the authenticated MCP snapshot",async()=>{
   const {db,connection}=database();
   const origin="https://example.github.io";
-  const env={DB:connection(),SNAPSHOT_PUBLIC_ENABLED:"1",SNAPSHOT_PUBLIC_ORIGIN:origin};
+  const ownerEmail="owner@example.test";
+  const ownerHeaders={"oai-authenticated-user-id":"site-owner","oai-authenticated-user-email":ownerEmail};
+  const env={DB:connection(),SNAPSHOT_PUBLIC_ENABLED:"1",SNAPSHOT_PUBLIC_ORIGIN:origin,
+    SNAPSHOT_MCP_OWNER_EMAIL:ownerEmail};
   const fundRows=[{date:sessions.at(-1),unit_nav:1.2}];
   const riskFree={rows:[{date:sessions.at(-1),annual_rate:0.01}]};
   const benchmark={official:true,name:"Test benchmark",formula:"100% test index",source:"test issuer",
@@ -269,8 +273,8 @@ test("anonymous stock and fund views share MCP snapshots and bound cold work wit
   let releaseStock,stockStarted;
   const started=new Promise((resolve)=>{stockStarted=resolve;});
   const pending=new Promise((resolve)=>{releaseStock=resolve;});
-  const app=createSnapshotWorker({calendar,modelVersion:"model-a",clock:()=>new Date(now),observe:(event)=>events.push(event),
-    authorize:(request)=>request.headers.get("Authorization")==="owner-fixture",
+  const worker=createSnapshotWorker({calendar,modelVersion:"model-a",clock:()=>new Date(now),observe:(event)=>events.push(event),
+    authorize:(request)=>request.headers.has("oai-authenticated-user-id"),
     compute:async(spec,{onUpstream})=>{
       onUpstream({provider:"fixture"});
       if (spec.asset_type==="fund") return fund;
@@ -278,18 +282,22 @@ test("anonymous stock and fund views share MCP snapshots and bound cold work wit
       await pending;
       return data;
     }});
+  const app=mountSnapshotSite({analysis:worker,legacy:worker});
   const web=(args,bindings=env,options={})=>app.fetch(new Request(
     "https://worker.example/api/analysis?"+new URLSearchParams(args),options),bindings);
   const fundQuery={asset_type:"fund",symbol:"110022"};
-  const rpc=async(name,args,authenticated=true)=>{
-    const response=await app.fetch(new Request("https://worker.example/mcp",{method:"POST",
-      headers:authenticated?{Authorization:"owner-fixture"}:{},
+  const rpcResponse=(name,args,headers=ownerHeaders)=>{
+    return app.fetch(new Request("https://worker.example/mcp",{method:"POST",headers,
       body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",params:{name,arguments:args}})}),env);
+  };
+  const rpc=async(name,args)=>{
+    const response=await rpcResponse(name,args);
     return (await response.json()).result.structuredContent;
   };
-  assert.equal((await web(query,{...env,SNAPSHOT_PUBLIC_ENABLED:"0"})).status,403);
+  assert.equal((await web(query,{...env,SNAPSHOT_PUBLIC_ENABLED:"0"})).status,404);
   const {SNAPSHOT_PUBLIC_ENABLED:enabled,...unconfigured}=env;
-  assert.equal((await web(query,unconfigured)).status,403);
+  assert.equal((await web(query,unconfigured)).status,404);
+  assert.equal((await web(query,{...env,SNAPSHOT_MCP_OWNER_EMAIL:""})).status,404);
   assert.equal((await web(query,{...env,DB:null})).status,503);
   assert.equal((await web(query,{...env,SNAPSHOT_PUBLIC_SYMBOLS:"fund:110022"})).status,403);
   const rejected=await web(query,env,{headers:{Origin:"https://other.example"}});
@@ -300,19 +308,28 @@ test("anonymous stock and fund views share MCP snapshots and bound cold work wit
   assert.equal((await web([["asset_type","stock"],["symbol","300078"],["symbol","600519"]])).status,400);
   assert.equal((await web({...query,symbol:"0".repeat(520)})).status,414);
   assert.equal((await web(query,env,{method:"POST"})).status,405);
-  assert.equal((await rpc("get_stock_analysis",{symbol:query.symbol},false)).status,"unauthorized");
+  assert.equal((await rpcResponse("get_stock_analysis",{symbol:query.symbol},{})).status,403);
+  assert.equal((await rpcResponse("get_stock_analysis",{symbol:query.symbol},{...ownerHeaders,
+    "oai-authenticated-user-email":"visitor@example.test"})).status,403);
+  assert.equal((await app.fetch(new Request("https://worker.example/__stage_trace"),env)).status,404);
   assert.equal(events.length,0);
 
   const cold=web(query);
   await started;
   assert.equal((await web(query)).status,202);
-  assert.equal((await web(fundQuery)).status,429);
+  const fundResponse=await web(fundQuery,env,{headers:{Origin:origin}});
+  assert.equal(fundResponse.status,200,"a different symbol may complete while the stock builds");
   releaseStock();
   const stock=await (await cold).json();
-  const fundResponse=await web(fundQuery,env,{headers:{Origin:origin}});
   assert.equal(fundResponse.headers.get("Access-Control-Allow-Origin"),origin);
   assert.equal(fundResponse.headers.has("Access-Control-Allow-Credentials"),false);
   const fundSnap=await fundResponse.json();
+  for (let i=0;i<61;i++) {
+    const res=await web(query);
+    assert.equal(res.status,200);
+    assert.equal((await res.json()).snapshot_id,stock.snapshot_id);
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM analysis_snapshot_limits").get().n,0);
   for (const [args,snapshot,expected] of [[query,stock,indicators],[fundQuery,fundSnap,fundRows]]) {
     assert.equal(snapshot.cache,"miss");
     assert.equal(snapshot.summary,undefined);
@@ -350,14 +367,6 @@ test("anonymous stock and fund views share MCP snapshots and bound cold work wit
   assert.equal((await web({...pinnedFund,symbol:"003095"})).status,404);
   db.exec("UPDATE analysis_snapshots SET expires_at=0 WHERE asset_type='fund'");
   assert.equal((await web(pinnedFund)).status,410);
-  db.exec("UPDATE analysis_snapshot_limits SET calls=24 WHERE slot='public_build_day'");
-  assert.equal((await web(fundQuery)).status,429);
-  assert.equal((await (await web(query)).json()).cache,"hit");
-  db.exec("UPDATE analysis_snapshot_limits SET calls=2000 WHERE slot='public_page_day'");
-  assert.equal((await web(query)).status,429);
-  db.exec("DELETE FROM analysis_snapshot_limits WHERE slot='public_page_day'");
-  db.exec("UPDATE analysis_snapshot_limits SET calls=60,minute=unixepoch()/60 WHERE slot='public_page_minute'");
-  assert.equal((await web(query)).status,429);
   assert.equal((await rpc("get_stock_analysis",{symbol:query.symbol})).snapshot_id,stock.snapshot_id);
   db.exec("UPDATE analysis_snapshot_limits SET calls=30,minute=unixepoch()/60 WHERE slot='owner_details'");
   const limited=await rpc("get_analysis_details",{...query,snapshot_id:stock.snapshot_id,category:"history"});

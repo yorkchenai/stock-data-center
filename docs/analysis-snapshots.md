@@ -83,7 +83,7 @@ python -m scripts.audit_hosted_snapshot --calendar path/to/calendar.json \
 
 公开 GET 仅接收单个标的、当前完整股票交易日或最新确认基金数据的按需构建，以及按 ID 读取当前模型版本的 `page` 或基金关联指数 `index` 视图。网页可缩短显示范围。较早的股票查询仍可走已有网页独立取数，并注明计算版本和来源。已打开的固定 ID 过期或版本变化时显示错误。公开路由拒绝重复或未知参数、刷新、批量查询、自由历史导出和非 GET 方法。查询字符串上限 512 字符，保留原有 4 MB 响应上限。
 
-全站公开查询限 60 次/分钟、2,000 次/UTC 日。最多 24 次公开冷构建/UTC 日，同时只运行一个公开冷构建。同一查询由既有 D1 锁合并，命中快照不扣构建额度。公开配额与 MCP 配额分别计数。该起步额度用于有限流量验收，正式前需验证边缘请求限额和共享 D1 余量。仅允许匿名流量到公开路径，保留 MCP 的宿主鉴权及原工具。D1 凭证和 MCP 配置留在 Worker。
+匿名查询直接读取快照或按缓存键构建。不同缓存键可以并行，同一缓存键仍由 D1 锁合并。公开查询无应用层频率额度，继续受 Cloudflare 平台配额、处理上限和上游超时约束。MCP 及隔离私有接口保留原配额。既有 D1 表结构无需迁移，旧的公开计数行可以留存。D1 凭证和 MCP 配置留在 Worker。
 
 ### 数据公开范围与授权风险
 
@@ -91,10 +91,15 @@ python -m scripts.audit_hosted_snapshot --calendar path/to/calendar.json \
 
 东方财富声明要求行情信息的复制、传播或演示取得相关交易所事先书面同意。天天基金公示页面标注 Choice 数据；未取得该净值历史由项目服务器公开分发的许可。腾讯历史日线端点也未找到适用于本项目的公开再分发授权。CIIS 所列的有限日终四价转发条件不能覆盖项目拟公开的完整历史及成交量。价格和净值图、量额和派生指标、关联排名与指数图应分别核实许可，包含服务器缓存期限。供应商页面可读、CORS 通过或公开提供下载均不能证明获准再分发。 [东方财富法律声明](https://about.eastmoney.com/home/legal) · [天天基金净值](https://fund.eastmoney.com/fund.html) · [CIIS 许可核对记录](off-market-funds-volume.md#按用途核查授权)
 
-### 发布与回滚顺序
+### 正式网关与配对发布
 
-1. 记录并评估实际数据来源的再分发许可风险；取消代码中的许可白名单不代表取得授权。确认宿主可将 `/api/analysis` 作为匿名路由交给同一 Worker，并保留 `/mcp` 的现行鉴权、旧兼容工具和同一个 D1 绑定。验证实际免费额度和边缘限流。
-2. 从同一个提交和同一构建生成 Pages 与 Worker 包。先在现有正式接入层保留 MCP 原路由，再配置仅 GET 的公开路由。生产定时 Pages 构建也须使用同一配对产物或同步更新两端，避免日历滚动导致版本漂移。发布前核对两端 `build-info.json` 的版本，并从真实 Pages 来源验收匿名查询、相同 ID 及 Live 连续追问。
-3. 回滚时先关闭公开路由或撤掉 `SNAPSHOT_PUBLIC_ENABLED`。用当前生产股票 Pages 的原构建产物恢复网站。若需要回滚 Worker，重新发布保留的第 13 版，保留原 D1 绑定及插件 1.0.4 的连接。该改动无需 D1 迁移，可保留已生成的版本化快照。正式回滚演练由发布阶段执行。
+现有生产 Site 使用整站的所有者访问策略，外部请求在进入 Worker 前受此策略约束。Sites 支持整站公共模式，平台仍认证 `/mcp` 并注入已认证身份。按当前可见配置，没有单路径免登录例外。最小方案是在同一个 Site 的正式 Worker 中安装 `mountSnapshotSite`，用 Sites 验证的现有所有者邮箱保护 `/mcp` 和诊断首页，其他应用路径返回 404。切换站点访问模式前，须先在私有模式验证同一个插件通过新增的所有者检查。只有公开开关和所有者配置同时存在时，Worker 才挂载 `/api/analysis`。CORS 仅为允许的 Pages 来源返回响应头。
+
+发布前保留 Sites 已保存第 13 版及原 D1 绑定、插件 1.0.4 和最近成功生产 Pages 发布的 `github-pages` 归档。第 13 版来源为 `4c4bc9afd516db903615f037049ec12849093c70`。当前 Pages 回滚点为 `33ad0f66efa6c9fabf69793ec83e25abfd1b86f3`，已归档发布 `45478713537`。 [Pages 原发布](https://github.com/yorkchenai/stock-data-center/actions/runs/45478713537)
+
+1. 从通过验收的分支提交运行 `GITHUB_SHA=$(git rev-parse HEAD) python -m stock_analysis.pages --output <配对目录>/pages --snapshot-service https://stock-data-center-voice-probe.finalnoodle2.chatgpt.site --snapshot-runtime-output <配对目录>/runtime`。将 runtime 复制到上述第 13 版 SHA 的 Site 源码副本的 `worker/snapshot-runtime/`，在该副本运行 `git apply --unidiff-zero <仓库>/scripts/site-snapshot-release.patch`。用 esbuild 把 `worker/snapshot-release.mjs` 打包为 `dist/server/index.js`，归档时保留现有 `.openai/hosting.json`、`drizzle/` 和构建输出。同一次构建的 Worker 和 Pages 共享模型版本和输入。
+2. 批准后，在原 Site 的环境设置填入 `SNAPSHOT_MCP_OWNER_EMAIL`（现有插件所有者的已验证邮箱）和 `SNAPSHOT_PUBLIC_ORIGIN=https://yorkchenai.github.io`。保持公开开关关闭，按原 Site 的源码发布流程部署配对 Worker，验证现有插件 1.0.4 的原连接、工具发现与已认证调用。保留原项目 ID 和逻辑 D1 绑定 `DB`，沿用原迁移文件。
+3. 验证 MCP 后切换 Site 的站点访问模式为 `public`。先确认匿名 `/mcp` 和诊断路径被拒绝，其他已登录账号也无法调用所有者工具，且外部请求不能伪造 Sites 注入的身份头。随后设置 `SNAPSHOT_PUBLIC_ENABLED=1` 并发布同一配对的 Pages 文件。确认常规 Pages 自动发布在后续使用配对产物或同步更新两端，避免日历滚动导致版本漂移。用真实 Pages 来源、无 Cookie 查询 300078 和 110022，用现有 Live 工具核对 `snapshot_id` 和 `model_version`，再复查 D1 命中零回源。Sites 平台可在重发时刷新工具发现，仍使用既有插件连接。
+4. 需要回滚时，先关闭公开开关并恢复 Site 所有者访问策略，再重新发布已保存的第 13 版，保留原 D1 绑定和插件连接。恢复备份的原 Pages 归档。回滚无需还原或删除 D1 表或快照。行情使用和再分发风险继续保留上述记录。
 
 GitHub runner 的实盘路径也会从本次隔离 D1 读取实际输入交给独立 Python 复算。临时输入仅在测试进程目录保留，CI 归档仅含请求状态、时间、计数、排名、缺失和校验结果。实盘失败直接报告，fixture 结果单独生成，runner 结果须与托管测试 Site 的证据分开记录。

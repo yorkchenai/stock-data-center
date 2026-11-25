@@ -1,4 +1,4 @@
-name: Production gateway connectivity probe
+name: Production gateway isolation probe
 on:
   push:
     branches: [ops/production-gateway-probe-1125]
@@ -7,21 +7,112 @@ permissions: {}
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 7
+    env:
+      SITE: https://stock-data-center-voice-probe.finalnoodle2.chatgpt.site
     steps:
-      - name: Check TLS and the current private gateway
-        env:
-          SITE: https://stock-data-center-voice-probe.finalnoodle2.chatgpt.site
+      - name: Prepare a one-time owner identity encryption key
         run: |
-          curl --silent --show-error --max-time 15 --proto '=https' \
-            --output /dev/null \
-            --write-out 'private-analysis http=%{http_code} tls=%{ssl_verify_result}\n' \
-            -H 'Origin: https://yorkchenai.github.io' \
-            "$SITE/api/analysis?asset_type=stock&symbol=300078"
-          curl --silent --show-error --max-time 15 --proto '=https' \
-            --output /dev/null \
-            --write-out 'private-mcp http=%{http_code} tls=%{ssl_verify_result}\n' \
-            -H 'Content-Type: application/json' \
-            -H 'Accept: application/json, text/event-stream' \
-            --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
-            "$SITE/mcp"
+          umask 077
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$RUNNER_TEMP/gate-private.pem" 2>/dev/null
+          openssl pkey -in "$RUNNER_TEMP/gate-private.pem" -pubout -out "$RUNNER_TEMP/gate-public.pem"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gate-public-key
+          path: ${{ runner.temp }}/gate-public.pem
+          retention-days: 1
+      - name: Receive encrypted owner identity
+        run: |
+          umask 077
+          for i in $(seq 1 45); do
+            url="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/ops/gate-challenge-$GITHUB_RUN_ID/gate-challenge.bin?attempt=$i"
+            if curl -fSs --max-time 4 "$url" -o "$RUNNER_TEMP/gate-challenge.bin" 2>/dev/null; then
+              openssl pkeyutl -decrypt -inkey "$RUNNER_TEMP/gate-private.pem" \
+                -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
+                -in "$RUNNER_TEMP/gate-challenge.bin" -out "$RUNNER_TEMP/gate-owner.json"
+              rm -f "$RUNNER_TEMP/gate-private.pem" "$RUNNER_TEMP/gate-challenge.bin"
+              exit 0
+            fi
+            sleep 4
+          done
+          exit 1
+      - name: Await public mode and verify gateway
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          from concurrent.futures import ThreadPoolExecutor
+          from pathlib import Path
+          from urllib.error import HTTPError
+          from urllib.parse import urlencode
+          from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+          site = os.environ["SITE"]
+          origin = "https://yorkchenai.github.io"
+          owner_path = Path(os.environ["RUNNER_TEMP"]) / "gate-owner.json"
+          owner = json.loads(owner_path.read_text())
+          owner_path.unlink()
+
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          def request(path, headers=None, payload=None):
+              if payload is not None:
+                  payload = json.dumps(payload).encode()
+              try:
+                  with build_opener(NoRedirect()).open(Request(site + path, headers=headers or {}, data=payload), timeout=12) as response:
+                      return response.status, response.headers, response.read(128_000)
+              except HTTPError as exc:
+                  return exc.code, exc.headers, exc.read(4000)
+
+          def mcp(tag, identity):
+              headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+              status, response_headers, _ = request("/mcp", headers | identity, {
+                  "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                  "params": {"protocolVersion": "2025-03-26", "capabilities": {},
+                             "clientInfo": {"name": "sdc-release-check", "version": "1"}},
+              })
+              print(f"{tag} http={status} oauth_challenge={bool(response_headers.get('WWW-Authenticate'))}", flush=True)
+              return status in (401, 403)
+
+          deadline = time.monotonic() + 95
+          while time.monotonic() < deadline:
+              code, _, body = request("/api/analysis", {"Origin": origin})
+              if code == 400 and json.loads(body).get("status") == "invalid_request":
+                  break
+              time.sleep(3)
+          else:
+              raise SystemExit("Public API gateway did not become reachable")
+
+          with ThreadPoolExecutor(max_workers=2) as pool:
+              tests = [pool.submit(mcp, "anonymous_mcp", {}), pool.submit(mcp, "forged_owner_mcp", {
+                  "oai-authenticated-user-id": owner["id"],
+                  "oai-authenticated-user-email": owner["email"],
+              })]
+              if not all(test.result() for test in tests):
+                  raise SystemExit("MCP authentication isolation failed")
+
+          def query(asset_type, symbol):
+              url = "/api/analysis?" + urlencode({"asset_type": asset_type, "symbol": symbol})
+              for attempt in range(4):
+                  status, headers, body = request(url, {"Origin": origin})
+                  data = json.loads(body)
+                  allowed = headers.get("Access-Control-Allow-Origin") == origin
+                  outcome = data.get("status")
+                  version = data.get("model_version")
+                  present = bool(data.get("snapshot_id"))
+                  print(f"{asset_type} {symbol} http={status} status={outcome} cors={allowed} version={version} snapshot={present}", flush=True)
+                  if status == 200 and allowed and present and data.get("schema_version") == 1 and version == "analysis-v1-8ea238b017daab1d6201":
+                      return True
+                  if status != 202 or outcome != "building":
+                      return False
+                  time.sleep(3)
+              return False
+
+          with ThreadPoolExecutor(max_workers=2) as pool:
+              tests = [pool.submit(query, "stock", "300078"), pool.submit(query, "fund", "110022")]
+              if not all(test.result() for test in tests):
+                  raise SystemExit("Anonymous analysis request did not return the matching snapshot")
+          PY

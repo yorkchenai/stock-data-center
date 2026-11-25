@@ -1,0 +1,27 @@
+name: Production gateway connectivity probe
+on:
+  push:
+    branches: [ops/production-gateway-probe-1125]
+    paths: [.github/workflows/production-gateway-probe.yml]
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check TLS and the current private gateway
+        env:
+          SITE: https://stock-data-center-voice-probe.finalnoodle2.chatgpt.site
+        run: |
+          curl --silent --show-error --max-time 15 --proto '=https' \
+            --output /dev/null \
+            --write-out 'private-analysis http=%{http_code} tls=%{ssl_verify_result}\n' \
+            -H 'Origin: https://yorkchenai.github.io' \
+            "$SITE/api/analysis?asset_type=stock&symbol=300078"
+          curl --silent --show-error --max-time 15 --proto '=https' \
+            --output /dev/null \
+            --write-out 'private-mcp http=%{http_code} tls=%{ssl_verify_result}\n' \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+            "$SITE/mcp"

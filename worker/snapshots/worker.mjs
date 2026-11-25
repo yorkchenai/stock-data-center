@@ -103,7 +103,7 @@ async function rpcInput(request) {
 
 const statusCode = (status) => ({
   building:202,invalid_arguments:400,snapshot_not_found:404,expired:410,
-  access_denied:403,display_not_authorized:403,version_mismatch:409,
+  access_denied:403,version_mismatch:409,
   rate_limited:429,cache_unavailable:503,data_unavailable:502,
 })[status]??200;
 
@@ -122,17 +122,13 @@ async function anonymousAnalysis(request, url, env, {service, calendar, clock, m
   try {publicQuery(url,args,calendar,clock());} catch(error) {
     return send(publicError("invalid_arguments",error.message));
   }
-  const grants=new Set((env.SNAPSHOT_PUBLIC_DISPLAY_GRANTS??"").split(",").map((entry)=>entry.trim()));
-  if (![...grants].some((entry)=>entry.startsWith(`${args.asset_type}:`) && entry.split(":")[1])) {
-    return send(publicError("display_not_authorized","该类数据的公开展示许可尚未确认。"));
-  }
   if (env.SNAPSHOT_PUBLIC_SYMBOLS && !approvedSymbol(env,args)) {
     return send(publicError("access_denied","该标的不在公开查询范围。"));
   }
   const budget=(slot,count,seconds)=>limitSnapshotCalls(env.DB,slot,count,seconds);
   const blocked=await budget("public_page_minute",60) || await budget("public_page_day",2000,86400);
   if (blocked) return send(publicError(blocked,"公开查询繁忙，请稍后重试。",{retry_after_seconds:60}));
-  const {present,select}=publicPresentation(grants,modelVersion);
+  const {present,select}=publicPresentation(modelVersion);
   const output=args.snapshot_id ? await service.details(env.DB,args,{browser:true,select,requestId}) :
     await service.initial(env.DB,args,{waitUntil,requestId,present,
       admitBuild:(store,query,now)=>admitPublicBuild(store,now,()=>budget("public_build_day",24,86400))});

@@ -1,20 +1,23 @@
 import { resolveSymbol, validDate } from "./engine.mjs";
 
 const options=globalThis.document?.documentElement?.dataset;
-const endpoint=options?.analysisOrigin;
+const privatePath=/^\/[a-z][a-z0-9-]*$/.test(options?.analysisPath??"") ? options.analysisPath : null;
+const endpoint=privatePath
+  ? new URL(privatePath,globalThis.location.origin).href
+  : options?.analysisOrigin && new URL("/api/analysis",options.analysisOrigin).href;
 const ownVersion=options?.analysisModel??"local-unversioned";
 export const browserModelVersion=ownVersion;
 export const snapshotsEnabled=Boolean(endpoint);
 const ready=new Set(["complete","partial"]);
-const PAGE_TIMEOUT=11_000;
+const PAGE_TIMEOUT=privatePath ? 40_000 : 11_000;
 
 async function request(args, signal=AbortSignal.timeout(PAGE_TIMEOUT)) {
   if (!endpoint) throw new Error("此构建未配置共享快照服务。");
-  const url=new URL("/api/analysis",endpoint);
+  const url=new URL(endpoint);
   for (const [name,value] of Object.entries(args)) {
     if (value!==null && value!==undefined && value!=="") url.searchParams.set(name,value);
   }
-  const response=await fetch(url,{credentials:"omit",cache:"no-store",signal});
+  const response=await fetch(url,{credentials:privatePath?"same-origin":"omit",cache:"no-store",signal});
   const result=await response.json();
   if (!response.ok) throw new Error(result.message??`快照服务 ${result.status??response.status}。`);
   return result;

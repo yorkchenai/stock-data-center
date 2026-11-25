@@ -104,6 +104,7 @@ const statusCode = (status) => ({
 })[status]??200;
 
 export function createSnapshotWorker({calendar,config,modelVersion,authorize=()=>false,authorizePage=()=>false,
+  pageAccess=async(request,env,args)=>await authorizePage(request,env)?publicAccess(request,env,args):null,
   initialRateLimit=(db)=>limitSnapshotCalls(db,"owner_initial",6),compute,clock=()=>new Date(),observe}) {
   const log=observe??((event)=>console.log(JSON.stringify(event)));
   const service=analysisService({calendar,modelVersion,clock,observe:log,
@@ -116,18 +117,18 @@ export function createSnapshotWorker({calendar,config,modelVersion,authorize=()=
       if (request.method==="GET" && url.pathname==="/api/analysis") {
         const args=Object.fromEntries(url.searchParams);
         if (args.limit) args.limit=Number(args.limit);
-        let cors;
-        try {if (await authorizePage(request,env)) cors=publicAccess(request,env,args);} catch {cors=null;}
-        if (!cors) return json({status:"access_denied"},403);
+        let pageHeaders;
+        try {pageHeaders=await pageAccess(request,env,args);} catch {pageHeaders=null;}
+        if (!pageHeaders) return json({status:"access_denied"},403);
         // Public readers have no force-refresh option and share a bounded quota.
         delete args.refresh;
         delete args.after_snapshot_id;
         const blocked=await limitSnapshotCalls(env.DB,"page",60);
-        if (blocked) return json({status:blocked},statusCode(blocked),cors);
+        if (blocked) return json({status:blocked},statusCode(blocked),pageHeaders);
         const output=args.snapshot_id
           ? await service.details(env.DB,args,{browser:true,requestId})
           : await service.initial(env.DB,args,{waitUntil,requestId});
-        return json(output,statusCode(output.status),cors);
+        return json(output,statusCode(output.status),pageHeaders);
       }
       if (request.method!=="POST" || url.pathname!=="/mcp") {
         return json({status:"not_found"},404);

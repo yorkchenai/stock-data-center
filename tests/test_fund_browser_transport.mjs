@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fundFromAssignments, parseDirectory, readNavAssignments } from "../web/funds/nav-source.mjs";
-import { indexChartPayload, tradingWindow } from "../web/funds/sector-browser.mjs";
+import { createBrowserSectorProvider, indexChartPayload, tradingWindow } from "../web/funds/sector-browser.mjs";
 import { readFundText } from "../web/funds/providers.mjs";
 import { fundFreshness } from "../web/funds/data.mjs";
 
@@ -67,4 +67,27 @@ test("calendar cutoff and explicit provider failures",async()=>{
   }),{name:"TimeoutError"});
   assert.equal(fundFreshness({normalFrequency:true,rows:[{date:"2025-01-02"}]},"2025-01-10"),
     "净值日期已超过 7 天");
+});
+
+test("special index timeout gives later symbols a chance before a bounded retry",async()=>{
+  const codes=["932133","932139","H30535"];
+  const calendar={schema_version:1,start:"2000-01-01",end:"2099-01-01",sessions:["2025-01-07","2025-01-08"]};
+  const indices=Object.fromEntries(codes.map((code)=>[code,{code,name:code,role:"industry",definition:"https://www.csindex.com.cn/"}]));
+  const requests=[];
+  const readText=async(url)=>{
+    const code=url.searchParams.get("indexCode");
+    requests.push(code);
+    if (code===codes[0] && requests.length===1) throw new DOMException("body stalled","TimeoutError");
+    return JSON.stringify({data:[{tradeDate:"20250108",indexCode:code,indexNameCnAll:code,close:10}]});
+  };
+  const provider=createBrowserSectorProvider(async()=>({indices}),undefined,async()=>calendar,{readText});
+  const result=await provider.analyze({category:"stock",valuation_frequency:"daily",return_basis:"event_reinvested",
+    rows:[{date:"2025-01-08",return_index:1}]});
+  assert.deepEqual(requests,[...codes,codes[0]]);
+  assert.deepEqual(result.report.special_index_diagnostics,{
+    "932133":{status:"available",attempts:2,source:"csi"},
+    "932139":{status:"available",attempts:1,source:"csi"},
+    "H30535":{status:"available",attempts:1,source:"csi"},
+  });
+  assert.equal(result.report.index_coverage.available,0,"A response with insufficient history cannot enter the model.");
 });

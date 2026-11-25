@@ -172,10 +172,11 @@ export function sectorAnalysisPayload(fund,histories,config,bounds,computed=new 
 }
 
 export function createBrowserSectorProvider(configPromise, stockHistory=fetchHistory, pageData=readPageData,
-  {readText=readFundText,timeout=45_000,priorityMarkets=false,reusePending=true,stockTransport="browser-cors"}={}) {
+  {readText=readFundText,timeout=45_000,specialTimeout=4_500,priorityMarkets=false,reusePending=true,stockTransport="browser-cors"}={}) {
   let cached;
   async function collect(config,calendar,bounds,read) {
     const histories={};
+    const specialDiagnostics={};
     const sessionSet=new Set(bounds.sessions);
     const snapshot=config.index_snapshot?await pageData(config.index_snapshot).catch(()=>null):null;
     const items=Object.values(config.indices);
@@ -188,17 +189,39 @@ export function createBrowserSectorProvider(configPromise, stockHistory=fetchHis
     const getJSON=async(url)=>JSON.parse(await read(url,{signal:deadline}));
     const collectSpecial=async()=>{
       let direct=true;
-      for (const item of special) {
-        if (deadline.aborted) break;
+      const retry=[];
+      const fetchOne=async(item,attempts)=>{
+        const diagnostic={status:"not_attempted",attempts:0};
+        const attemptSignal=AbortSignal.any([deadline,AbortSignal.timeout(specialTimeout)]);
         try {
-          const data=snapshotIndex(snapshot,item,sessionSet,bounds.end)??(direct?
-            await fetchSpecial(item,sessionSet,bounds.end,deadline,read):null);
-          if (data) histories[item.code]=data;
+          const stored=snapshotIndex(snapshot,item,sessionSet,bounds.end);
+          if (!stored) {
+            if (deadline.aborted || !direct) {
+              specialDiagnostics[item.code]??={...diagnostic,reason:deadline.aborted?"total_deadline":"source_unavailable"};
+              return;
+            }
+            diagnostic.attempts=attempts;
+          }
+          histories[item.code]=stored??await fetchSpecial(item,sessionSet,bounds.end,attemptSignal,read);
+          diagnostic.status="available";
+          diagnostic.source=stored?"static":"csi";
         } catch (error) {
-          if (error instanceof TypeError || /HTTP (401|403|429)/.test(error.message)) direct=false;
+          const restriction=/^HTTP (401|403|429)$/.exec(error.message);
+          if (attemptSignal.aborted || ["TimeoutError","AbortError"].includes(error.name)) {
+            diagnostic.status="timeout";
+            if (!deadline.aborted && attempts===1) retry.push(item);
+          } else if (restriction || error instanceof TypeError) {
+            diagnostic.status=restriction?`http_${restriction[1]}`:"transport_unavailable";
+            direct=false;
+          } else {
+            diagnostic.status=error.message.startsWith("HTTP ")?"http_error":"invalid_history";
+          }
         }
-        if (direct) await delay(250);
-      }
+        specialDiagnostics[item.code]=diagnostic;
+        if (direct && !deadline.aborted) await delay(250);
+      };
+      for (const item of special) await fetchOne(item,1);
+      for (const item of retry) await fetchOne(item,2);
     };
     const queue=items.filter((item)=>!missingSpecial.has(item.code));
     if (priorityMarkets) queue.sort((left,right)=>Number(right.role==="market")-Number(left.role==="market"));
@@ -214,7 +237,7 @@ export function createBrowserSectorProvider(configPromise, stockHistory=fetchHis
       }
     };
     await Promise.all([collectStock(),collectStock(),collectStock(),collectSpecial()]);
-    return histories;
+    return {histories,specialDiagnostics};
   }
   async function base(refresh,read) {
     const [config,calendar]=await Promise.all([configPromise(),pageData("calendar.json")]);
@@ -222,27 +245,28 @@ export function createBrowserSectorProvider(configPromise, stockHistory=fetchHis
     const now=Date.now();
     if (!reusePending) {
       if (refresh || cached?.end!==bounds.end || now-cached.time>5*60_000) {
-        const histories=await collect(config,calendar,bounds,read);
-        if (Object.keys(histories).length) cached={end:bounds.end,time:now,histories};
-        return {config,bounds,histories};
+        const data=await collect(config,calendar,bounds,read);
+        if (Object.keys(data.histories).length) cached={end:bounds.end,time:now,data};
+        return {config,bounds,...data};
       }
-      return {config,bounds,histories:cached.histories};
+      return {config,bounds,...cached.data};
     }
     if (refresh || !cached || cached.end!==bounds.end || now-cached.time>5*60_000) {
       const pending=collect(config,calendar,bounds,read);
       cached={end:bounds.end,time:now,pending};
-      pending.then((items)=>{if (!Object.keys(items).length&&cached?.pending===pending) cached=null;},
+      pending.then(({histories})=>{if (!Object.keys(histories).length&&cached?.pending===pending) cached=null;},
         ()=>{if (cached?.pending===pending) cached=null;});
     }
-    return {config,bounds,histories:await cached.pending};
+    return {config,bounds,...await cached.pending};
   }
   return {
     async analyze(fund,{refresh=false,readText:read=readText}={}) {
       if (!["stock","mixed"].includes(fund.category)||fund.valuation_frequency!=="daily") {
         return {report:sectorAnalysisPayload(fund,{},{},{})};
       }
-      const {config,bounds,histories}=await base(refresh,read);
-      return {report:sectorAnalysisPayload(fund,histories,config,bounds),histories,sessions:bounds.sessions};
+      const {config,bounds,histories,specialDiagnostics}=await base(refresh,read);
+      return {report:{...sectorAnalysisPayload(fund,histories,config,bounds),special_index_diagnostics:specialDiagnostics},
+        histories,sessions:bounds.sessions};
     },
     history(fundCode,entry,context) {
       return indexChartPayload(fundCode,entry,context.report,context.histories[entry.code],context.sessions);

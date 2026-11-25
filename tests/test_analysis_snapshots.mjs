@@ -209,6 +209,36 @@ test("browser authorization, legacy stock fields and snapshot details use the sa
   assert.equal((await page({...detail(summary,"page"),symbol:"600519"})).status,403);
 });
 
+test("private same-origin access requires identity and has a separate D1 quota",async()=>{
+  const {db,connection}=database();
+  const env={DB:connection()};
+  const authorized=(request)=>request.headers.get("Authorization")==="owner-fixture";
+  let builds=0;
+  const app=createSnapshotWorker({calendar,modelVersion:"model-a",clock:()=>new Date(now),
+    pageAccess:(request)=>authorized(request)?{}:null,authorize:authorized,observe:()=>{},
+    compute:async()=>{builds++;return data;}});
+  const url="https://example.test/api/analysis?asset_type=stock&symbol=300078";
+  const headers={Authorization:"owner-fixture"};
+  assert.equal((await app.fetch(new Request(url,{headers:{Origin:"https://example.test"}}),env)).status,403);
+  assert.equal(builds,0);
+  const allowed=await app.fetch(new Request(url,{headers}),env);
+  assert.equal(allowed.status,200);
+  assert.equal(allowed.headers.has("Access-Control-Allow-Origin"),false);
+  const {snapshot_id}=await allowed.json();
+  const pinned=url+"&category=page&snapshot_id="+snapshot_id;
+  assert.equal((await app.fetch(new Request(pinned),env)).status,403);
+  assert.equal((await app.fetch(new Request(pinned,{headers}),env)).status,200);
+  db.exec("UPDATE analysis_snapshot_limits SET calls=60,minute=unixepoch()/60 WHERE slot='page'");
+  const limited=await app.fetch(new Request(pinned,{headers}),env);
+  assert.equal(limited.status,429);
+  assert.equal((await limited.json()).status,"rate_limited");
+  const rpc=await app.fetch(new Request("https://example.test/mcp",{method:"POST",headers,
+    body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",
+      params:{name:"get_stock_analysis",arguments:{symbol:"300078"}}})}),env);
+  assert.equal((await rpc.json()).result.structuredContent.snapshot_id,snapshot_id);
+  assert.equal(builds,1);
+});
+
 test("fund keeps the v10 summary with a separate partial snapshot status and no history in speech", async()=>{
   const {connection}=database();
   const source={name:"test fund provider",method:"confirmed_nav",retrieved_at:new Date(now).toISOString()};

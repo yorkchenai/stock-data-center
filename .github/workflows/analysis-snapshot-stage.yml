@@ -6,6 +6,7 @@ on:
       - 'worker/snapshots/**'
       - 'scripts/test_snapshot_stage.mjs'
       - 'tests/test_analysis_snapshots.mjs'
+      - 'tests/test_fund_browser_transport.mjs'
       - 'web/**'
       - 'stock_analysis/pages.py'
   workflow_dispatch:
@@ -30,7 +31,7 @@ jobs:
       - run: >-
           python -m stock_analysis.pages --output work/snapshot-stage-pages
           --snapshot-service http://127.0.0.1:8787 --snapshot-runtime-output work/snapshot-stage-runtime
-      - run: node --test tests/test_analysis_snapshots.mjs
+      - run: node --test tests/test_analysis_snapshots.mjs tests/test_fund_browser_transport.mjs
       - name: Verify fixed test data, D1 persistence and landscape browser wiring
         run: |
           export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"

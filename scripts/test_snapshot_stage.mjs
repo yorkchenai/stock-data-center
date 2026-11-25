@@ -331,6 +331,7 @@ try {
       row.browser_mcp_identical=true;
       row.rows=stored.length;
       row.sector_status=snapshot.data.association?.status;
+      row.special_index_diagnostics=snapshot.data.association?.special_index_diagnostics;
       row.rank_codes=snapshot.data.association?.sectors.map((sector)=>sector.code);
     } catch (error) {row.error=error.message;}
   }

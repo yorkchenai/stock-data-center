@@ -1,4 +1,4 @@
-name: Production gateway isolation probe
+name: Production gateway diagnostics
 on:
   push:
     branches: [ops/production-gateway-probe-1125]
@@ -11,79 +11,151 @@ jobs:
     env:
       SITE: https://stock-data-center-voice-probe.finalnoodle2.chatgpt.site
     steps:
-      - name: Await public mode and verify gateway
+      - name: Record private baseline and observe the controlled cutover
         run: |
           python - <<'PY'
           import json
           import os
           import time
           from concurrent.futures import ThreadPoolExecutor
-          from urllib.error import HTTPError
-          from urllib.parse import urlencode
+          from urllib.error import HTTPError, URLError
           from urllib.request import HTTPRedirectHandler, Request, build_opener
 
           site = os.environ["SITE"]
           origin = "https://yorkchenai.github.io"
+          run = os.environ["GITHUB_RUN_ID"]
+          known_errors = {
+              "access_denied", "authentication_required", "forbidden", "invalid_arguments",
+              "invalid_request", "invalid_token", "not_authenticated", "not_authorized",
+              "not_found", "unauthenticated", "unauthorized",
+          }
 
           class NoRedirect(HTTPRedirectHandler):
               def redirect_request(self, req, fp, code, msg, headers, newurl):
                   return None
 
-          def request(path, headers=None, payload=None):
-              if payload is not None:
-                  payload = json.dumps(payload).encode()
+          def probe(tag, path, headers=None, rpc=None):
+              request_headers = {
+                  "User-Agent": f"sdc-gateway-diagnostics/{run}",
+                  "Cache-Control": "no-cache",
+                  **(headers or {}),
+              }
+              payload = None
+              if rpc:
+                  request_headers.update({"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
+                  payload = json.dumps(rpc).encode()
+
               try:
-                  with build_opener(NoRedirect()).open(Request(site + path, headers=headers or {}, data=payload), timeout=12) as response:
-                      return response.status, response.headers, response.read(128_000)
+                  response = build_opener(NoRedirect()).open(Request(site + path, headers=request_headers, data=payload), timeout=8)
               except HTTPError as exc:
-                  return exc.code, exc.headers, exc.read(4000)
+                  response = exc
+              except (URLError, TimeoutError) as exc:
+                  print(json.dumps({"check": tag, "http": None, "error": type(exc).__name__}), flush=True)
+                  return {}
 
-          def mcp(tag, identity):
-              headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
-              status, response_headers, _ = request("/mcp", headers | identity, {
-                  "jsonrpc": "2.0", "id": 1, "method": "initialize",
-                  "params": {"protocolVersion": "2025-03-26", "capabilities": {},
-                             "clientInfo": {"name": "sdc-release-check", "version": "1"}},
-              })
-              print(f"{tag} http={status} oauth_challenge={bool(response_headers.get('WWW-Authenticate'))}", flush=True)
-              return status == 401 and bool(response_headers.get("WWW-Authenticate"))
+              with response:
+                  body = response.read(8192)
+                  media = response.headers.get_content_type()
+                  media = next((kind for kind in ("application/json", "application/problem+json", "text/event-stream", "text/html", "text/plain") if media == kind), "other")
+                  try:
+                      data = json.loads(body)
+                  except (ValueError, UnicodeError):
+                      data = {}
+                  if not isinstance(data, dict):
+                      data = {}
 
-          deadline = time.monotonic() + 95
-          while time.monotonic() < deadline:
-              code, _, body = request("/api/analysis", {"Origin": origin})
-              if code == 400 and json.loads(body).get("status") == "invalid_arguments":
-                  break
-              time.sleep(3)
-          else:
-              raise SystemExit("Public API gateway did not become reachable")
+                  error = next((data.get(field) for field in ("status", "error", "code")
+                                if isinstance(data.get(field), str) and data[field] in known_errors), None)
+                  challenge = bool(response.headers.get("WWW-Authenticate"))
+                  if not body:
+                      body_type = "empty"
+                  elif media == "text/html" or body.lstrip().lower().startswith((b"<!doctype html", b"<html")):
+                      body_type = "html"
+                  elif data:
+                      body_type = "json"
+                  elif media in ("application/json", "application/problem+json"):
+                      body_type = "invalid_or_truncated_json"
+                  else:
+                      body_type = media
+                  result = {
+                      "check": tag, "http": response.status,
+                      "content_type": media if response.headers.get("Content-Type") else None,
+                      "body_type": body_type, "error": error,
+                      "oauth_challenge": challenge,
+                      "redirect": bool(response.headers.get("Location")),
+                      "pages_cors": response.headers.get("Access-Control-Allow-Origin") == origin,
+                      "rpc_result": "result" in data or media == "text/event-stream",
+                      "worker_forbidden_shape": response.status == 403 and not body
+                          and response.headers.get("Cache-Control") == "private, no-store"
+                          and response.headers.get("X-Content-Type-Options") == "nosniff",
+                  }
+                  print(json.dumps(result), flush=True)
+                  return result
 
-          with ThreadPoolExecutor(max_workers=2) as pool:
-              tests = [pool.submit(mcp, "anonymous_mcp", {}), pool.submit(mcp, "forged_owner_mcp", {
-                  "oai-authenticated-user-id": "synthetic-site-owner",
-                  "oai-authenticated-user-email": "synthetic-site-owner@example.invalid",
-              })]
-              if not all(test.result() for test in tests):
-                  raise SystemExit("MCP authentication isolation failed")
+          def api(sample, pages=True):
+              return probe(f"api-{sample}-{'pages' if pages else 'no-origin'}",
+                           f"/api/analysis?gateway_probe={run}-{sample}",
+                           {"Origin": origin} if pages else {})
 
-          def query(asset_type, symbol):
-              url = "/api/analysis?" + urlencode({"asset_type": asset_type, "symbol": symbol})
-              for attempt in range(4):
-                  status, headers, body = request(url, {"Origin": origin})
-                  data = json.loads(body)
-                  allowed = headers.get("Access-Control-Allow-Origin") == origin
-                  outcome = data.get("status")
-                  version = data.get("model_version")
-                  present = bool(data.get("snapshot_id"))
-                  print(f"{asset_type} {symbol} http={status} status={outcome} cors={allowed} version={version} snapshot={present}", flush=True)
-                  if status == 200 and allowed and present and data.get("schema_version") == 1 and version == "analysis-v1-8ea238b017daab1d6201":
-                      return True
-                  if status != 202 or outcome != "building":
-                      return False
-                  time.sleep(3)
-              return False
+          synthetic = {"oai-authenticated-user-id": "diagnostic-owner-claim",
+                       "oai-authenticated-user-email": "diagnostic-owner-claim@example.invalid"}
+          calls = {
+              "list": {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+              "call": {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+                  "name": "stock_voice_probe", "arguments": {"symbol": "300078", "surface": "iphone_live"}}},
+          }
 
-          with ThreadPoolExecutor(max_workers=2) as pool:
-              tests = [pool.submit(query, "stock", "300078"), pool.submit(query, "fund", "110022")]
-              if not all(test.result() for test in tests):
-                  raise SystemExit("Anonymous analysis request did not return the matching snapshot")
+          def mcp(phase, variant, method):
+              return probe(f"mcp-{phase}-{variant}-{method}", "/mcp",
+                           synthetic if variant == "synthetic" else {}, calls[method])
+
+          def blocked(result):
+              return result.get("http") in (401, 403) and not result.get("rpc_result")
+
+          def gate_evidence(result):
+              return not result.get("worker_forbidden_shape") and (
+                  result.get("oauth_challenge") or result.get("error") in {
+                      "authentication_required", "invalid_token", "not_authenticated", "unauthenticated"})
+
+          with ThreadPoolExecutor(max_workers=6) as pool:
+              baseline = [pool.submit(api, "baseline", pages) for pages in (True, False)]
+              baseline += [pool.submit(mcp, "baseline", variant, "call") for variant in ("anonymous", "synthetic")]
+              baseline += [pool.submit(probe, "routing-baseline", f"/gateway-route-check-{run}")]
+              baseline_results = [job.result() for job in baseline]
+              if any(not item for item in baseline_results):
+                  raise SystemExit("Baseline did not reach the production domain")
+              print("BASELINE_COMPLETE", flush=True)
+
+              deadline = time.monotonic() + 105
+              first = True
+              worker_api = False
+              denials = []
+              sample = 0
+              while time.monotonic() < deadline:
+                  sample += 1
+                  checks = [pool.submit(api, sample, pages) for pages in (True, False)]
+                  if first or sample % 4 == 0:
+                      checks.append(pool.submit(probe, f"routing-{sample}", f"/gateway-route-check-{run}-{sample}"))
+                      checks.extend(pool.submit(mcp, str(sample), variant, method)
+                                    for variant in ("anonymous", "synthetic") for method in ("list", "call"))
+                  first = False
+                  evidence = [job.result() for job in checks]
+                  if any(x.get("check", "").startswith("mcp-") and x.get("rpc_result") and x.get("http") == 200 for x in evidence):
+                      raise SystemExit("Anonymous MCP returned an RPC result")
+                  if any(x.get("check", "").endswith("-pages") and x.get("http") == 400
+                         and x.get("error") == "invalid_arguments" and x.get("pages_cors") for x in evidence):
+                      worker_api = True
+                      denials = [pool.submit(mcp, "api-reachable", variant, method)
+                                 for variant in ("anonymous", "synthetic") for method in ("list", "call")]
+                      break
+                  time.sleep(4)
+
+              if not worker_api:
+                  raise SystemExit("Public API did not return the configured Worker validation response")
+              observed = [job.result() for job in denials]
+              if not all(blocked(result) for result in observed):
+                  raise SystemExit("MCP access denial was not confirmed")
+              if not all(gate_evidence(result) for result in observed):
+                  raise SystemExit("MCP requests were denied, but gateway provenance was not confirmed")
+              print("PUBLIC_API_AND_MCP_GATEWAY_CONFIRMED", flush=True)
           PY

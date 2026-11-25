@@ -246,6 +246,102 @@ test("private same-origin access requires identity and has a separate D1 quota",
   assert.equal(builds,1);
 });
 
+test("anonymous stock and fund views share MCP snapshots and bound cold work and licensed output",async()=>{
+  const {db,connection}=database();
+  const origin="https://example.github.io";
+  const env={DB:connection(),SNAPSHOT_PUBLIC_ENABLED:"1",SNAPSHOT_PUBLIC_ORIGIN:origin,
+    SNAPSHOT_PUBLIC_DISPLAY_GRANTS:"stock:test,fund:fund-feed,sector-model:index-feed,sector-chart:index-feed"};
+  const fundRows=[{date:sessions.at(-1),unit_nav:1.2}];
+  const fundRisk={windows:{"1y":{metrics:{drawdown:{value:-0.15}}}}};
+  const association={index_coverage:{price_sources:["index-feed"]},sectors:[]};
+  const chart={source:{name:"index-feed"},volume_unit:"手",rows:[{close:100,volume:123}]};
+  const fund={status:"complete",data_as_of:fundRows[0].date,source:{name:"fund-feed"},quality:{},
+    raw_data:{history:fundRows,fund:{code:"110022"}},models:{risk:fundRisk,sectors:{report:association,charts:{"399997":chart}}},summary:{}};
+  const events=[];
+  let releaseStock,stockStarted;
+  const started=new Promise((resolve)=>{stockStarted=resolve;});
+  const pending=new Promise((resolve)=>{releaseStock=resolve;});
+  const app=createSnapshotWorker({calendar,modelVersion:"model-a",clock:()=>new Date(now),observe:(event)=>events.push(event),
+    authorize:(request)=>request.headers.get("Authorization")==="owner-fixture",
+    compute:async(spec,{onUpstream})=>{
+      onUpstream({provider:"fixture"});
+      if (spec.asset_type==="fund") return fund;
+      stockStarted();
+      await pending;
+      return data;
+    }});
+  const web=(args,bindings=env,options={})=>app.fetch(new Request(
+    "https://worker.example/api/analysis?"+new URLSearchParams(args),options),bindings);
+  const fundQuery={asset_type:"fund",symbol:"110022"};
+  const rpc=async(name,args,authenticated=true)=>{
+    const response=await app.fetch(new Request("https://worker.example/mcp",{method:"POST",
+      headers:authenticated?{Authorization:"owner-fixture"}:{},
+      body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",params:{name,arguments:args}})}),env);
+    return (await response.json()).result.structuredContent;
+  };
+  assert.equal((await web(query,{...env,SNAPSHOT_PUBLIC_ENABLED:"0"})).status,403);
+  assert.equal((await web(query,{...env,DB:null,SNAPSHOT_PUBLIC_DISPLAY_GRANTS:""})).status,403);
+  const rejected=await web(query,env,{headers:{Origin:"https://other.example"}});
+  assert.equal(rejected.status,403);
+  assert.equal(rejected.headers.has("Access-Control-Allow-Origin"),false);
+  for (const extra of [{refresh:"true"},{after_snapshot_id:"x"},{symbol:"300078,600519"},{end:sessions.at(-2)},
+    {snapshot_id:crypto.randomUUID(),category:"history"}]) assert.equal((await web({...query,...extra})).status,400);
+  assert.equal((await web([["asset_type","stock"],["symbol","300078"],["symbol","600519"]])).status,400);
+  assert.equal((await web({...query,symbol:"0".repeat(520)})).status,414);
+  assert.equal((await web(query,env,{method:"POST"})).status,405);
+  assert.equal((await rpc("get_stock_analysis",{symbol:query.symbol},false)).status,"unauthorized");
+  assert.equal(events.length,0);
+
+  const cold=web(query);
+  await started;
+  assert.equal((await web(query)).status,202);
+  assert.equal((await web(fundQuery)).status,429);
+  releaseStock();
+  const stock=await (await cold).json();
+  const fundResponse=await web(fundQuery,env,{headers:{Origin:origin}});
+  assert.equal(fundResponse.headers.get("Access-Control-Allow-Origin"),origin);
+  assert.equal(fundResponse.headers.has("Access-Control-Allow-Credentials"),false);
+  const fundSnap=await fundResponse.json();
+  for (const [args,snapshot,expected] of [[query,stock,indicators],[fundQuery,fundSnap,fundRows]]) {
+    assert.equal(snapshot.cache,"miss");
+    assert.equal(snapshot.summary,undefined);
+    const pinned={...args,snapshot_id:snapshot.snapshot_id,category:"page"};
+    const read=await (await web(pinned)).json();
+    assert.equal(read.snapshot_id,snapshot.snapshot_id);
+    assert.deepEqual(args.asset_type==="stock"?read.data.rows:read.data.fund.rows,expected);
+    const mcp=await rpc("get_analysis_details",{...pinned,category:"history",limit:1});
+    assert.equal(mcp.snapshot_id,snapshot.snapshot_id);
+    assert.equal(mcp.model_version,read.model_version);
+    assert.deepEqual(mcp.data.rows,args.asset_type==="stock"?rows.slice(-1):fundRows);
+    assert.equal((await (await web(args)).json()).snapshot_id,snapshot.snapshot_id);
+    assert.match(read.model_version,/model-a/);
+  }
+  const pinnedFund={...fundQuery,snapshot_id:fundSnap.snapshot_id,category:"page"};
+  const noSector={...env,SNAPSHOT_PUBLIC_DISPLAY_GRANTS:"fund:fund-feed"};
+  const limitedView=await (await web(pinnedFund,noSector)).json();
+  assert.equal(limitedView.data.association,null);
+  assert.match(limitedView.data.association_message,/公开展示许可/);
+  const index={...pinnedFund,category:"index",index_code:"399997"};
+  assert.equal((await web(index)).status,403);
+  const indexAllowed={...env,SNAPSHOT_PUBLIC_DISPLAY_GRANTS:env.SNAPSHOT_PUBLIC_DISPLAY_GRANTS+",sector-volume:index-feed"};
+  assert.deepEqual((await (await web(index,indexAllowed)).json()).data,chart);
+  assert.equal((await web(pinnedFund,{...env,SNAPSHOT_PUBLIC_DISPLAY_GRANTS:"fund:other-feed"})).status,403);
+  db.exec("UPDATE analysis_snapshots SET expires_at=0 WHERE asset_type='fund'");
+  assert.equal((await web(pinnedFund)).status,410);
+  db.exec("UPDATE analysis_snapshot_limits SET calls=24 WHERE slot='public_build_day'");
+  assert.equal((await web(fundQuery)).status,429);
+  assert.equal((await (await web(query)).json()).cache,"hit");
+  db.exec("UPDATE analysis_snapshot_limits SET calls=2000 WHERE slot='public_page_day'");
+  assert.equal((await web(query)).status,429);
+  db.exec("DELETE FROM analysis_snapshot_limits WHERE slot='public_page_day'");
+  db.exec("UPDATE analysis_snapshot_limits SET calls=60,minute=unixepoch()/60 WHERE slot='public_page_minute'");
+  assert.equal((await web(query)).status,429);
+  assert.equal((await rpc("get_stock_analysis",{symbol:query.symbol})).snapshot_id,stock.snapshot_id);
+  assert.equal(events.filter(({event})=>event==="snapshot_upstream").length,2);
+  assert.ok(events.filter(({event})=>["snapshot_hit","snapshot_read"].includes(event))
+    .every(({upstream_requests})=>upstream_requests===0));
+});
+
 test("different closing dates share the fixed preheat and agree on overlapping indicators",async()=>{
   const {connection}=database();
   const computation=[];

@@ -10,6 +10,7 @@ import { join, resolve, extname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright-core";
 import { calculateIndicators, FIELDS } from "../web/engine.mjs";
+import { currentMarketWindow } from "../worker/snapshots/compute.mjs";
 import { snapshotStore } from "../worker/snapshots/store.mjs";
 
 const require=createRequire(pathToFileURL(join(process.env.SNAPSHOT_TEST_TOOLS??"/tmp/analysis-snapshot-tools","runner.cjs")));
@@ -78,6 +79,8 @@ await writeFile(scriptPath,bundle.outputFiles[0].text);
 const opts={modules:true,modulesRoot:storage,scriptPath,cf:false,host:"127.0.0.1",port:8787,compatibilityDate:"2026-07-30",
   d1Databases:["DB"],d1Persist:join(storage,"d1"),
   bindings:{TEST_SECRET:secret,SNAPSHOT_PUBLIC_ORIGIN:origin,
+    ...(sample?{SNAPSHOT_PUBLIC_ENABLED:"1",
+      SNAPSHOT_PUBLIC_DISPLAY_GRANTS:"stock:eastmoney,fund:天天基金 / 东方财富,sector-model:东方财富,sector-chart:东方财富,sector-volume:东方财富"}:{}),
     SNAPSHOT_PUBLIC_SYMBOLS:symbols.map(([type,,code])=>type+":"+code).join(",")}};
 const make=()=>new Miniflare(opts);
 let mf=make();
@@ -119,7 +122,7 @@ async function initial(type,symbol) {
   const began=performance.now();
   const elapsed=(value)=>Math.round(performance.now()-value);
   const tool=type==="stock"?"get_stock_analysis":"get_fund_analysis";
-  let result=await rpc(tool,{symbol});
+  let result=sample?await latestSnapshot(type,symbol):await rpc(tool,{symbol});
   const first_ms=elapsed(began);
   const first_status=result.status;
   for (let tries=0;result.status==="building"&&tries<9;tries++) {
@@ -144,6 +147,7 @@ async function latestSnapshot(type,symbol) {
 }
 const report=()=>({sample:sample?"deterministic fixture":"live vendor",stage:"local workerd + persisted D1",
   model_version:version,results,
+  browser_access:sample?"anonymous":"isolated authorized fixture",
   browser_fallback:fallbackChecks,
   independent_audit:independentAudit,
   upstream:coldEvents.filter((event)=>event.event==="snapshot_upstream"),
@@ -225,7 +229,7 @@ async function verifyFallback(type,mode) {
       await page.locator("#symbol").fill(code);
       await page.locator("#kind").selectOption("stock");
       await page.locator("#start").fill(mode==="before-preheat"?"2024-11-01":"2025-01-01");
-      await page.locator("#end").fill("2026-11-23");
+      await page.locator("#end").fill(mode==="version"?currentMarketWindow(JSON.parse(calendar),new Date()).end:"2026-11-23");
       await page.locator("#load").click();
     } else await page.goto(origin+"/funds.html?fund="+code);
     const selector=isStock?"#data-timestamp":"#fund-source";
@@ -265,6 +269,12 @@ try {
       row.hit_ms=Math.round(performance.now()-lookupStarted);
       assert.equal(cached.cache,"hit");
       assert.equal(cached.snapshot_id,snapshot_id);
+      if (sample) {
+        const mcp=await rpc(type==="stock"?"get_stock_analysis":"get_fund_analysis",{symbol});
+        assert.equal(mcp.snapshot_id,snapshot_id);
+        assert.equal(mcp.model_version,version);
+        assert.equal(mcp.cache,"hit");
+      }
       const snapshot=await pageSnapshot(type,symbol,snapshot_id);
       assert.equal(snapshot.model_version,version);
       assert.equal(snapshot.snapshot_id,snapshot_id);

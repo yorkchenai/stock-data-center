@@ -126,7 +126,7 @@ async function loadOnlineFund(code, snapshotId) {
           Date.parse(shanghaiToday())-Date.parse(snapshot.data_as_of)>7*86_400_000) {
         throw new Error("共享快照净值日期已超过 7 天。");
       }
-      if (!snapshotId && ["stock","mixed"].includes(snapshot.data.fund.category)) {
+      if (!snapshotId && !snapshot.data.association_message && ["stock","mixed"].includes(snapshot.data.fund.category)) {
         const coverage=snapshot.data.association?.index_coverage;
         const covered=coverage?.available??0;
         if (covered<verifiedWebCoverage) {

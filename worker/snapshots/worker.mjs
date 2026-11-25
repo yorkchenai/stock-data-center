@@ -3,6 +3,7 @@ import { createSnapshotCompute } from "./compute.mjs";
 import { boundedJson } from "./details.mjs";
 import { analysisService } from "./service.mjs";
 import { initialResult, prepareInitial } from "./compatibility.mjs";
+import { admitPublicBuild, publicError, publicOrigin, publicPresentation, publicQuery } from "./public.mjs";
 
 const PROTOCOL = "2026-07-28";
 const symbolSchema={type:"string",description:"六位代码。股票或指数可带 sh/sz 前缀；基金保留前导零。"};
@@ -38,33 +39,35 @@ export const tools=[
 ].map((tool)=>({...tool,annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:true}}));
 
 const LIMIT_SQL=`
-INSERT INTO analysis_snapshot_limits(slot,minute,calls) VALUES(?,unixepoch()/60,1)
+INSERT INTO analysis_snapshot_limits(slot,minute,calls) VALUES(?,unixepoch()/CAST(? AS INTEGER),1)
 ON CONFLICT(slot) DO UPDATE SET minute=excluded.minute,
 calls=CASE WHEN excluded.minute>analysis_snapshot_limits.minute THEN 1 ELSE analysis_snapshot_limits.calls+1 END
 WHERE excluded.minute>analysis_snapshot_limits.minute OR analysis_snapshot_limits.calls<?
 RETURNING calls`;
 
-export async function limitSnapshotCalls(db, slot, count) {
+export async function limitSnapshotCalls(db, slot, count, intervalSeconds=60) {
   try {
-    return await db.prepare(LIMIT_SQL).bind(slot,count).first() ? null : "rate_limited";
+    return await db.prepare(LIMIT_SQL).bind(slot,intervalSeconds,count).first() ? null : "rate_limited";
   } catch {
     return "cache_unavailable";
   }
 }
 
-function publicAccess(request, env, args) {
-  const origin=request.headers.get("Origin");
-  if (!env.SNAPSHOT_PUBLIC_ORIGIN || origin!==env.SNAPSHOT_PUBLIC_ORIGIN) return null;
-  if (new URL(origin).protocol!=="https:" && !["localhost","127.0.0.1"].includes(new URL(origin).hostname)) return null;
+function approvedSymbol(env, args) {
   let symbol=args.symbol;
   if (args.asset_type==="stock") {
     try {
       const resolved=resolveSymbol(symbol,args.kind??"auto");
       symbol=resolved.market+resolved.code;
-    } catch { return null; }
+    } catch { return false; }
   }
-  const approved=(env.SNAPSHOT_PUBLIC_SYMBOLS??"").split(",").includes(`${args.asset_type}:${symbol}`);
-  return approved ? {"Access-Control-Allow-Origin":origin,Vary:"Origin"} : null;
+  return (env.SNAPSHOT_PUBLIC_SYMBOLS??"").split(",").includes(`${args.asset_type}:${symbol}`);
+}
+
+function isolatedPageAccess(request, env, args) {
+  const origin=request.headers.get("Origin");
+  return publicOrigin(origin) && origin===env.SNAPSHOT_PUBLIC_ORIGIN && approvedSymbol(env,args)
+    ? {"Access-Control-Allow-Origin":origin,Vary:"Origin"} : null;
 }
 
 function json(value, status=200, extra={}) {
@@ -100,11 +103,44 @@ async function rpcInput(request) {
 
 const statusCode = (status) => ({
   building:202,invalid_arguments:400,snapshot_not_found:404,expired:410,
+  access_denied:403,display_not_authorized:403,version_mismatch:409,
   rate_limited:429,cache_unavailable:503,data_unavailable:502,
 })[status]??200;
 
+async function anonymousAnalysis(request, url, env, {service, calendar, clock, modelVersion, requestId, waitUntil}) {
+  const origin=request.headers.get("Origin"), allowed=env.SNAPSHOT_PUBLIC_ORIGIN;
+  if (!publicOrigin(allowed) || (origin!==null && origin!==allowed)) {
+    return json({status:"access_denied"},403,{Vary:"Origin"});
+  }
+  const cors={Vary:"Origin",...(origin?{"Access-Control-Allow-Origin":allowed}:{})};
+  const send=(output)=>json(output,statusCode(output.status),{
+    ...cors,...(output.retry_after_seconds?{"Retry-After":String(output.retry_after_seconds)}:{}),
+  });
+  if (request.method!=="GET") return json({status:"method_not_allowed"},405,{...cors,Allow:"GET"});
+  if (url.search.length>512) return json({status:"invalid_arguments"},414,cors);
+  const args=Object.fromEntries(url.searchParams);
+  try {publicQuery(url,args,calendar,clock());} catch(error) {
+    return send(publicError("invalid_arguments",error.message));
+  }
+  const grants=new Set((env.SNAPSHOT_PUBLIC_DISPLAY_GRANTS??"").split(",").map((entry)=>entry.trim()));
+  if (![...grants].some((entry)=>entry.startsWith(`${args.asset_type}:`) && entry.split(":")[1])) {
+    return send(publicError("display_not_authorized","该类数据的公开展示许可尚未确认。"));
+  }
+  if (env.SNAPSHOT_PUBLIC_SYMBOLS && !approvedSymbol(env,args)) {
+    return send(publicError("access_denied","该标的不在公开查询范围。"));
+  }
+  const budget=(slot,count,seconds)=>limitSnapshotCalls(env.DB,slot,count,seconds);
+  const blocked=await budget("public_page_minute",60) || await budget("public_page_day",2000,86400);
+  if (blocked) return send(publicError(blocked,"公开查询繁忙，请稍后重试。",{retry_after_seconds:60}));
+  const {present,select}=publicPresentation(grants,modelVersion);
+  const output=args.snapshot_id ? await service.details(env.DB,args,{browser:true,select,requestId}) :
+    await service.initial(env.DB,args,{waitUntil,requestId,present,
+      admitBuild:(store,query,now)=>admitPublicBuild(store,now,()=>budget("public_build_day",24,86400))});
+  return send(output);
+}
+
 export function createSnapshotWorker({calendar,config,modelVersion,authorize=()=>false,authorizePage=()=>false,
-  pageAccess=async(request,env,args)=>await authorizePage(request,env)?publicAccess(request,env,args):null,
+  pageAccess=async(request,env,args)=>await authorizePage(request,env)?isolatedPageAccess(request,env,args):null,
   initialRateLimit=(db)=>limitSnapshotCalls(db,"owner_initial",6),compute,clock=()=>new Date(),observe}) {
   const log=observe??((event)=>console.log(JSON.stringify(event)));
   const service=analysisService({calendar,modelVersion,clock,observe:log,
@@ -114,13 +150,16 @@ export function createSnapshotWorker({calendar,config,modelVersion,authorize=()=
       const url=new URL(request.url);
       const waitUntil=ctx?.waitUntil?.bind(ctx);
       const requestId=crypto.randomUUID();
+      if (url.pathname==="/api/analysis" && env.SNAPSHOT_PUBLIC_ENABLED==="1") {
+        return anonymousAnalysis(request,url,env,{service,calendar,clock,modelVersion,requestId,waitUntil});
+      }
       if (request.method==="GET" && url.pathname==="/api/analysis") {
         const args=Object.fromEntries(url.searchParams);
         if (args.limit) args.limit=Number(args.limit);
         let pageHeaders;
         try {pageHeaders=await pageAccess(request,env,args);} catch {pageHeaders=null;}
         if (!pageHeaders) return json({status:"access_denied"},403);
-        // Public readers have no force-refresh option and share a bounded quota.
+        // The private page view has no force-refresh option.
         delete args.refresh;
         delete args.after_snapshot_id;
         const blocked=await limitSnapshotCalls(env.DB,"page",60);

@@ -11,7 +11,7 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
   if (!modelVersion) throw new Error("必须配置分析模型版本。");
   const ms=()=>clock().getTime();
 
-  async function build(store,key,token,query,refresh,requestId,present) {
+  async function build(store,key,token,query,refresh,requestId,present,releaseBuild) {
     const started=ms();
     let upstreamRequests=0;
     const onUpstream=(trace)=>{
@@ -41,11 +41,12 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
       return response("cache_unavailable","快照存储或写入失败。");
     } finally {
       await store.release(key,token).catch(()=>{});
+      if (releaseBuild) await releaseBuild().catch(()=>{});
     }
   }
 
   return {
-    async initial(binding,args,{waitUntil,waitMs=7_000,present=presentSummary,requestId=crypto.randomUUID()}={}) {
+    async initial(binding,args,{waitUntil,waitMs=7_000,present=presentSummary,admitBuild,requestId=crypto.randomUUID()}={}) {
       const started=ms();
       const requestedAfter=args?.after_snapshot_id;
       if (requestedAfter!==undefined && (typeof requestedAfter!=="string"||!SNAPSHOT_ID.test(requestedAfter)||args.refresh)) {
@@ -96,7 +97,16 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
           await store.release(key,token);
           return cacheHit(after);
         }
-        const work=build(store,key,token,query,args.refresh===true,requestId,present);
+        let releaseBuild;
+        if (admitBuild) {
+          try {releaseBuild=await admitBuild(store,query,ms());}
+          catch (error) {await store.release(key,token); throw error;}
+          if (typeof releaseBuild!=="function") {
+            await store.release(key,token);
+            return releaseBuild;
+          }
+        }
+        const work=build(store,key,token,query,args.refresh===true,requestId,present,releaseBuild);
         if (!waitUntil) return await work;
         waitUntil(work);
         let timer;
@@ -140,7 +150,7 @@ export function analysisService({compute,calendar,modelVersion,clock=()=>new Dat
         return response("cache_unavailable","快照缓存不可用。");
       }
       try {
-        const result=selectDetails(snapshot,args,options);
+        const result=(options.select??selectDetails)(snapshot,args,options);
         observe({event:"snapshot_read",request_id:options.requestId,snapshot_id:snapshot.snapshot_id,symbol,
           category:args.category,upstream_requests:0,d1_read_and_decode_ms:readMs,duration_ms:ms()-started});
         return result;

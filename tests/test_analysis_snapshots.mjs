@@ -251,12 +251,20 @@ test("anonymous stock and fund views share MCP snapshots and bound cold work wit
   const origin="https://example.github.io";
   const env={DB:connection(),SNAPSHOT_PUBLIC_ENABLED:"1",SNAPSHOT_PUBLIC_ORIGIN:origin};
   const fundRows=[{date:sessions.at(-1),unit_nav:1.2}];
-  const fundRisk={windows:{"1y":{metrics:{drawdown:{value:-0.15}}}}};
+  const riskFree={rows:[{date:sessions.at(-1),annual_rate:0.01}]};
+  const benchmark={official:true,name:"Test benchmark",formula:"100% test index",source:"test issuer",
+    source_url:"https://example.com/disclosure"};
+  const benchmarkPoints=[{time:sessions.at(-1),value:0.15}];
+  const fundPoints=[{time:sessions.at(-1),value:-0.15}];
+  const fundRisk={risk_free:riskFree,windows:{"1y":{metrics:{drawdown:{value:-0.15}},
+    points:{fund:fundPoints,drawdown:fundPoints,benchmark:benchmarkPoints},
+    comparison:{status:"complete",value:0.15,points:benchmarkPoints}}}};
   const association={index_coverage:{price_sources:["index-feed"]},sectors:[]};
   const chart={source:{name:"index-feed"},volume_unit:"手",rows:[{close:100,volume:123}]};
   const fund={status:"complete",data_as_of:fundRows[0].date,source:{name:"fund-feed"},quality:{},
-    raw_data:{history:fundRows,fund:{code:"110022",risk_free:{rows:[{date:sessions.at(-1),rate:0.01}]},
-      benchmark:{rows:[{date:sessions.at(-1),close:100}]}}},models:{risk:fundRisk,sectors:{report:association,charts:{"399997":chart}}},summary:{}};
+    raw_data:{history:fundRows,fund:{code:"110022",risk_free:riskFree,
+      benchmark:{...benchmark,rows:[{date:sessions.at(-1),value:100}],series:[{rows:[{date:sessions.at(-1),value:100}]}]}}},
+    models:{risk:fundRisk,sectors:{report:association,charts:{"399997":chart}}},summary:{}};
   const events=[];
   let releaseStock,stockStarted;
   const started=new Promise((resolve)=>{stockStarted=resolve;});
@@ -280,7 +288,10 @@ test("anonymous stock and fund views share MCP snapshots and bound cold work wit
     return (await response.json()).result.structuredContent;
   };
   assert.equal((await web(query,{...env,SNAPSHOT_PUBLIC_ENABLED:"0"})).status,403);
+  const {SNAPSHOT_PUBLIC_ENABLED:enabled,...unconfigured}=env;
+  assert.equal((await web(query,unconfigured)).status,403);
   assert.equal((await web(query,{...env,DB:null})).status,503);
+  assert.equal((await web(query,{...env,SNAPSHOT_PUBLIC_SYMBOLS:"fund:110022"})).status,403);
   const rejected=await web(query,env,{headers:{Origin:"https://other.example"}});
   assert.equal(rejected.status,403);
   assert.equal(rejected.headers.has("Access-Control-Allow-Origin"),false);
@@ -320,11 +331,23 @@ test("anonymous stock and fund views share MCP snapshots and bound cold work wit
   const publicView=await (await web(pinnedFund)).json();
   assert.deepEqual(publicView.data.association,association);
   assert.equal(publicView.data.fund.risk_free,undefined);
-  assert.equal(publicView.data.fund.benchmark,undefined);
+  assert.deepEqual(publicView.data.fund.benchmark,benchmark);
+  assert.equal(publicView.data.risk.risk_free,undefined);
+  const window=publicView.data.risk.windows["1y"];
+  assert.deepEqual(window.points,{fund:fundPoints,drawdown:fundPoints});
+  assert.deepEqual(window.comparison,{status:"complete",value:0.15});
+  const privateRisk=await rpc("get_analysis_details",{...pinnedFund,category:"risk",period:"1y"});
+  assert.deepEqual(privateRisk.data.metrics,window.metrics);
+  assert.deepEqual(privateRisk.data.comparison.points,benchmarkPoints);
   const index={...pinnedFund,category:"index",index_code:"399997"};
   assert.deepEqual((await (await web(index)).json()).data,chart);
   const legacy=await (await web(pinnedFund,{...env,SNAPSHOT_PUBLIC_DISPLAY_GRANTS:"fund:other-feed"})).json();
   assert.equal(legacy.snapshot_id,fundSnap.snapshot_id);
+  const upgraded=createSnapshotWorker({calendar,modelVersion:"model-b",clock:()=>new Date(now),observe:()=>{}});
+  const oldView=await upgraded.fetch(new Request("https://worker.example/api/analysis?"+new URLSearchParams(pinnedFund)),env);
+  assert.equal(oldView.status,409);
+  assert.equal((await oldView.json()).status,"version_mismatch");
+  assert.equal((await web({...pinnedFund,symbol:"003095"})).status,404);
   db.exec("UPDATE analysis_snapshots SET expires_at=0 WHERE asset_type='fund'");
   assert.equal((await web(pinnedFund)).status,410);
   db.exec("UPDATE analysis_snapshot_limits SET calls=24 WHERE slot='public_build_day'");
@@ -336,6 +359,10 @@ test("anonymous stock and fund views share MCP snapshots and bound cold work wit
   db.exec("UPDATE analysis_snapshot_limits SET calls=60,minute=unixepoch()/60 WHERE slot='public_page_minute'");
   assert.equal((await web(query)).status,429);
   assert.equal((await rpc("get_stock_analysis",{symbol:query.symbol})).snapshot_id,stock.snapshot_id);
+  db.exec("UPDATE analysis_snapshot_limits SET calls=30,minute=unixepoch()/60 WHERE slot='owner_details'");
+  const limited=await rpc("get_analysis_details",{...query,snapshot_id:stock.snapshot_id,category:"history"});
+  assert.equal(limited.status,"rate_limited");
+  assert.equal(limited.snapshot_id,undefined);
   assert.equal(events.filter(({event})=>event==="snapshot_upstream").length,2);
   assert.ok(events.filter(({event})=>["snapshot_hit","snapshot_read"].includes(event))
     .every(({upstream_requests})=>upstream_requests===0));

@@ -160,7 +160,7 @@ export function createSectorPanel() {
         onlineContext=result;
       }
       if (mode.snapshot && !mode.snapshot.data.association) {
-        text("sector-status",mode.snapshot.data.association_message??STATUSES.indices_unavailable);
+        text("sector-status",STATUSES.indices_unavailable);
         return;
       }
       const source=bundle?bundle.analysis:normalizeAssociations(mode.snapshot?.data.association ??

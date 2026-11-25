@@ -49,11 +49,21 @@ export function publicPresentation(version) {
     const blocked=check(snapshot);
     if (blocked) return blocked;
     const result=selectDetails(snapshot,args,{browser:true});
-    // Supplemental risk-free and benchmark histories remain outside anonymous page responses.
-    // Removing source-based display grants does not expand the public response schema.
     if (snapshot.asset_type==="fund" && args.category==="page" && result.data?.fund) {
       const {risk_free,benchmark,...visibleFund}=result.data.fund;
       result.data.fund=visibleFund;
+      if (benchmark) {
+        const {official,name,formula,source,source_url}=benchmark;
+        result.data.fund.benchmark={official,name,formula,source,source_url};
+      }
+      // The risk model also stores the rate input and two copies of the benchmark curve.
+      // Keep the calculated metrics and fund/drawdown curves in the anonymous view.
+      const {risk_free:rateInput,windows,...risk}=result.data.risk;
+      result.data.risk={...risk,windows:Object.fromEntries(Object.entries(windows).map(([period,window])=>{
+        const {benchmark:benchmarkPoints,...points}=window.points??{};
+        const {points:comparisonPoints,...comparison}=window.comparison??{};
+        return [period,{...window,points,comparison:window.comparison?comparison:null}];
+      }))};
     }
     return result;
   }

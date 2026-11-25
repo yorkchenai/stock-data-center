@@ -115,7 +115,10 @@ async function rpc(name,args) {
     signal:AbortSignal.timeout(13_000)});
   const packet=await response.json();
   assert.ok(packet.result?.structuredContent,JSON.stringify(packet.error??{status:response.status}));
-  return packet.result.structuredContent;
+  const value=packet.result.structuredContent;
+  assert.equal(packet.result.isError,false,
+    `${name} ${args.symbol} ${args.category??"initial"}: ${value.status} ${value.message??""}`.trim());
+  return value;
 }
 async function initial(type,symbol) {
   const began=performance.now();
@@ -308,6 +311,8 @@ try {
       ];
       row.detail_ms=[];
       for (const [i,query] of checks.entries()) {
+        // Stock high/low was already verified above. Reserve details quota for the three fund index charts.
+        if (isStock && query.aggregate==="max") continue;
         const started=performance.now();
         const value=await rpc("get_analysis_details",{...args,...query});
         row.detail_ms.push(Math.round(performance.now()-started));

@@ -80,7 +80,7 @@ jobs:
           deadline = time.monotonic() + 95
           while time.monotonic() < deadline:
               code, _, body = request("/api/analysis", {"Origin": origin})
-              if code == 400 and json.loads(body).get("status") == "invalid_request":
+              if code == 400 and json.loads(body).get("status") == "invalid_arguments":
                   break
               time.sleep(3)
           else:

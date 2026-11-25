@@ -41,44 +41,24 @@ export function publicQuery(url, params, calendar, now) {
   }
 }
 
-export function publicPresentation(grants, version) {
-  const allows = (scope, source) => typeof source === "string" && grants.has(`${scope}:${source}`);
-  const denied = () => publicError("display_not_authorized", "该数据来源的公开展示许可尚未确认。");
-
-  function check(snapshot) {
-    if (snapshot.model_version !== version) {
-      return publicError("version_mismatch", "该快照的模型版本已更新，请重新查询。");
-    }
-    if (!allows(snapshot.asset_type, snapshot.source?.name)) return denied();
-    if (snapshot.asset_type === "fund") {
-      const fund = snapshot.raw_data.fund;
-      if (fund.risk_free || fund.benchmark?.rows?.length || fund.benchmark?.series?.length) return denied();
-    }
-    return null;
-  }
+export function publicPresentation(version) {
+  const check = (snapshot) => snapshot.model_version !== version
+    ? publicError("version_mismatch", "该快照的模型版本已更新，请重新查询。") : null;
 
   function select(snapshot, args) {
-    const blocked = check(snapshot);
+    const blocked=check(snapshot);
     if (blocked) return blocked;
-    const report = snapshot.models.sectors?.report;
-    const sources = report?.index_coverage?.price_sources;
-    const modelAllowed = Array.isArray(sources) && sources.length > 0 &&
-      sources.every((source) => allows("sector-model", source));
-    if (args.category === "index") {
-      const chart = snapshot.models.sectors?.charts?.[args.index_code];
-      if (chart && (!modelAllowed || !allows("sector-chart", chart.source?.name) ||
-          (chart.volume_unit && !allows("sector-volume", chart.source?.name)))) return denied();
-      return selectDetails(snapshot, args, {browser:true});
-    }
-    const result = selectDetails(snapshot, args, {browser:true});
-    if (snapshot.asset_type === "fund" && report?.index_coverage && !modelAllowed) {
-      result.data.association = null;
-      result.data.association_message = "关联指数数据的公开展示许可尚未确认。";
+    const result=selectDetails(snapshot,args,{browser:true});
+    // Supplemental risk-free and benchmark histories remain outside anonymous page responses.
+    // Removing source-based display grants does not expand the public response schema.
+    if (snapshot.asset_type==="fund" && args.category==="page" && result.data?.fund) {
+      const {risk_free,benchmark,...visibleFund}=result.data.fund;
+      result.data.fund=visibleFund;
     }
     return result;
   }
 
-  return {select, present:(snapshot, cache) => check(snapshot) ?? {...snapshotMetadata(snapshot), cache}};
+  return {select,present:(snapshot,cache)=>check(snapshot)??{...snapshotMetadata(snapshot),cache}};
 }
 
 export async function admitPublicBuild(store, now, takeBudget) {

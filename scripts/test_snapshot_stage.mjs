@@ -79,8 +79,7 @@ await writeFile(scriptPath,bundle.outputFiles[0].text);
 const opts={modules:true,modulesRoot:storage,scriptPath,cf:false,host:"127.0.0.1",port:8787,compatibilityDate:"2026-07-30",
   d1Databases:["DB"],d1Persist:join(storage,"d1"),
   bindings:{TEST_SECRET:secret,SNAPSHOT_PUBLIC_ORIGIN:origin,
-    ...(sample?{SNAPSHOT_PUBLIC_ENABLED:"1",
-      SNAPSHOT_PUBLIC_DISPLAY_GRANTS:"stock:eastmoney,fund:天天基金 / 东方财富,sector-model:东方财富,sector-chart:东方财富,sector-volume:东方财富"}:{}),
+    ...(sample?{SNAPSHOT_PUBLIC_ENABLED:"1"}:{}),
     SNAPSHOT_PUBLIC_SYMBOLS:symbols.map(([type,,code])=>type+":"+code).join(",")}};
 const make=()=>new Miniflare(opts);
 let mf=make();

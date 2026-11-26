@@ -37,7 +37,9 @@ async function fund(code) {
   await page.locator("#returns-chart canvas").first().waitFor({timeout:15_000});
   await page.locator("#drawdown-chart canvas").first().waitFor({timeout:15_000});
   assert.match(await page.locator("#fund-nav").innerText(),/^\d+\.\d+$/);
-  assert.equal(await page.locator("#core-metrics article").count(),6);
+  assert.equal(await page.locator("#core-metrics article").count(),5);
+  assert.match(await page.locator("#risk-reference-note").innerText(),/2\.5%.*252/);
+  assert.equal(await page.getByText("超额收益",{exact:true}).count(),0);
   assert.equal(await page.getByRole("heading",{name:"强关联板块指数分析",exact:true}).count(),0);
 }
 
@@ -106,6 +108,16 @@ try {
   await quotes(code);
   assert.equal(historyRequests.length,historyCount);
   assert.deepEqual(await fundAnalysis(),before);
+
+  await page.locator("#back-to-funds").click();
+  const table = page.locator("#fund-table");
+  const headings = await table.locator("th").allTextContents();
+  const navColumn = headings.indexOf("最新单位净值");
+  assert.deepEqual(headings.slice(navColumn-3,navColumn),["估值1","估值2","估值3"]);
+  const row = table.locator('tr[data-fund-code="019830"]');
+  await row.locator("td[data-estimate]").filter({hasText:/^[+-]?\d+\.\d{2}%$/}).first().waitFor({timeout:20_000});
+  const listEstimates = await row.locator("td[data-estimate]").allTextContents();
+  assert.equal(historyRequests.length,historyCount);
   assert.deepEqual(pageErrors,[]);
 
   const anonymous = await fetch(new URL("/mcp",worker),{method:"POST",headers:{
@@ -115,6 +127,7 @@ try {
 
   console.log(JSON.stringify({url:page.url(),estimates,
     benchmark:{code:"003095",disclosed_on:disclosure,effective_from:effective,historical:true},
+    list_019830_estimates:listEstimates,
     browser_direct_estimates_blocked:true,auto_refresh_ms:elapsed,manual_refresh:true,
     history_requests_during_refresh:0,anonymous_mcp:anonymous.status},null,2));
 } finally {

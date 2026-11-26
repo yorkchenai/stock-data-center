@@ -7,6 +7,7 @@ import { createSnapshotWorker } from "../worker/snapshots/worker.mjs";
 import { prepareInitial } from "../worker/snapshots/compatibility.mjs";
 import { analysisQuery, createSnapshotCompute, currentMarketWindow, snapshotExpiry } from "../worker/snapshots/compute.mjs";
 import { mountSnapshotSite } from "../worker/snapshots/site-gateway.mjs";
+import { FUND_RISK_REFERENCE } from "../web/funds/performance.mjs";
 import { createRecord, snapshotStore } from "../worker/snapshots/store.mjs";
 import { marketTransport } from "../worker/snapshots/providers.mjs";
 import { calculateIndicators } from "../web/engine.mjs";
@@ -315,11 +316,10 @@ test("anonymous Sites views have no shared quota or build lock and reuse the aut
   const riskFree={rows:[{date:sessions.at(-1),annual_rate:0.01}]};
   const benchmark={official:true,name:"Test benchmark",formula:"100% test index",source:"test issuer",
     source_url:"https://example.com/disclosure"};
-  const benchmarkPoints=[{time:sessions.at(-1),value:0.15}];
   const fundPoints=[{time:sessions.at(-1),value:-0.15}];
-  const fundRisk={risk_free:riskFree,windows:{"1y":{metrics:{drawdown:{value:-0.15}},
-    points:{fund:fundPoints,drawdown:fundPoints,benchmark:benchmarkPoints},
-    comparison:{status:"complete",value:0.15,points:benchmarkPoints}}}};
+  const fundRisk={reference:FUND_RISK_REFERENCE,observations_per_year:252,sortino_target:0.025,
+    windows:{"1y":{metrics:{drawdown:{value:-0.15},sharpe:{value:0.85},sortino:{value:1.25},volatility:{value:0.5118}},
+      points:{fund:fundPoints,drawdown:fundPoints}}}};
   const association={index_coverage:{price_sources:["index-feed"]},sectors:[]};
   const chart={source:{name:"index-feed"},volume_unit:"手",rows:[{close:100,volume:123}]};
   const fund={status:"complete",data_as_of:fundRows[0].date,source:{name:"fund-feed"},quality:{},
@@ -409,10 +409,13 @@ test("anonymous Sites views have no shared quota or build lock and reuse the aut
   assert.equal(publicView.data.risk.risk_free,undefined);
   const window=publicView.data.risk.windows["1y"];
   assert.deepEqual(window.points,{fund:fundPoints,drawdown:fundPoints});
-  assert.deepEqual(window.comparison,{status:"complete",value:0.15});
+  assert.equal(window.comparison,undefined);
+  assert.equal(window.metrics.excess,undefined);
   const privateRisk=await rpc("get_analysis_details",{...pinnedFund,category:"risk",period:"1y"});
   assert.deepEqual(privateRisk.data.metrics,window.metrics);
-  assert.deepEqual(privateRisk.data.comparison.points,benchmarkPoints);
+  assert.deepEqual(privateRisk.data.reference,publicView.data.risk.reference);
+  assert.equal(privateRisk.data.sortino_target,0.025);
+  assert.equal(privateRisk.data.comparison,undefined);
   const index={...pinnedFund,category:"index",index_code:"399997"};
   assert.deepEqual((await (await web(index)).json()).data,chart);
   const legacy=await (await web(pinnedFund,{...env,SNAPSHOT_PUBLIC_DISPLAY_GRANTS:"fund:other-feed"})).json();

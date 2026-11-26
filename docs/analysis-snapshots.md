@@ -27,7 +27,7 @@
 
 仅允许已登录所有者通过私有同源路由读取 300078 和 600519。网页配额与 MCP 分开。验收对照开高低收、成交量与成交额，另逐日比较 MA、VOL、EMA、MACD、RSI、ADX 和 DI，以及同一 20 个完整交易日窗口的高低价和日期。
 
-同一个 `snapshot_id` 绑定标的、原始输入、模型版本、计算时间与结果。股票快照调用现有 `web/providers.mjs` 和 `web/engine.mjs`。基金复用已有净值解析、`performance.mjs`、`sector-model.mjs` 和 `sector-browser.mjs`。常用区间的风险和收益点序列在写入前计算。基金累计净值与总回报保持独立，覆盖不足或缺少无风险利率时保留缺失原因。指数与基金日期各自记录。
+同一个 `snapshot_id` 绑定标的、原始输入、模型版本、计算时间与结果。股票快照调用现有 `web/providers.mjs` 和 `web/engine.mjs`。基金复用已有净值解析、`performance.mjs`、`sector-model.mjs` 和 `sector-browser.mjs`。常用区间的风险和收益点序列在写入前计算。基金累计净值与总回报保持独立，日收益覆盖不足或风险比率分母为零时保留缺失原因。指数与基金日期各自记录。
 
 ## 读取与更新
 
@@ -71,7 +71,9 @@ python -m scripts.audit_hosted_snapshot --calendar path/to/calendar.json \
   --config path/to/fund-config.json path/to/snapshot-audit.json
 ```
 
-验收页的 `request_id` 对应 Worker 的 `snapshot_request`、`snapshot_hit`、`snapshot_read` 等事件。冷构建的 `snapshot_upstream` 及 `snapshot_publish` 共享初始请求编号。日志分别记录上游请求个数、构建、写入和 D1 读取及解码时间。详情日志可确认 D1 固定 ID 读取及零回源。基金关联指数仍保留逐条实际覆盖状态，无风险利率缺失时保留夏普空值。
+验收页的 `request_id` 对应 Worker 的 `snapshot_request`、`snapshot_hit`、`snapshot_read` 等事件。冷构建的 `snapshot_upstream` 及 `snapshot_publish` 共享初始请求编号。日志分别记录上游请求个数、构建、写入和 D1 读取及解码时间。详情日志可确认 D1 固定 ID 读取及零回源。基金关联指数仍保留逐条实际覆盖状态。
+
+基金 `risk.reference` 和 MCP 风险详情的 `reference` 携带固定年化参考收益率、日参考收益率和年化交易日数。网页核对模型版本和参考参数后读取缓存。风险模型升级以新模型版本重建快照，旧 ID 不按新口径返回。Worker 与 Pages 需配对更新，D1 表结构和现有 MCP 连接可复用。
 
 ## 权限和上线边界
 

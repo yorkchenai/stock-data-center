@@ -55,13 +55,13 @@ export function publicPresentation(version) {
         const {official,name,formula,source,source_url}=benchmark;
         result.data.fund.benchmark={official,name,formula,source,source_url};
       }
-      // The risk model also stores the rate input and two copies of the benchmark curve.
-      // Keep the calculated metrics and fund/drawdown curves in the anonymous view.
+      // Limit the anonymous result to fund metrics and its own curves.
       const {risk_free:rateInput,windows,...risk}=result.data.risk;
       result.data.risk={...risk,windows:Object.fromEntries(Object.entries(windows).map(([period,window])=>{
-        const {benchmark:benchmarkPoints,...points}=window.points??{};
-        const {points:comparisonPoints,...comparison}=window.comparison??{};
-        return [period,{...window,points,comparison:window.comparison?comparison:null}];
+        const {comparison,points,...periodStats}=window;
+        const {excess,...metrics}=periodStats.metrics;
+        const {benchmark:benchmarkPoints,...fundPoints}=points??{};
+        return [period,{...periodStats,metrics,points:fundPoints}];
       }))};
     }
     return result;

@@ -5,7 +5,7 @@ import {
   assignment, fundFromAssignments, parseDirectory, readNavAssignments,
 } from "../../web/funds/nav-source.mjs";
 import { navURL } from "../../web/funds/providers.mjs";
-import { PERIODS, analyzePerformance, periodReturn, periodStart, selectWindow } from "../../web/funds/performance.mjs";
+import { FUND_RISK_REFERENCE, PERIODS, analyzePerformance, periodReturn, periodStart, selectWindow } from "../../web/funds/performance.mjs";
 import { createBrowserSectorProvider } from "../../web/funds/sector-browser.mjs";
 import { marketTransport } from "./providers.mjs";
 
@@ -59,8 +59,8 @@ function fundPerformance(fund) {
     const window=selectWindow(fund,key==="all"?null:periodStart(end,key),end);
     return [key,{start:window.start??null,end:window.end??null,...analyzePerformance(fund,window)}];
   }));
-  return {returns,windows,currency:"CNY",observations_per_year:252,sortino_target:0,
-    risk_free:fund.risk_free,return_basis:fund.return_basis};
+  return {returns,windows,currency:"CNY",observations_per_year:FUND_RISK_REFERENCE.observations_per_year,
+    sortino_target:FUND_RISK_REFERENCE.annual_rate,reference:FUND_RISK_REFERENCE,return_basis:fund.return_basis};
 }
 
 export function createSnapshotCompute({calendar,config,fetcher=fetch,observe,clock=()=>new Date()}) {
@@ -133,9 +133,7 @@ export function createSnapshotCompute({calendar,config,fetcher=fetch,observe,clo
       (index_coverage && index_coverage.available<index_coverage.total) ||
       risk.windows["1y"].metrics.sharpe.value===null ? "partial" : "complete";
     return {status,source:raw.source,data_as_of:last.date,
-      quality:{freshness,return_gaps,index_coverage,sector_status:association?.status??"indices_unavailable",
-        benchmark_status:risk.windows["1y"].comparison?.status??"unavailable",
-        risk_free_available:Boolean(fund.risk_free)},
+      quality:{freshness,return_gaps,index_coverage,sector_status:association?.status??"indices_unavailable"},
       raw_data:{history:raw.rows,fund:{...raw,rows:undefined},sector_index_history:indexInputs},
       indicators:{},
       models:{risk,sectors:{report:association,charts}},

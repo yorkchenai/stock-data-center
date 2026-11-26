@@ -21,7 +21,7 @@ from .sector_data import read_catalog
 MODEL_MODULES = ("web/engine.mjs", "web/providers.mjs", *(
     f"web/funds/{name}.mjs" for name in (
         "benchmark", "chart-data", "data", "nav-source", "performance", "providers",
-        "risk-free", "sector-browser", "sector-model",
+        "sector-browser", "sector-model",
     )
 ))
 SNAPSHOT_TRANSPORT = {"compatibility.mjs", "details.mjs", "public.mjs", "service.mjs", "site-gateway.mjs", "store.mjs", "valuation.mjs", "worker.mjs"}

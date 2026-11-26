@@ -269,7 +269,7 @@ async function verifyFallback(type,mode) {
     assert.match(label,mode==="version"?/版本不兼容/:mode==="timeout"?/加载超时/:
       mode==="before-preheat"?/指标起算日为 2025-01-01.*指标起算 2024-11-01/:/服务暂不可用/);
     assert.doesNotMatch(label,/共享快照 [a-f0-9]{8}-/);
-    assert.equal(await page.locator(isStock?".pane-legend":"#core-metrics article").count(),isStock?5:6);
+    assert.equal(await page.locator(isStock?".pane-legend":"#core-metrics article").count(),5);
     return {type,mode,passed:true};
   } finally {await context.close();}
 }
@@ -367,11 +367,26 @@ try {
             assert.deepEqual(stored,calculateIndicators(input));
           }
         }
-        if (i===3 && !isStock) assert.deepEqual(value.data.metrics,snapshot.data.risk.windows["1y"].metrics);
+        if (i===3 && !isStock) {
+          assert.deepEqual(value.data.metrics,snapshot.data.risk.windows["1y"].metrics);
+          assert.deepEqual(value.data.reference,snapshot.data.risk.reference);
+          assert.equal(value.data.reference.annual_rate,0.025);
+          assert.equal(value.data.sortino_target,0.025);
+          assert.equal(value.data.metrics.excess,undefined);
+        }
         if (i===4 && !isStock) assert.deepEqual(value.data?.sectors??[],snapshot.data.association?.sectors??[]);
       }
       const page=await browser.newPage();
       try {
+        if (sample) {
+          // Risk snapshot replay has no live intraday estimates.
+          await page.route(service+"/api/fund-valuation**",(route)=>{
+            const {searchParams} = new URL(route.request().url());
+            return route.fulfill({headers:{"Access-Control-Allow-Origin":origin},json:{
+              symbol:searchParams.get("symbol"),provider:searchParams.get("provider"),values:[],
+            }});
+          });
+        }
         const requestFailures=[];
         page.on("pageerror",(error)=>requestFailures.push(error.message));
         const url=isStock?"/index.html?symbol="+symbol:"/funds.html?fund="+symbol;
@@ -398,9 +413,11 @@ try {
         }
         if (!isStock) {
           const annual=snapshot.data.risk.windows["1y"];
-          const formatted=(value)=>value==null?"—":(100*value).toFixed(2)+"%";
-          assert.equal(await page.locator('#core-metrics [data-metric="drawdown"] strong').textContent(),
-            formatted(annual.metrics.drawdown.value));
+          for (const id of ["drawdown","volatility","sharpe","sortino"]) {
+            const value = annual.metrics[id].value;
+            const formatted = value==null ? "—" : ["sharpe","sortino"].includes(id) ? value.toFixed(2) : (100*value).toFixed(2)+"%";
+            assert.equal(await page.locator(`#core-metrics [data-metric="${id}"] strong`).textContent(),formatted);
+          }
           if (annual.start) {
             assert.deepEqual(await page.locator('#core-metrics [data-metric="return"] time').allTextContents(),
               [annual.start,annual.end]);
@@ -424,7 +441,10 @@ try {
       row.sector_status=snapshot.data.association?.status;
       row.special_index_diagnostics=snapshot.data.association?.special_index_diagnostics;
       row.rank_codes=snapshot.data.association?.sectors.map((sector)=>sector.code);
-    } catch (error) {row.error=error.message;}
+    } catch (error) {
+      row.error=error.message;
+      console.error(`${row.type} ${row.symbol}:`,error);
+    }
   }
   await wait(250);
   const after=(await traces()).filter((event)=>event.event==="snapshot_upstream").length;

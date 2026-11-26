@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { normalizeFund } from "../web/funds/data.mjs";
-import { analyzePerformance, periodStart, selectWindow } from "../web/funds/performance.mjs";
+import { analyzePerformance, FUND_RISK_REFERENCE, periodStart, selectWindow } from "../web/funds/performance.mjs";
 
 const site = path.resolve(process.env.PAGES_SITE || "work/pages-site");
 const output = path.resolve(process.env.BROWSER_OUTPUT || "work/pages-browser");
@@ -95,6 +95,8 @@ const report = {mode:"explicitly labeled synthetic fund test",viewports:[]};
 try {
   for (const [width,height,mobile] of [[1440,900,false],[390,844,true]]) {
     const context = await browser.newContext({viewport:{width,height},isMobile:mobile,hasTouch:mobile});
+    await context.route("https://fundcomapi.tiantianfunds.com/**",(route)=>route.abort());
+    await context.route("https://stock.finance.sina.com.cn/**",(route)=>route.abort());
     const page = await context.newPage();
     const errors=[];
     page.on("pageerror",(error)=>errors.push(error.message));
@@ -105,8 +107,8 @@ try {
     const tbody = page.locator("#fund-table tbody");
     const long = tbody.locator("tr",{hasText:first.name});
     const short = tbody.locator("tr",{hasText:second.name});
-    assert.equal(await long.locator("td").nth(10).textContent() === "—",false);
-    assert.equal(await short.locator("td").nth(10).textContent(),"—");
+    assert.notEqual(await long.locator('[data-column="5y"]').textContent(),"—");
+    assert.equal(await short.locator('[data-column="5y"]').textContent(),"—");
     await page.locator("#search-term").fill(first.name);
     await page.getByRole("button",{name:"搜索",exact:true}).click();
     assert.match(await page.locator("#search-result").innerText(),/已添加/);
@@ -142,11 +144,39 @@ try {
     await page.getByRole("link",{name:first.name}).click();
     await page.locator("#returns-chart canvas").first().waitFor();
     await page.locator("#nav-chart canvas").first().waitFor();
+    assert.ok((await page.locator("#returns-title").boundingBox()).y < (await page.locator("#nav-chart-title").boundingBox()).y);
+    const extrema = ()=>page.locator(".chart-extremes span").allTextContents();
+    const oneYearExtrema = await extrema();
+    assert.equal(oneYearExtrema.length,6);
+    assert.ok(oneYearExtrema.every((label,index)=>new RegExp(`${index%2 ? "谷" : "峰"}值 \\d{4}-\\d{2}-\\d{2} ·`).test(label)));
     assert.equal(await page.locator("#nav-chart").evaluate((chart)=>
       [...chart.childNodes].some((node)=>node.nodeType===3&&node.textContent.trim())),false);
     assert.match(await page.locator("#returns-source").innerText(),/基金净值来源.*最新确认/);
     assert.ok(page.url().endsWith("/funds.html?fund=000001"));
-    assert.equal(await page.locator("#core-metrics article").count(),6);
+    const benchmarkCard = page.locator(".fund-identity .fund-benchmark");
+    await benchmarkCard.getByRole("heading",{name:"业绩比较基准"}).waitFor();
+    assert.ok((await benchmarkCard.boundingBox()).y < (await page.locator("#core-metrics").boundingBox()).y);
+    const dataPanel = page.locator("#fund-detail > section:last-child");
+    assert.equal(await dataPanel.getAttribute("id"),"fund-data-panel");
+    assert.match(await dataPanel.locator("#fund-source").innerText(),/合成界面测试/);
+    await dataPanel.locator("#fund-freshness").waitFor();
+    await dataPanel.getByText("导入该基金数据",{exact:true}).waitFor();
+    assert.equal(await page.locator("#detail-status").isVisible(),false);
+    assert.equal(await page.locator("#core-metrics article").count(),5);
+    assert.match(await page.locator("#risk-reference-note").innerText(),/2\.5%.*252.*不构成投资建议/);
+    const sharpeCard = page.locator('[data-metric="sharpe"]');
+    assert.notEqual(await sharpeCard.locator(".metric-result .risk-rating").innerText(),"");
+    await sharpeCard.locator("summary").click();
+    assert.match(await sharpeCard.locator(".risk-metric-help p").innerText(),/日参考收益率.*√252/);
+    assert.equal(await sharpeCard.locator(".risk-rating-ranges dd:visible").count(),7);
+    await sharpeCard.locator("summary").click();
+    for (const id of ["volatility","sortino"]) {
+      const card = page.locator(`[data-metric="${id}"]`);
+      await card.locator(".metric-result .risk-rating").waitFor();
+      await card.locator("summary").click();
+      assert.equal(await card.locator(".risk-rating-ranges dd:visible").count(),id==="sortino" ? 6 : 7);
+      await card.locator("summary").click();
+    }
     const grid = await page.locator("#core-metrics").evaluate((el)=>getComputedStyle(el).gridTemplateColumns.split(" ").length);
     assert.equal(grid,mobile ? 2 : 3);
     const detail=page.locator("#fund-missing-facts");
@@ -165,9 +195,13 @@ try {
     const nav = await page.locator("#fund-nav").innerText();
     const value = page.locator("[data-metric='return'] strong");
     const initial = await value.innerText();
+    await page.getByRole("button",{name:"全部历史",exact:true}).click();
+    await page.getByText(`图表视窗 ${first.inception} 至 ${first.rows.at(-1).date}`,{exact:true}).waitFor();
     await page.getByRole("button",{name:"近3年",exact:true}).click();
     assert.notEqual(initial,await value.innerText());
     assert.equal(await page.locator("#fund-nav").innerText(),nav);
+    const threeYearExtrema = await extrema();
+    assert.notDeepEqual(threeYearExtrema,oneYearExtrema);
     const stats = await page.locator("#core-metrics").innerText();
     if (!mobile) {
       const bound=await page.locator("#returns-chart").boundingBox();
@@ -175,6 +209,7 @@ try {
       await page.mouse.wheel(0,-300);
       await page.mouse.move(bound.x+bound.width/2,bound.y+100);
       assert.equal(await page.locator("#core-metrics").innerText(),stats);
+      assert.deepEqual(await extrema(),threeYearExtrema);
     }
     assert.equal(await page.locator("#benchmark-disclosure").innerText(),"合成比较基准");
     assert.equal(await page.locator("#benchmark-source [data-date-kind=effective]").textContent(),first.inception);
@@ -182,25 +217,29 @@ try {
     assert.equal(await page.locator("#benchmark-validity").innerText(),"当前有效性待核实");
     assert.equal(await page.getByRole("heading",{name:"强关联板块指数分析"}).count(),0);
     assert.equal(await page.locator("#benchmark-line").count(),0);
-    assert.equal(await page.locator("[data-metric='excess'] strong").innerText(),"—");
+    assert.equal(await page.getByText("超额收益",{exact:true}).count(),0);
     assert.notEqual(await page.locator("[data-metric='sharpe'] strong").innerText(),"—");
     await page.getByRole("button",{name:"自定义",exact:true}).click();
     await page.locator("#fund-start").fill("2026-09-01");
     await page.locator("#fund-end").fill("2026-10-20");
     await page.getByRole("button",{name:"应用区间"}).click();
     assert.match(await page.locator("#range-status").innerText(),/2026-09-01 至 2026-10-20/);
-    assert.match(await page.locator("[data-metric='excess'] strong").innerText(),/个百分点/);
+    assert.equal(await page.locator("[data-metric='excess']").count(),0);
     await page.locator("#fund-start").fill("2026-11-01");
     await page.getByRole("button",{name:"应用区间"}).click();
     assert.match(await page.locator("#range-status").innerText(),/开始日期不能晚于结束日期/);
     assert.equal(await value.innerText(),"—");
+    assert.equal(await sharpeCard.locator("strong").innerText(),"—");
+    assert.equal(await sharpeCard.locator(".metric-result .risk-rating").count(),0);
+    assert.deepEqual(await extrema(),[]);
     await page.getByRole("button",{name:"近1年",exact:true}).click();
     assert.equal(await value.innerText(),initial);
+    assert.deepEqual(await extrema(),oneYearExtrema);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),true);
     await page.screenshot({path:path.join(output,`funds-detail-${width}.png`),fullPage:true});
     await page.locator("#detail-import").setInputFiles({name:"test-fund-bundle.json",mimeType:"application/json",
       buffer:Buffer.from(JSON.stringify(fixtureBundle()))});
-    await page.waitForFunction(()=>document.getElementById("detail-status").textContent === "已载入 000001。");
+    await dataPanel.getByText("已载入 000001。",{exact:true}).waitFor();
     await page.locator("#nav-raw").click();
     assert.match(await page.locator("#nav-basis").innerText(),/原始单位净值/);
     assert.equal(await page.locator("#sector-chart").count(),0);
@@ -208,7 +247,7 @@ try {
     await page.getByRole("link",{name:second.name}).click();
     assert.equal(await page.locator("#benchmark-disclosure").innerText(),"业绩比较基准暂未核实");
     assert.equal(await page.locator("[data-metric='sharpe'] strong").innerText(),"—");
-    assert.equal(await page.locator("[data-metric='excess'] strong").innerText(),"—");
+    assert.equal(await page.locator("[data-metric='excess']").count(),0);
     assert.match(await page.locator("#holdings-data").innerText(),/暂无/);
     await page.getByRole("link",{name:"返回基金列表"}).click();
     await page.reload();
@@ -233,14 +272,14 @@ try {
     const symbol = query.get("symbol");
     const category = query.get("category");
     requests.push([symbol,category]);
-    const fund = {...first,code:symbol,valuation_frequency:null};
+    const fund = {...first,code:symbol,synthetic:false,valuation_frequency:null};
     const data = {snapshot_id:"11111111-1111-4111-8111-111111111111",asset_type:"fund",symbol,
       status:"partial",model_version:model,schema_version:1,data_as_of:fund.rows.at(-1).date,
       expires_at:new Date(Date.now()+60_000).toISOString()};
     if (category === "page") {
       const normalized = normalizeFund(fund);
       const range = selectWindow(normalized,periodStart(data.data_as_of,"1y"),data.data_as_of);
-      Object.assign(data,{detail_status:"available",data:{fund,risk:{windows:{"1y":{...range,
+      Object.assign(data,{detail_status:"available",data:{fund,risk:{reference:FUND_RISK_REFERENCE,windows:{"1y":{...range,
         ...analyzePerformance(normalized,range)}}}}});
     }
     return route.fulfill({json:data,headers:{"Access-Control-Allow-Origin":"*"}});
@@ -404,7 +443,25 @@ try {
   assert.equal(await old.locator("[data-date-kind=published]").textContent(),"2026-10-27");
   assert.equal(await old.locator("[data-date-kind=effective]").textContent(),"2026-07-01");
   assert.equal(await old.locator("a").count(),1);
-  report.valuation = {fixedLabels:true,automatic:true,background:true,manual:true,retainsLastQuote:true,historyLoads:0};
+
+  const listHistoryLoads = requests.length;
+  staleQuotes = false;
+  await page.goto(origin+"funds.html");
+  const table = page.locator("#fund-table");
+  const savedFund = table.locator('tr[data-fund-code="018993"]');
+  await savedFund.locator('[data-estimate="sina_ds3"]').getByText("+2.00%",{exact:true}).waitFor();
+  const headings = await table.locator("th").allTextContents();
+  const navColumn = headings.indexOf("最新单位净值");
+  assert.deepEqual(headings.slice(navColumn-3,navColumn),["估值1","估值2","估值3"]);
+  assert.deepEqual(await savedFund.locator("td[data-estimate]").allTextContents(),["—","+1.18%","+2.00%"]);
+  assert.equal(await savedFund.locator('[data-column="nav"]').textContent(),"—");
+  await table.getByRole("button",{name:"估值1",exact:true}).click();
+  assert.equal(await table.locator("tbody tr").first().getAttribute("data-fund-code"),"014194");
+  staleQuotes = true;
+  await page.clock.fastForward(60_000);
+  await savedFund.locator('[data-estimate="sina_ds3"]').getByText("—",{exact:true}).waitFor();
+  assert.equal(requests.length,listHistoryLoads);
+  report.valuation = {fixedLabels:true,listColumns:true,automatic:true,background:true,manual:true,retainsLastQuote:true,historyLoads:0};
   await context.close();
 } finally {
   await browser.close();

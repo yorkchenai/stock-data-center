@@ -21,7 +21,6 @@ from bs4 import BeautifulSoup
 
 from stock_analysis import funds
 from scripts.audit_fund_interactions import measure_interactions
-from stock_analysis.fund_rates import fetch_rate_history, load_chinabond_rates
 
 ROOT = Path(__file__).resolve().parents[1]
 PANEL = ROOT / "tests/fixtures/fund_generalization_panel.json"
@@ -31,7 +30,7 @@ PROFILE_URLS = ("https://fundf10.eastmoney.com/jbgk_{}.html",
                 "https://fund.eastmoney.com/data/xininfo_{}.html")
 RISK = {"sharpe", "volatility", "sortino"}
 PERIODS = ("1m", "3m", "6m", "1y", "3y", "5y", "all")
-METRICS = ("return", "drawdown", "sharpe", "volatility", "sortino", "excess")
+METRICS = ("return", "drawdown", "sharpe", "volatility", "sortino")
 NOT_APPLICABLE = {"insufficient_fund_age","unsupported_type"}
 
 
@@ -86,7 +85,7 @@ def run_engine(root, data, as_of=None):
     return json.loads(call.stdout)
 
 
-def independent(rows, rates, start, end, daily):
+def independent(rows, rates, start, end, daily, reference=None):
     observations = [row for row in rows if start <= row["date"] <= end]
     if len(observations)<2 or any(row["return_index"] is None for row in observations):
         return {}
@@ -109,6 +108,21 @@ def independent(rows, rates, start, end, daily):
     dates = list(map(lambda row: date.fromisoformat(row["date"]), observations))
     if not daily or len(daily_returns)<2 or any((right-left).days > 14 for left,right in zip(dates,dates[1:])):
         return output
+    if reference:
+        sessions = reference["observations_per_year"]
+        daily_reference = (1 + reference["annual_rate"]) ** (1 / sessions) - 1
+        if not isclose(daily_reference, reference["daily_rate"], abs_tol=1e-15):
+            raise ValueError("快照日参考收益率与年化参数不一致")
+        excess = [value - daily_reference for value in daily_returns]
+        volatility = statistics.stdev(daily_returns)
+        downside = sqrt(statistics.fmean(min(0, value) ** 2 for value in excess))
+        output["volatility"] = volatility * sqrt(sessions)
+        if volatility:
+            output["sharpe"] = statistics.fmean(excess) / volatility * sqrt(sessions)
+        if downside:
+            output["sortino"] = statistics.fmean(excess) / downside * sqrt(sessions)
+        return output
+    # Retain independent reading of archives created under the historical rate convention.
     output["volatility"] = statistics.stdev(daily_returns)*sqrt(252)
     downside = sqrt(statistics.fmean(min(0, x)**2 for x in daily_returns))
     if downside:
@@ -129,9 +143,9 @@ def independent(rows, rates, start, end, daily):
     return output
 
 
-def classify_window(result, data, rates, inception, group):
+def classify_window(result, data, inception, group):
     for key, window in result["windows"].items():
-        window["sources"] = {"nav":data["source"]["name"],"risk":rates and rates["name"],
+        window["sources"] = {"nav":data["source"]["name"],"risk":result["reference"],
                              "benchmark":data.get("benchmark") and data["benchmark"]["source"]}
         start,end = window.get("start"),window.get("end")
         target = window["requested_start"]
@@ -140,7 +154,7 @@ def classify_window(result, data, rates, inception, group):
                       and row["return_issue"]), None)
         if key != "all" and target and not start and not inception:
             window["history_applicability"] = "unknown"
-        verification = independent(data["rows"],rates,start,end,result["normal_frequency"]) if start and end else {}
+        verification = independent(data["rows"],None,start,end,result["normal_frequency"],result["reference"]) if start and end else {}
         for metric, item in window["metrics"].items():
             value, reason = item["value"], item.get("reason") or ""
             if short:
@@ -153,8 +167,6 @@ def classify_window(result, data, rates, inception, group):
                 status = "calculated"
             elif window["error"] or "不足两条" in reason or "相隔超过" in reason or "起点附近" in reason:
                 status = "source_data"
-            elif metric == "excess" and window["metrics"]["return"]["value"] is not None:
-                status = "benchmark_missing_history" if data.get("benchmark") else "benchmark_not_configured"
             elif metric == "sharpe" and "利率" in reason:
                 status = "risk_free_missing"
             elif "为零" in reason:
@@ -170,11 +182,6 @@ def classify_window(result, data, rates, inception, group):
                 item["verification"] = "pass" if isclose(value,expected,abs_tol=1e-10,rel_tol=1e-10) else "mismatch"
                 if item["verification"] == "mismatch":
                     item["difference"] = value-expected
-            elif status == "calculated" and metric == "excess":
-                entry = next((r for r in data["benchmark"].get("disclosed_periods",[]) if r["start"]==start and r["end"]==end), None)
-                if entry and "return" in verification:
-                    item["verification"] = ("pass" if isclose(value,verification["return"]-entry["return"],abs_tol=1e-10)
-                                            else "mismatch")
         list_result = result["list"].get(key)
         detail_return = window["metrics"]["return"]
         if list_result and list_result["value"] is None and detail_return["value"] is not None:
@@ -196,26 +203,12 @@ def describe_history(raw, data):
             "event_labels":len(events),"max_calendar_gap":max(delays,default=0)}
 
 
-def benchmark_state(data, windows):
-    if not data.get("benchmark"):
-        return "A_missing_audited_configuration"
-    if any(w["benchmark_status"]=="complete" and w["metrics"]["excess"]["verification"]=="pass" for w in windows.values()):
-        return "D_complete_and_verified"
-    return "B_missing_history_or_verified_method"
-
-
 def disclosure_check(root, payload, definition):
     """Public report aggregates are evidence, never fed into the engine."""
     cases = {}
     official_periods = definition.get("periods")
     if official_periods:
-        # Controlled import tests the same contract for other funds. The live
-        # provider path still retrieves its ordinary, unmodified fund payload.
-        stated = {"official":True,"name":definition.get("formula") or "管理人披露的基准收益",
-                  "source":definition["source"],"disclosed_periods":[
-                      {"start":period["start"],"end":definition["end"],"return":period["benchmark"],
-                       "source":definition["source"]} for period in official_periods.values()]}
-        output = run_engine(root,{**payload,"benchmark":stated},as_of=definition["end"])
+        output = run_engine(root,payload,as_of=definition["end"])
     for key, official in (official_periods or {}).items():
         window = output["windows"][key]
         actual = window["metrics"]["return"]["value"]
@@ -227,9 +220,6 @@ def disclosure_check(root, payload, definition):
                       "matches":confirmed,"reason":window["metrics"]["return"]["reason"],
                       "official_net_value_std":official.get("daily_std"),
                       "system_volatility":window["metrics"]["volatility"]["value"],
-                      "excess_against_disclosure":None if not confirmed else actual-official["benchmark"],
-                      "contract_excess":window["metrics"]["excess"]["value"],
-                      "contract_benchmark_status":window["benchmark_status"],
                       "system_sharpe":window["metrics"]["sharpe"]["value"],
                       "system_drawdown":window["metrics"]["drawdown"]["value"]}
     check = {"source":definition["source"],"formula":definition.get("formula"),"windows":cases}
@@ -321,24 +311,8 @@ def run():
     with ThreadPoolExecutor(max_workers=2) as executor:
         captured = list(executor.map(capture,fixture))
     batch_seconds = round(monotonic()-begin,2)
-    as_of = clock.date()
-    valuation_dates = []
-    for incoming in captured:
-        if "history" in incoming:
-            try:
-                raw = funds.assignment(incoming["history"],"Data_netWorthTrend")
-                if raw:
-                    valuation_dates.append(date.fromisoformat(funds.timestamp_day(raw[-1]["x"])))
-            except (ValueError,TypeError,KeyError):
-                pass
-    try:
-        rates = load_chinabond_rates(date(2021,9,1),max(valuation_dates,default=as_of),fetch_rate_history)
-        rate_summary = {"source":rates["source"], "start":rates["rows"][0]["date"],"end":rates["effective_to"],
-                        "observations":len(rates["rows"]), "missing_count":len(rates["missing_dates"])}
-    except (OSError,ValueError) as error:
-        rates, rate_summary = None, failure(error)
     report = {"baseline":selection["baseline"],"at":clock.isoformat(),"catalog_count":len(catalog),
-              "catalog_error":catalog_error,"profile_preflight":preflight,"rate":rate_summary,"batch_seconds":batch_seconds,"funds":[]}
+              "catalog_error":catalog_error,"profile_preflight":preflight,"batch_seconds":batch_seconds,"funds":[]}
 
     disclosures = json.loads(DISCLOSURES.read_text())
     replay_histories = {}
@@ -370,17 +344,15 @@ def run():
                     payload = adapter.parse_history(incoming["history"],code,metadata,incoming["retrieved_at"])
                     obj[name] = {"history":describe_history(adapter.assignment(incoming["history"],"Data_netWorthTrend"),payload),
                                  "name":payload["name"],"category":payload["category"]}
-                    current = {**payload,"risk_free":rates}
-                    result = run_engine(path,current)
-                    obj[name].update(classify_window(result,payload,rates,inception,group))
-                    obj[name]["benchmark_state"] = benchmark_state(payload,obj[name]["windows"])
-                    obj[name]["as_received_sharpe_possible"] = bool(payload.get("risk_free"))
+                    result = run_engine(path,payload)
+                    obj[name].update(classify_window(result,payload,inception,group))
+                    obj[name]["benchmark_disclosed"] = bool(payload.get("benchmark_disclosure") or payload.get("benchmark"))
                     if name == "current":
                         replay_histories[code] = incoming["history"]
                         if result["normal_frequency"] and group != "regression":
                             browser_candidates.append(payload)
                     if code in disclosures:
-                        obj[name]["disclosure_check"] = disclosure_check(path,current,disclosures[code])
+                        obj[name]["disclosure_check"] = disclosure_check(path,payload,disclosures[code])
                 except (ValueError,TypeError,OSError,subprocess.SubprocessError) as error:
                     obj[name] = {"error":failure(error)}
     report["coverage"] = {label:coverage(report["funds"],label) for label in ("baseline","current")}

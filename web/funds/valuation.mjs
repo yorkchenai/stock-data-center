@@ -116,7 +116,12 @@ async function fetchValuation(code, signal, origin, onResult) {
 
 export function watchValuation(render, origin) {
   const cache = new Map();
-  let code, controller, timer;
+  let symbols = [], controller, timer;
+
+  function quotes(code) {
+    const today = shanghaiToday()+" ";
+    return (cache.get(code) ?? []).filter(({updatedAt})=>updatedAt.startsWith(today));
+  }
 
   function pause() {
     clearTimeout(timer);
@@ -124,35 +129,46 @@ export function watchValuation(render, origin) {
     controller = null;
   }
 
-  async function refresh() {
-    if (!code || document.hidden || controller) return;
-    clearTimeout(timer);
-    timer = setTimeout(refresh,60_000);
-    const request = controller = new AbortController();
-    const symbol = code;
-    const previous = ()=> (cache.get(symbol) ?? []).filter(({updatedAt})=>updatedAt.startsWith(shanghaiToday()+" "));
-    render(previous(),"正在更新估值…",true);
+  async function refreshSymbol(symbol, request) {
+    const update = (message,pending)=>render(symbol,quotes(symbol),message,pending);
+    update("正在更新估值…",true);
     try {
       const failed = [];
       const retained = [];
       await fetchValuation(symbol,request.signal,origin,({ids,values,failed:failures})=>{
         failed.push(...failures);
-        const old = previous();
+        const old = quotes(symbol);
         retained.push(...old.filter(({id})=>failures.includes(id)));
         const mixed = [...values,...old.filter(({id})=>!ids.includes(id) || failures.includes(id))];
         cache.set(symbol,Object.keys(sources).flatMap((id)=>mixed.filter((item)=>item.id===id)));
-        render(previous(),"正在更新估值…",true);
+        update("正在更新估值…",true);
       });
       if (controller!==request) return;
       const failure = failed.length===Object.keys(sources).length ? "更新失败" : failed.length ? "部分估值来源更新失败" : "";
       const message = retained.length ? failure+" · 保留上次成功估值" : failure;
-      render(previous(),message,false);
+      update(message,false);
     } catch {
       if (controller!==request) return;
-      const values = previous();
-      render(values,values.length ? "更新失败 · 保留上次成功估值" : "更新失败",false);
+      update(quotes(symbol).length ? "更新失败 · 保留上次成功估值" : "更新失败",false);
+    }
+  }
+
+  async function refresh() {
+    if (!symbols.length || document.hidden || controller) return;
+    clearTimeout(timer);
+    const request = controller = new AbortController();
+    const started = Date.now();
+    const batch = symbols;
+    try {
+      // Fetch at most three funds at once, even when the watchlist has many rows.
+      for (let i=0; i<batch.length && controller===request; i+=3) {
+        await Promise.all(batch.slice(i,i+3).map((symbol)=>refreshSymbol(symbol,request)));
+      }
     } finally {
-      if (controller===request) controller = null;
+      if (controller===request) {
+        controller = null;
+        timer = setTimeout(refresh,Math.max(0,60_000-(Date.now()-started)));
+      }
     }
   }
 
@@ -160,10 +176,11 @@ export function watchValuation(render, origin) {
     if (document.hidden) pause();
     else void refresh();
   });
-  return {refresh,select(symbol) {
+  return {refresh,quotes,select(codes) {
+    const next = [...new Set(codes)].sort();
+    if (next.length===symbols.length && next.every((symbol,index)=>symbol===symbols[index])) return;
     pause();
-    code = symbol;
-    render([],"",false);
+    symbols = next;
     void refresh();
   }};
 }

@@ -91,7 +91,7 @@ export function selectDetails(snapshot, args, {browser=false}={}) {
     if (risk) {
       const {points,...window}=risk.windows[period];
       result={...window,period,drawdown_dates:drawdownDates(window.metrics,points),observations_per_year:risk.observations_per_year,
-        return_basis:risk.return_basis,sortino_target:risk.sortino_target};
+        return_basis:risk.return_basis,sortino_target:risk.sortino_target,reference:risk.reference};
     }
   } else if (category==="sectors") {
     const report=snapshot.models.sectors?.report;

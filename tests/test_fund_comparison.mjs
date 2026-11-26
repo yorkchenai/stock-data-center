@@ -110,7 +110,7 @@ test("insufficient rate coverage, outdated quotes and invalid date order are dis
   assert.throws(()=>normalizeRiskFree({...history,rows:[...history.rows].reverse()},end),/日期/);
 });
 
-test("historical Sharpe and percentage-point excess on an identical period match independent arithmetic", () => {
+test("legacy rate fields and benchmark histories do not change active fund risk calculations", () => {
   const payload = {
     code:"000001",name:"测试基金",kind:"off_market_fund",schema_version:1,category:"mixed",valuation_frequency:"daily",
     source:{name:source,method:source,retrieved_at:"2025-01-08T00:00:00Z"},risk_free:history,rows,
@@ -118,9 +118,10 @@ test("historical Sharpe and percentage-point excess on an identical period match
   };
   const fund = normalizeFund(payload);
   const actual = analyzePerformance(fund,selectWindow(fund,dates[0],end)).metrics;
-  const [a,b,c] = [.1-.0001,-.1-.0006,.1-.0003];
-  const sampleStd = Math.sqrt(((a-b)**2+(a-c)**2+(b-c)**2)/6);
-  near(actual.sharpe.value,Math.sqrt(252)*(a+b+c)/3/sampleStd);
-  near(actual.excess.value,.089-.2);
+  const withoutLegacy = normalizeFund({...payload,risk_free:null,benchmark:null});
+  assert.deepEqual(actual,analyzePerformance(withoutLegacy,selectWindow(withoutLegacy,dates[0],end)).metrics);
+  assert.equal(actual.excess,undefined);
+  assert.equal(fund.benchmark.name,"测试业绩基准");
+  assert.equal(fund.benchmark.seriesById.size,0);
   near(actual.drawdown.value,-.1);
 });

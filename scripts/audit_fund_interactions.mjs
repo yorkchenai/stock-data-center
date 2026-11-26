@@ -61,7 +61,7 @@ try {
         await page.locator('#fund-periods button[data-period="'+period+'"]').click();
         await page.locator("#core-metrics article").last().waitFor();
         elapsed.push(performance.now()-start);
-        assert.equal(await page.locator("#core-metrics article").count(),6);
+        assert.equal(await page.locator("#core-metrics article").count(),5);
       }
       await page.getByRole("link",{name:"返回基金列表"}).click();
     }

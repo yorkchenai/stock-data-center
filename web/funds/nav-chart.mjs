@@ -1,6 +1,7 @@
 import { navTimeline } from "./chart-data.mjs";
+import { fitChartWithMarkers, renderChartExtremes } from "./chart-extremes.mjs";
 
-export function createNavChart(element, readout) {
+export function createNavChart(element, readout, extremes) {
   let chart, lines = [], axis;
   let points = new Map();
   let latest = null;
@@ -13,10 +14,12 @@ export function createNavChart(element, readout) {
       : (fallback && latest ? `最新可见 ${latest.time} · ${formatted(latest.value)}` : "");
   };
   function clear() {
+    lines.forEach(({markers})=>markers?.detach());
     chart?.remove();
     chart = axis = null;
     lines = [];
     readout.textContent = "";
+    renderChartExtremes([],extremes,formatted);
     element.textContent = "";
   }
   function display(fund, mode, start, end) {
@@ -38,24 +41,31 @@ export function createNavChart(element, readout) {
       chart = LC.createChart(element, {
         autoSize:true, layout:{background:{color:"#fff"},textColor:"#536579",attributionLogo:true},
         grid:{vertLines:{color:"#f1f4f8"},horzLines:{color:"#edf2f6"}},
+        timeScale:{minBarSpacing:0.01},
         localization:{locale:"zh-CN",priceFormatter:formatted},
       });
       axis = chart.addSeries(LC.LineSeries,{visible:false});
       chart.subscribeCrosshairMove(({time})=>show(time));
     }
-    lines.forEach((line)=>chart.removeSeries(line));
+    lines.forEach(({line,markers})=>{
+      markers?.detach();
+      chart.removeSeries(line);
+    });
+    const extrema = renderChartExtremes(visible,extremes,formatted);
     lines = groups.map((group)=>{
       const line = chart.addSeries(globalThis.LightweightCharts.LineSeries,{
         color:"#087e75",lineWidth:2,priceLineVisible:false,lastValueVisible:false,
         pointMarkersVisible:group.points.length===1,
       });
       line.setData(group.points);
-      return line;
+      const inGroup = extrema.filter(({time})=>time>=group.points[0].time && time<=group.points.at(-1).time);
+      const markers = inGroup.length ? globalThis.LightweightCharts.createSeriesMarkers(line,inGroup) : null;
+      return {line,markers};
     });
     axis.setData(visible.map(({time})=>({time})));
     points = new Map(visible.map(({time,value})=>[time,value]));
     latest = visible.findLast((point)=>point.value!=null);
-    chart.timeScale().fitContent();
+    fitChartWithMarkers(chart,visible.length);
     show();
     return {gaps:gaps.filter(({date})=>range({time:date})), anchors:groups.map((group)=>group.anchor)};
   }

@@ -55,7 +55,7 @@ def audit_risk(rows, fund, risk):
     daily = fund["valuation_frequency"] == "daily" and fund["category"] not in {"qdii", "fof", "money"}
     for period, window in risk["windows"].items():
         start, end = window["start"], window["end"]
-        computed = independent(rows, risk["risk_free"], start, end, daily) if start and end else {}
+        computed = independent(rows, risk.get("risk_free"), start, end, daily, risk.get("reference")) if start and end else {}
         for metric in FUND_METRICS:
             observed = window["metrics"][metric]
             key = f"{period}.{metric}"

@@ -29,6 +29,9 @@ const key = "stock-data-center.off-market-funds.v1";
 const loaded = new Map();
 const catalog = new Map();
 const beingLoaded = new Map();
+const listNavRequests = new Set();
+const listNavErrors = new Map();
+const maxListNavRequests = 3;
 const sharedSnapshots = new Map();
 const snapshotFallback = new Map();
 const valuationLabels = new Map([["fundgz","估值1"],["sina_ds2","估值2"],["sina_ds3","估值3"]]);
@@ -155,11 +158,13 @@ async function loadOnlineFund(code, snapshotId) {
 function loadFund(code,snapshotId=null) {
   const key=snapshotId??code;
   if (!beingLoaded.has(key)) {
+    const before = loaded.get(code);
     const pending=online?loadOnlineFund(code,snapshotId):readApi("/" + code).then((raw)=>({raw}));
     const disclosures = (online || local) ? fetchPageDisclosures() : null;
     beingLoaded.set(key,Promise.all([pending,disclosures]).then(([{raw,snapshot},reviewed])=>{
       const fund = normalizeFund(raw);
       if (fund.code !== code) throw new Error("查询结果的基金代码不一致。");
+      if (!snapshotId && loaded.has(code) && loaded.get(code)!==before) return loaded.get(code);
       fund.reviewedBenchmark = reviewed?.[code];
       if (snapshot) sharedSnapshots.set(code,snapshot);
       else sharedSnapshots.delete(code);
@@ -172,9 +177,21 @@ function loadFund(code,snapshotId=null) {
 }
 async function loadListFund(code) {
   status("list-status",`正在载入 ${code} 的确认净值…`);
-  try {await loadFund(code);status("list-status",`已载入 ${code}。`);}
-  catch (error) {status("list-status",error.message,true);}
+  try {await loadFund(code);listNavErrors.delete(code);status("list-status",`已载入 ${code}。`);}
+  catch (error) {listNavErrors.set(code,error.message);status("list-status",error.message,true);}
   renderList();
+}
+function loadVisibleListFunds(rows) {
+  if (selectedCode || !(local || online)) return;
+  for (const {code} of rows) {
+    if (listNavRequests.size>=maxListNavRequests) break;
+    if (loaded.has(code) || listNavRequests.has(code) || listNavErrors.has(code)) continue;
+    listNavRequests.add(code);
+    void loadFund(code).catch((error)=>listNavErrors.set(code,error.message)).finally(()=>{
+      listNavRequests.delete(code);
+      if (!selectedCode) renderList();
+    });
+  }
 }
 function estimateValue(quote) {
   return {value:quote?.change ?? null,format:estimatePct,reason:quote ? "" : "暂无当日估值",percent:true};
@@ -188,7 +205,12 @@ function tableValue(id, row, fund, estimates) {
   if (id==="name") return {value:row.name};
   if (id==="type") return {value:describe(row.category)};
   if (valuationLabels.has(id)) return estimateValue(estimates.find((quote)=>quote.id===id));
-  if (!fund) return {value:null,reason:"本会话尚未载入净值。"};
+  if (!fund) {
+    const loading = listNavRequests.has(row.code);
+    const error = listNavErrors.get(row.code);
+    const reason = loading ? "正在载入确认净值。" : error ? `${error} 请点击行内「载入」重试。` : "尚未载入确认净值。";
+    return {value:null,reason};
+  }
   const latest = fund.rows.at(-1);
   if (id==="nav") return {value:latest.unit_nav,format:nav};
   if (id==="date") return {value:latest.date};
@@ -224,13 +246,14 @@ function renderList() {
     header.append(th);
   }
   $("fund-table").tHead.replaceChildren(header);
-  const items = state.list.filter((entry)=>(!state.favorites || entry.favorite) && (!state.type || state.type===entry.category))
-    .map((row)=>{
-      const fund = loaded.get(row.code);
-      const estimates = fund?.mode==="synthetic" ? [] : valuation.quotes(row.code);
-      const entries = Object.fromEntries(active.filter(([id])=>id!=="actions").map(([id])=>[id,tableValue(id,row,fund,estimates)]));
-      return {row,fund,entries};
-    });
+  const rows = state.list.filter((entry)=>(!state.favorites || entry.favorite) && (!state.type || state.type===entry.category));
+  loadVisibleListFunds(rows);
+  const items = rows.map((row)=>{
+    const fund = loaded.get(row.code);
+    const estimates = fund?.mode==="synthetic" ? [] : valuation.quotes(row.code);
+    const entries = Object.fromEntries(active.filter(([id])=>id!=="actions").map(([id])=>[id,tableValue(id,row,fund,estimates)]));
+    return {row,fund,entries};
+  });
   items.sort((a,b)=>{
     const left = a.entries[state.sort]?.value;
     const right = b.entries[state.sort]?.value;
@@ -266,11 +289,16 @@ function renderList() {
         td.append(star," ",remove);
         if (local || online) {
           const refresh = tag("button",fund ? "刷新" : "载入",{"aria-label":`载入 ${row.code} 的净值`});
+          refresh.disabled = listNavRequests.has(row.code);
           refresh.addEventListener("click",()=>{refresh.disabled=true;void loadListFund(row.code);});
           td.append(" ",refresh);
         }
       } else {
         paintValue(td,entries[id],id==="date" && fund?.mode==="synthetic" ? " · 测试" : "");
+        if (id==="nav" && !fund) {
+          if (listNavRequests.has(row.code)) td.textContent = "载入中…";
+          else if (listNavErrors.has(row.code)) td.textContent = "载入失败";
+        }
       }
       tr.append(td);
     }

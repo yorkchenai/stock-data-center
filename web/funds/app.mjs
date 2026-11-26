@@ -135,7 +135,9 @@ async function loadOnlineFund(code, snapshotId) {
       const snapshot=await getPageSnapshot({asset_type:"fund",symbol:code},snapshotId);
       if (!snapshot.data.risk?.windows?.["1y"]?.metrics) throw new Error("共享快照缺少基金风险结果。");
       const reference = snapshot.data.risk.reference;
-      if (!reference || Object.entries(FUND_RISK_REFERENCE).some(([key,value])=>reference[key]!==value)) {
+      if (reference?.annual_rate!==FUND_RISK_REFERENCE.annual_rate ||
+          reference?.observations_per_year!==riskSessions || !Number.isFinite(reference?.daily_rate) ||
+          Math.abs(reference.daily_rate-FUND_RISK_REFERENCE.daily_rate)>1e-15) {
         throw new Error("共享快照的风险参考收益率与网页不一致。");
       }
       if (!snapshotId && snapshot.data.fund.valuation_frequency==="daily" &&

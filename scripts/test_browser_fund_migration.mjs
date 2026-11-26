@@ -90,6 +90,18 @@ try {
     }
     await page.setViewportSize({width:1440,height:1000});
   }
+  await page.goto(origin+"funds.html");
+  summary.list_after_reload={};
+  for (const code of ["019830","014194","018993"]) {
+    const row = page.locator(`#fund-table tr[data-fund-code="${code}"]`);
+    const nav = row.locator('[data-column="nav"]').getByText(/^\d+\.\d{4}$/);
+    await nav.waitFor({timeout:35_000});
+    const date = await row.locator('[data-column="date"]').textContent();
+    const month = await row.locator('[data-column="1m"]').textContent();
+    assert.match(date,/^\d{4}-\d{2}-\d{2}$/);
+    assert.match(month,/^-?\d+\.\d{2}%$/);
+    summary.list_after_reload[code]={unit_nav:await nav.textContent(),date,month};
+  }
   assert.deepEqual(pageErrors,[]);
   assert.deepEqual(unexpectedRequests,[]);
   summary.unexpected_requests=unexpectedRequests.length;

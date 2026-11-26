@@ -1,11 +1,14 @@
 import { validDate } from "../engine.mjs";
 import { RETURN_ISSUES } from "./data.mjs";
-import { compareBenchmark } from "./benchmark.mjs";
-import { riskFreeReturns } from "./risk-free.mjs";
 
 export const PERIODS = [["1w","近1周"],["1m","近1月"],["3m","近3月"],["6m","近6月"],
   ["1y","近1年"],["3y","近3年"],["5y","近5年"]];
 const SESSIONS = 252;
+const ANNUAL_REFERENCE = 0.025;
+export const FUND_RISK_REFERENCE = Object.freeze({
+  annual_rate:ANNUAL_REFERENCE, observations_per_year:SESSIONS,
+  daily_rate:(1+ANNUAL_REFERENCE)**(1/SESSIONS)-1,
+});
 const DAY = 86_400_000;
 const mean = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
 const result = (value, reason = null) => Number.isFinite(value) ? {value, reason: null} : {value: null, reason};
@@ -15,7 +18,6 @@ function sampleDeviation(values) {
   const center = mean(shifted);
   return Math.sqrt(shifted.reduce((sum, value) => sum + (value - center) ** 2, 0) / (values.length - 1));
 }
-const noBenchmark = "缺少对应的官方业绩基准及可对齐历史。";
 
 export function periodStart(end, key) {
   validDate(end);
@@ -71,10 +73,10 @@ export function analyzePerformance(fund, window) {
   const period = window.error ? fail(window.error) : totalReturn(rows);
   const missing = fail(period.reason);
   const metrics = {return:period, annualReturn:missing, drawdown:missing, volatility:missing,
-    sharpe:missing, sortino:missing, excess:window.error ? missing : fail(noBenchmark), calmar:missing,
+    sharpe:missing, sortino:missing, calmar:missing,
     drawdownDays:missing, recoveryDays:missing};
-  const points = {fund:[], benchmark:[], drawdown:[]};
-  if (period.value === null) return {metrics, points, comparison:null};
+  const points = {fund:[], drawdown:[]};
+  if (period.value === null) return {metrics, points};
 
   const first = rows[0].return_index;
   let peak = first, peakDate = start, worst = 0, worstPeakDate = start, trough = start, recovery = null, worstPeak = first;
@@ -100,33 +102,26 @@ export function analyzePerformance(fund, window) {
   metrics.calmar = worst && metrics.annualReturn.value !== null
     ? result(metrics.annualReturn.value / -worst) : fail("区间没有回撤或缺少年化收益。");
 
-  const risk = fund.risk_free;
   const longGap = rows.some((row,i)=>i>0 && dayDiff(rows[i-1].date,row.date)>14);
-  if (!fund.normalFrequency || returns.length < 2 || longGap) {
+  if (returns.some((value)=>!Number.isFinite(value))) {
+    metrics.volatility = metrics.sharpe = metrics.sortino = fail("日收益数据异常。");
+  } else if (!fund.normalFrequency || returns.length < 2 || longGap) {
     const reason = fail(!fund.normalFrequency ? "该基金类型或估值频率尚未采用同一日频年化口径。"
       : longGap ? "观察记录相隔超过 14 天，无法按日频年化。" : "至少需要两个日收益样本。");
     metrics.volatility = metrics.sharpe = metrics.sortino = reason;
   } else {
-    const average = mean(returns);
     const sigma = sampleDeviation(returns);
-    metrics.volatility = result(sigma * Math.sqrt(SESSIONS));
-    const aligned = riskFreeReturns(risk, rows, SESSIONS);
-    if (aligned.reason) {
-      metrics.sharpe = fail(aligned.reason);
-    } else {
-      const excess = returns.map((value, i) => value - aligned.values[i]);
-      const excessMean = mean(excess);
-      const excessSigma = sampleDeviation(excess);
-      metrics.sharpe = excessSigma ? result(excessMean / excessSigma * Math.sqrt(SESSIONS))
-        : fail("日超额收益样本波动率为零。");
-    }
-    // Explicit target: 0 annual return. Include every day in the lower partial moment.
-    const downside = Math.sqrt(mean(returns.map((value) => Math.min(value, 0) ** 2)));
-    metrics.sortino = downside ? result(average / downside * Math.sqrt(SESSIONS)) : fail("区间下行波动率为零。");
+    metrics.volatility = result(sigma * Math.sqrt(SESSIONS),"日收益波动率超出可计算范围。");
+    const relativeReturns = returns.map((value)=>value-FUND_RISK_REFERENCE.daily_rate);
+    const scaledMean = mean(relativeReturns)*Math.sqrt(SESSIONS);
+    // Subtracting a constant leaves the sample standard deviation unchanged.
+    metrics.sharpe = !Number.isFinite(sigma) ? fail("日收益波动率超出可计算范围。") : sigma
+      ? result(scaledMean/sigma,"夏普比率超出可计算范围。") : fail("日收益样本波动率为零。");
+    // Include all observations. Days at or above the reference contribute zero to downside deviation.
+    const downside = Math.sqrt(mean(relativeReturns.map((value)=>Math.min(value,0)**2)));
+    metrics.sortino = !Number.isFinite(downside) ? fail("日收益下行偏差超出可计算范围。") : downside
+      ? result(scaledMean/downside,"索提诺比率超出可计算范围。") : fail("相对参考收益率的下行偏差为零。");
   }
 
-  const comparison = compareBenchmark(fund.benchmark, rows);
-  metrics.excess = comparison.value == null ? fail(comparison.reason) : result(period.value - comparison.value);
-  points.benchmark = comparison.points;
-  return {metrics, points, comparison};
+  return {metrics, points};
 }

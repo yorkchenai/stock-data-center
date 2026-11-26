@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeFund, searchCatalog, fundFreshness } from "../web/funds/data.mjs";
-import { analyzePerformance, periodReturn, periodStart, selectWindow } from "../web/funds/performance.mjs";
+import { analyzePerformance, FUND_RISK_REFERENCE, periodReturn, periodStart, selectWindow } from "../web/funds/performance.mjs";
+import { riskRating } from "../web/funds/risk-ratings.mjs";
 
 const dates = ["2025-01-02","2025-01-03","2025-01-06","2025-01-07"];
 const fixture = (overrides = {}) => ({
@@ -20,18 +21,20 @@ test("positive ending return with an interim drawdown: all core metrics match in
   const fund = normalizeFund(fixture());
   const {metrics,points} = analyzePerformance(fund,selectWindow(fund,null,dates.at(-1)));
   const sampleSigma = Math.sqrt((2 * (1/15) ** 2 + (2/15) ** 2) / 2);
+  const dailyReference = 1.025**(1/252)-1;
+  assert.deepEqual(FUND_RISK_REFERENCE,{annual_rate:0.025,observations_per_year:252,daily_rate:dailyReference});
   near(metrics.return.value,.089);
   near(metrics.annualReturn.value,1.089**(365.2425/5)-1);
   near(metrics.drawdown.value,-.1);
   near(metrics.volatility.value,sampleSigma*Math.sqrt(252));
-  near(metrics.sharpe.value,((1/30)-.0001)*Math.sqrt(252)/sampleSigma);
-  near(metrics.sortino.value,((1/30)/Math.sqrt(.01/3))*Math.sqrt(252));
-  near(metrics.excess.value,.039);
+  near(metrics.sharpe.value,((1/30)-dailyReference)*Math.sqrt(252)/sampleSigma);
+  near(metrics.sortino.value,((1/30)-dailyReference)*Math.sqrt(252)/Math.sqrt((.1+dailyReference)**2/3));
+  assert.equal(Object.hasOwn(metrics,"excess"),false);
   near(metrics.calmar.value,metrics.annualReturn.value/.1);
   assert.equal(metrics.drawdownDays.value,3);
   assert.match(metrics.recoveryDays.reason,/尚未恢复/);
   assert.equal(points.fund[0].value,0);
-  assert.equal(points.benchmark[0].value,0);
+  assert.equal(Object.hasOwn(points,"benchmark"),false);
   near(points.drawdown[2].value,-.1);
 });
 
@@ -58,18 +61,15 @@ test("the seven list return periods use their own anchor and no inception substi
   for (const [period,anchor] of Object.entries(expected)) near(periodReturn(fund,period).value,107/anchor-1);
 });
 
-test("no unverified totals, generic benchmark, invented risk-free rate, or special-fund daily metrics", () => {
+test("fixed risk input is independent of optional rate history and unverified returns stay unavailable", () => {
   const input = fixture({risk_free:null,benchmark:null});
   const fund = normalizeFund(input);
   const window = selectWindow(fund,null,dates.at(-1));
   const base = analyzePerformance(fund,window);
-  assert.match(base.metrics.sharpe.reason,/缺少/);
-  assert.match(base.metrics.excess.reason,/官方业绩基准/);
-  assert.equal(base.points.benchmark.length,0);
+  assert.deepEqual(base,analyzePerformance(normalizeFund(fixture()),window));
+  assert.ok(Number.isFinite(base.metrics.sharpe.value));
   const special = normalizeFund({...input,category:"money"});
   assert.equal(analyzePerformance(special,window).metrics.volatility.value,null);
-  const misaligned = normalizeFund(fixture({benchmark:{...fixture().benchmark,rows:fixture().benchmark.rows.slice(1)}}));
-  assert.equal(analyzePerformance(misaligned,window).metrics.excess.value,null);
   const absent = normalizeFund({...input,return_basis:"unavailable",rows:input.rows.map(({date,unit_nav})=>({date,unit_nav}))});
   assert.equal(analyzePerformance(absent,selectWindow(absent,null,dates.at(-1))).metrics.return.value,null);
   const broken = normalizeFund({...input,rows:input.rows.map((r,i)=>i===2?{...r,return_index:null}:r)});
@@ -81,9 +81,35 @@ test("zero variance and downside are handled, and recovery is measured in calend
   const flatMetrics = analyzePerformance(flat,selectWindow(flat,null,dates.at(-1))).metrics;
   assert.equal(flatMetrics.volatility.value,0);
   assert.match(flatMetrics.sharpe.reason,/为零/);
-  assert.match(flatMetrics.sortino.reason,/为零/);
+  near(flatMetrics.sortino.value,-Math.sqrt(252));
+  const rising = normalizeFund(fixture({rows:fixture().rows.map((row,i)=>({...row,return_index:[100,102,104,107][i]}))}));
+  const risingMetrics = analyzePerformance(rising,selectWindow(rising,null,dates.at(-1))).metrics;
+  assert.equal(risingMetrics.sortino.value,null);
+  assert.match(risingMetrics.sortino.reason,/为零/);
   const recover = normalizeFund(fixture({rows:fixture().rows.map((row,i)=>i===3?{...row,return_index:111}:row)}));
   assert.equal(analyzePerformance(recover,selectWindow(recover,null,dates.at(-1))).metrics.recoveryDays.value,1);
+});
+
+test("every risk rating boundary uses the unrounded metric and the requested grade color",()=>{
+  const expected = {
+    volatility:[[0,"极低波动","dark-green"],[.05,"低波动","light-green"],[.1,"中等波动","yellow"],
+      [.2,"较高波动","orange"],[.3,"高波动","dark-orange"],[.4,"很高波动","red"],[.5,"极高波动","dark-red"]],
+    sharpe:[[-1,"低于参考收益","dark-red"],[0,"较差","red"],[.5,"一般","orange"],[1,"较好","light-green"],
+      [1.5,"良好","green"],[2,"优秀","dark-green"],[3,"非常高","dark-green"]],
+    sortino:[[-1,"未达目标","dark-red"],[0,"偏低","red"],[.5,"一般","orange"],[1,"较好","light-green"],
+      [2,"优秀","green"],[3,"非常高","dark-green"]],
+  };
+  for (const [id,bands] of Object.entries(expected)) {
+    for (const [index,[lower,label,color]] of bands.entries()) {
+      assert.deepEqual(riskRating(id,lower).slice(1),[label,color]);
+      assert.deepEqual(riskRating(id,lower+1e-8).slice(1),[label,color]);
+      if (index) assert.deepEqual(riskRating(id,lower-1e-8).slice(1),bands[index-1].slice(1));
+    }
+    for (const value of [NaN,null,Infinity,-Infinity]) assert.equal(riskRating(id,value),null);
+  }
+  assert.equal(riskRating("volatility",-1e-8),null);
+  assert.equal((.5-1e-8).toFixed(2),"0.50");
+  assert.equal(riskRating("sharpe",.5-1e-8)[1],"较差");
 });
 
 test("data contract checks namespace, chronology, metadata and search order", () => {

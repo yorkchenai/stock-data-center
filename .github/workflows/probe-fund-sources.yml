@@ -46,7 +46,7 @@ jobs:
           cat work/fund-probe/pages-transport.json
           node scripts/probe_fund_browser.mjs > work/fund-probe/browser.json
           cat work/fund-probe/browser.json
-      - name: Cross-check fund comparisons and Sharpe without retaining histories
+      - name: Cross-check fixed-reference fund risk without retaining histories
         run: |
           python -m scripts.probe_fund_comparison > work/fund-probe/comparison.json
           cat work/fund-probe/comparison.json

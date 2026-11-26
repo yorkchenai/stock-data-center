@@ -37,7 +37,9 @@ async function fund(code) {
   await page.locator("#returns-chart canvas").first().waitFor({timeout:15_000});
   await page.locator("#drawdown-chart canvas").first().waitFor({timeout:15_000});
   assert.match(await page.locator("#fund-nav").innerText(),/^\d+\.\d+$/);
-  assert.equal(await page.locator("#core-metrics article").count(),6);
+  assert.equal(await page.locator("#core-metrics article").count(),5);
+  assert.match(await page.locator("#risk-reference-note").innerText(),/2\.5%.*252/);
+  assert.equal(await page.getByText("超额收益",{exact:true}).count(),0);
   assert.equal(await page.getByRole("heading",{name:"强关联板块指数分析",exact:true}).count(),0);
 }
 

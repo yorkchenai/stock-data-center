@@ -1,5 +1,6 @@
 import { FUND_CATEGORIES, FUND_CODE, MAX_FILE_BYTES, fundFreshness, normalizeFund, searchCatalog, shanghaiToday } from "./data.mjs";
-import { PERIODS, analyzePerformance, periodReturn, periodStart, selectWindow } from "./performance.mjs";
+import { FUND_RISK_REFERENCE, PERIODS, analyzePerformance, periodReturn, periodStart, selectWindow } from "./performance.mjs";
+import { RISK_RATINGS, riskRating, riskRatingRange } from "./risk-ratings.mjs";
 import { createFundCharts } from "./charts.mjs";
 import { BUNDLE_BYTES, normalizeChartFile } from "./chart-data.mjs";
 import { createNavChart } from "./nav-chart.mjs";
@@ -20,7 +21,6 @@ function status(id, text, error = false) {
 }
 const pct = (v) => (100 * v).toFixed(2) + "%";
 const estimatePct = (v) => (v>0 ? "+" : "") + v.toFixed(2) + "%";
-const pp = (v) => (100 * v).toFixed(2) + " 个百分点";
 const decimal = (v) => v.toFixed(2);
 const nav = (v) => v.toFixed(4);
 const shown = (v, format) => v == null ? "—" : format(v);
@@ -41,11 +41,20 @@ const detailPeriods = [...PERIODS.slice(1),["all","全部历史"],["custom","自
 const coreDefinitions = [
   ["return","区间收益率",pct,"区间末总回报指数相对起点的变化。"],
   ["drawdown","最大回撤",pct,"区间内总回报指数从峰值到谷底的最大跌幅。"],
-  ["sharpe","夏普比率",decimal,"以有出处的年化无风险利率换算日利率。"],
-  ["volatility","年化波动率",pct,"日收益样本标准差按 252 日年化。"],
-  ["sortino","索提诺比率",decimal,"年化目标收益 0%，下行偏差包含全部日收益样本。"],
-  ["excess","超额收益",pp,"基金区间收益减去同起止日的官方比较基准收益。"],
+  ["sharpe","夏普比率",decimal],
+  ["volatility","年化波动率",pct],
+  ["sortino","索提诺比率",decimal],
 ];
+const riskSessions = FUND_RISK_REFERENCE.observations_per_year;
+const annualReference = new Intl.NumberFormat("zh-CN",{style:"percent",maximumFractionDigits:4})
+  .format(FUND_RISK_REFERENCE.annual_rate);
+const dailyReferenceFormula = `日参考收益率 = (1 + ${annualReference}) ^ (1 / ${riskSessions}) − 1。`;
+const riskFormulas = {
+  volatility:`日收益的样本标准差 × √${riskSessions}。数值越高，日常涨跌越大。`,
+  sharpe:`（平均日收益 − 日参考收益率）÷ 日收益的样本标准差 × √${riskSessions}。${dailyReferenceFormula}`,
+  sortino:`（平均日收益 − 日参考收益率）÷ 下行偏差 × √${riskSessions}。${dailyReferenceFormula} 最低可接受收益率（MAR）为年化 ${annualReference}。下行偏差是各日低于参考收益率的差额的均方根，达到参考值的日期按零计入。`,
+};
+$("risk-reference-note").textContent = `夏普比率及索提诺比率采用固定年化参考收益率${annualReference}计算，年化基数为${riskSessions}个交易日。评价等级为系统自定义经验标准，不构成投资建议。`;
 const charts = createFundCharts();
 const navChart = createNavChart($("nav-chart"),$("nav-hover"),$("nav-extremes"));
 let navMode = "adjusted";
@@ -125,6 +134,10 @@ async function loadOnlineFund(code, snapshotId) {
     try {
       const snapshot=await getPageSnapshot({asset_type:"fund",symbol:code},snapshotId);
       if (!snapshot.data.risk?.windows?.["1y"]?.metrics) throw new Error("共享快照缺少基金风险结果。");
+      const reference = snapshot.data.risk.reference;
+      if (!reference || Object.entries(FUND_RISK_REFERENCE).some(([key,value])=>reference[key]!==value)) {
+        throw new Error("共享快照的风险参考收益率与网页不一致。");
+      }
       if (!snapshotId && snapshot.data.fund.valuation_frequency==="daily" &&
           Date.parse(shanghaiToday())-Date.parse(snapshot.data_as_of)>7*86_400_000) {
         throw new Error("共享快照净值日期已超过 7 天。");
@@ -455,6 +468,30 @@ function renderIdentity(code,fund) {
   $("fund-start").value = first;
   $("fund-end").value = latest?.date ?? "";
 }
+function ratingBadge([,label,color]) {
+  return tag("span",label,{class:"risk-rating","data-rating-color":color});
+}
+function riskMetricHeading(id,label,tagName) {
+  const bands = RISK_RATINGS[id];
+  if (!bands) return tag(tagName,label);
+  const details = tag("details",null,{class:"risk-metric-help"});
+  const ranges = tag("dl",null,{class:"risk-rating-ranges"});
+  bands.forEach((band,index)=>{
+    const rating = tag("dd");
+    rating.append(ratingBadge(band));
+    ranges.append(tag("dt",riskRatingRange(id,index)),rating);
+  });
+  details.append(tag("summary",label),tag("p",riskFormulas[id]),ranges);
+  return details;
+}
+function metricResult(id,value,format) {
+  const result = tag("div",null,{class:"metric-result"});
+  result.append(tag("strong",shown(value,format)));
+  const rating = riskRating(id,value);
+  if (rating) result.append(ratingBadge(rating));
+  return result;
+}
+
 function renderAnalysis(requestedStart, requestedEnd) {
   const fund = loaded.get(selectedCode);
   const latest = fund?.rows.at(-1).date;
@@ -479,13 +516,13 @@ function renderAnalysis(requestedStart, requestedEnd) {
   const unavailable = precomputed ? (statsStart ? null : precomputed.metrics.return.reason) : range.error;
   $("range-status").textContent = unavailable ?? `统计范围 ${interval} · 已载入净值 ${fund.rows[0].date} 至 ${latest}`;
   $("core-metrics").replaceChildren(...coreDefinitions.map(([id,label,format,description])=>{
-    const article = tag("article",null,{class:"metric","data-metric":id,title:description});
+    const article = tag("article",null,{class:"metric","data-metric":id,...(description ? {title:description} : {})});
     const metric = analysis.metrics[id];
     const note = tag("small",metric.reason ?? interval);
     if (!metric.reason && statsStart) {
       note.replaceChildren(tag("time",statsStart,{datetime:statsStart})," 至 ",tag("time",statsEnd,{datetime:statsEnd}));
     }
-    article.append(tag("h3",label),tag("strong",shown(metric.value,format)),note);
+    article.append(riskMetricHeading(id,label,"h3"),metricResult(id,metric.value,format),note);
     return article;
   }));
   const riskMetrics = [
@@ -496,15 +533,11 @@ function renderAnalysis(requestedStart, requestedEnd) {
   $("risk-metrics").replaceChildren(...riskMetrics.map(([id,label,format])=>{
     const value = analysis.metrics[id];
     const item = tag("div",null,{class:"risk-metric"});
-    item.append(tag("span",label),tag("strong",shown(value.value,format)),tag("small",value.reason ?? (id.endsWith("Days") ? "自然日" : "")));
+    item.append(riskMetricHeading(id,label,"span"),metricResult(id,value.value,format),
+      tag("small",value.reason ?? (id.endsWith("Days") ? "自然日" : "")));
     return item;
   }));
-  const risk = fund?.risk_free;
-  const convention = {simple_act_365f:"单利 ACT/365F",effective_act_365f:"复利 ACT/365F",simple_act_360:"单利 ACT/360"};
-  const riskLabel = risk?.rows
-    ? `${risk.name} · ${convention[risk.convention]} · ${risk.effective_from} 至 ${risk.effective_to} · ${risk.source}`
-    : risk ? `年利率 ${pct(risk.annual_rate)} · 复利按 252 日折算 · ${risk.source}` : "缺少有出处的无风险利率时不计算夏普";
-  $("risk-assumptions").textContent = "日收益波动率与日超额收益夏普均按 252 个净值观察日年化。索提诺目标为 0%。" + riskLabel + "。";
+  $("risk-assumptions").textContent = `风险指标使用分红再投资日收益，按 ${riskSessions} 个交易日年化。`;
   $("returns-source").hidden = !fund;
   $("returns-source").textContent = fund ? `基金净值来源 ${fund.source.name} · 最新确认 ${latest}` : "";
   charts.display("fund",analysis.points.fund);

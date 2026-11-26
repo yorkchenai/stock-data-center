@@ -12,7 +12,6 @@ import csv
 import json
 import math
 import re
-import sys
 
 
 CATALOG_URL = "https://fund.eastmoney.com/js/fundcode_search.js"
@@ -454,10 +453,6 @@ def main():
     parser.add_argument("--manager", help="Disclosed fund management company")
     parser.add_argument("--inception", help="Disclosed share-class inception date")
     parser.add_argument("--daily-nav", action="store_true", help="Declare CSV as confirmed daily valuations")
-    parser.add_argument("--benchmark-data", type=Path, help="Local authorized benchmark component levels JSON")
-    rates = parser.add_mutually_exclusive_group()
-    rates.add_argument("--risk-free-start", type=date.fromisoformat, help="Opt in to local ChinaBond 3-month rates from YYYY-MM-DD")
-    rates.add_argument("--risk-free-data", type=Path, help="Local authorized historical rate JSON")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if not CODE.fullmatch(args.code):
@@ -481,27 +476,6 @@ def main():
             data = parse_history(body.decode("utf-8-sig"), args.code, metadata, modified_at)
         else:
             data = load_fund(args.code)
-        if args.benchmark_data:
-            if args.benchmark_data.stat().st_size > MAX_RESPONSE:
-                raise ValueError("补充基准数据文件过大。")
-            imported = json.loads(args.benchmark_data.read_text(encoding="utf-8-sig"))
-            if not isinstance(imported, dict):
-                raise ValueError("补充基准数据必须为 JSON 对象。")
-            data = attach_benchmark_data(data, imported)
-        if args.risk_free_data:
-            if args.risk_free_data.stat().st_size > MAX_RESPONSE:
-                raise ValueError("补充利率数据文件过大。")
-            rate_data = json.loads(args.risk_free_data.read_text(encoding="utf-8-sig"))
-            if not isinstance(rate_data, dict) or not isinstance(rate_data.get("rows"), list):
-                raise ValueError("补充利率数据必须包含历史观察序列。")
-            data = {**data, "risk_free": rate_data}
-        if args.risk_free_start:
-            from .fund_rates import fetch_rate_history, load_chinabond_rates
-            end = date.fromisoformat(data["rows"][-1]["date"])
-            try:
-                data = {**data, "risk_free": load_chinabond_rates(args.risk_free_start, end, fetch_rate_history)}
-            except (OSError, ValueError, TimeoutError) as error:
-                print(f"历史无风险利率不可用：{error}", file=sys.stderr)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with args.output.open("x", encoding="utf-8") as stream:
             json.dump(data, stream, ensure_ascii=False, allow_nan=False)

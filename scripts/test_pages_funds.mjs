@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { normalizeFund } from "../web/funds/data.mjs";
-import { analyzePerformance, periodStart, selectWindow } from "../web/funds/performance.mjs";
+import { analyzePerformance, FUND_RISK_REFERENCE, periodStart, selectWindow } from "../web/funds/performance.mjs";
 
 const site = path.resolve(process.env.PAGES_SITE || "work/pages-site");
 const output = path.resolve(process.env.BROWSER_OUTPUT || "work/pages-browser");
@@ -162,7 +162,21 @@ try {
     await dataPanel.locator("#fund-freshness").waitFor();
     await dataPanel.getByText("导入该基金数据",{exact:true}).waitFor();
     assert.equal(await page.locator("#detail-status").isVisible(),false);
-    assert.equal(await page.locator("#core-metrics article").count(),6);
+    assert.equal(await page.locator("#core-metrics article").count(),5);
+    assert.match(await page.locator("#risk-reference-note").innerText(),/2\.5%.*252.*不构成投资建议/);
+    const sharpeCard = page.locator('[data-metric="sharpe"]');
+    assert.notEqual(await sharpeCard.locator(".metric-result .risk-rating").innerText(),"");
+    await sharpeCard.locator("summary").click();
+    assert.match(await sharpeCard.locator(".risk-metric-help p").innerText(),/日参考收益率.*√252/);
+    assert.equal(await sharpeCard.locator(".risk-rating-ranges dd:visible").count(),7);
+    await sharpeCard.locator("summary").click();
+    for (const id of ["volatility","sortino"]) {
+      const card = page.locator(`[data-metric="${id}"]`);
+      await card.locator(".metric-result .risk-rating").waitFor();
+      await card.locator("summary").click();
+      assert.equal(await card.locator(".risk-rating-ranges dd:visible").count(),id==="sortino" ? 6 : 7);
+      await card.locator("summary").click();
+    }
     const grid = await page.locator("#core-metrics").evaluate((el)=>getComputedStyle(el).gridTemplateColumns.split(" ").length);
     assert.equal(grid,mobile ? 2 : 3);
     const detail=page.locator("#fund-missing-facts");
@@ -203,18 +217,20 @@ try {
     assert.equal(await page.locator("#benchmark-validity").innerText(),"当前有效性待核实");
     assert.equal(await page.getByRole("heading",{name:"强关联板块指数分析"}).count(),0);
     assert.equal(await page.locator("#benchmark-line").count(),0);
-    assert.equal(await page.locator("[data-metric='excess'] strong").innerText(),"—");
+    assert.equal(await page.getByText("超额收益",{exact:true}).count(),0);
     assert.notEqual(await page.locator("[data-metric='sharpe'] strong").innerText(),"—");
     await page.getByRole("button",{name:"自定义",exact:true}).click();
     await page.locator("#fund-start").fill("2026-09-01");
     await page.locator("#fund-end").fill("2026-10-20");
     await page.getByRole("button",{name:"应用区间"}).click();
     assert.match(await page.locator("#range-status").innerText(),/2026-09-01 至 2026-10-20/);
-    assert.match(await page.locator("[data-metric='excess'] strong").innerText(),/个百分点/);
+    assert.equal(await page.locator("[data-metric='excess']").count(),0);
     await page.locator("#fund-start").fill("2026-11-01");
     await page.getByRole("button",{name:"应用区间"}).click();
     assert.match(await page.locator("#range-status").innerText(),/开始日期不能晚于结束日期/);
     assert.equal(await value.innerText(),"—");
+    assert.equal(await sharpeCard.locator("strong").innerText(),"—");
+    assert.equal(await sharpeCard.locator(".metric-result .risk-rating").count(),0);
     assert.deepEqual(await extrema(),[]);
     await page.getByRole("button",{name:"近1年",exact:true}).click();
     assert.equal(await value.innerText(),initial);
@@ -231,7 +247,7 @@ try {
     await page.getByRole("link",{name:second.name}).click();
     assert.equal(await page.locator("#benchmark-disclosure").innerText(),"业绩比较基准暂未核实");
     assert.equal(await page.locator("[data-metric='sharpe'] strong").innerText(),"—");
-    assert.equal(await page.locator("[data-metric='excess'] strong").innerText(),"—");
+    assert.equal(await page.locator("[data-metric='excess']").count(),0);
     assert.match(await page.locator("#holdings-data").innerText(),/暂无/);
     await page.getByRole("link",{name:"返回基金列表"}).click();
     await page.reload();
@@ -263,7 +279,7 @@ try {
     if (category === "page") {
       const normalized = normalizeFund(fund);
       const range = selectWindow(normalized,periodStart(data.data_as_of,"1y"),data.data_as_of);
-      Object.assign(data,{detail_status:"available",data:{fund,risk:{windows:{"1y":{...range,
+      Object.assign(data,{detail_status:"available",data:{fund,risk:{reference:FUND_RISK_REFERENCE,windows:{"1y":{...range,
         ...analyzePerformance(normalized,range)}}}}});
     }
     return route.fulfill({json:data,headers:{"Access-Control-Allow-Origin":"*"}});

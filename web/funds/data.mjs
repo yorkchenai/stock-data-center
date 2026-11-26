@@ -1,6 +1,5 @@
 import { validDate } from "../engine.mjs";
 import { normalizeBenchmark } from "./benchmark.mjs";
-import { normalizeRiskFree } from "./risk-free.mjs";
 
 export const FUND_CATEGORIES = {
   stock: "股票型", mixed: "混合型", bond: "债券型", index: "指数 / ETF 联接",
@@ -65,7 +64,10 @@ export function normalizeFund(raw) {
   if (basis !== "unavailable" && !rows.some((row) => row.return_index !== null)) {
     throw new Error("已声明总回报口径，实际缺少有效序列。");
   }
-  const benchmark = normalizeBenchmark(raw.benchmark, shanghaiToday());
+  const benchmark = raw.benchmark ? normalizeBenchmark({
+    official:raw.benchmark.official,name:raw.benchmark.name,formula:raw.benchmark.formula,
+    source:raw.benchmark.source,source_url:raw.benchmark.source_url,regimes:raw.benchmark.regimes,
+  }, latestDay) : null;
   const disclosure = raw.benchmark_disclosure;
   let benchmarkDisclosure = null;
   if (optionalText(disclosure?.formula)) {
@@ -73,7 +75,6 @@ export function normalizeFund(raw) {
       if (validDate(disclosure.effective_from) <= latestDay) benchmarkDisclosure = disclosure;
     } catch { /* Ignore invalid optional disclosure dates. */ }
   }
-  const riskFree = normalizeRiskFree(raw.risk_free, shanghaiToday());
   const category = Object.hasOwn(FUND_CATEGORIES, raw.category) ? raw.category : "unknown";
   const normalFrequency = ["stock", "mixed", "bond", "index", "other"].includes(category) && raw.valuation_frequency === "daily";
   const holdings = raw.holdings;
@@ -93,7 +94,7 @@ export function normalizeFund(raw) {
     manager: optionalText(raw.manager), fund_manager: optionalText(raw.fund_manager),
     size: optionalText(raw.size), fee: optionalText(raw.fee), reference: optionalText(raw.reference),
     holdings: disclosedHoldings, related, benchmark, benchmark_disclosure: benchmarkDisclosure,
-    risk_free: riskFree, rows, return_basis: basis, valuation_frequency:raw.valuation_frequency==="daily"?"daily":null,
+    rows, return_basis: basis, valuation_frequency:raw.valuation_frequency==="daily"?"daily":null,
     return_note: optionalText(raw.return_note), source,
     normalFrequency, mode: raw.synthetic === true ? "synthetic" : "reported",
   };

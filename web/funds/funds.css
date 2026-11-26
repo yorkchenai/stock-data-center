@@ -83,6 +83,21 @@
 .metric strong {display: block; margin: 8px 0; font-size: 25px; font-variant-numeric: tabular-nums;}
 .metric h3 {margin: 0; font-size: 14px;}
 .metric small {display: block; color: var(--muted); overflow-wrap: anywhere;}
+.metric-result {display: flex; flex-wrap: wrap; align-items: center; column-gap: 7px;}
+.risk-rating {display: inline-block; padding: 2px 5px; border-radius: 4px; font-size: 13px; line-height: 1.3; white-space: nowrap;}
+.risk-rating[data-rating-color="dark-green"] {color: #14532d; background: #d0ead9;}
+.risk-rating[data-rating-color="green"] {color: #156037; background: #e0f1e4;}
+.risk-rating[data-rating-color="light-green"] {color: #365617; background: #edf5df;}
+.risk-rating[data-rating-color="yellow"] {color: #674b00; background: #fff3c4;}
+.risk-rating[data-rating-color="orange"] {color: #8b4403; background: #fff0d8;}
+.risk-rating[data-rating-color="dark-orange"] {color: #873316; background: #ffe4ce;}
+.risk-rating[data-rating-color="red"] {color: #9c292c; background: #fce5e5;}
+.risk-rating[data-rating-color="dark-red"] {color: #801c2c; background: #f7d9de;}
+.risk-metric-help summary {cursor: pointer; font-size: 14px; font-weight: 650; padding-block: 2px;}
+.risk-metric-help p {margin: 6px 0; font-size: 13px; line-height: 1.45;}
+.risk-rating-ranges {display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 5px 8px; margin: 6px 0; font-size: 13px;}
+.risk-rating-ranges dd {margin: 0;}
+#risk-reference-note {margin-block: 0 14px;}
 .fund-chart {height: 320px; min-width: 0; position: relative;}
 .drawdown-chart {height: 190px;}
 .fund-chart.empty {display: grid; place-items: center; height: 115px; color: var(--muted); text-align: center; border: 1px dashed var(--line);}
@@ -102,8 +117,8 @@
 .chart-extremes {display: flex; flex-wrap: wrap; gap: 3px 16px; margin: 6px 0 0; font-variant-numeric: tabular-nums;}
 .risk-grid {display: grid; grid-template-columns: repeat(auto-fit, minmax(145px,1fr)); gap: 8px; margin-bottom: 13px;}
 .risk-metric {padding: 9px; background: #f8fafb;}
-.risk-metric span, .risk-metric strong {display: block;}
-.risk-metric span {color: var(--muted); font-size: 13px; margin-bottom: 4px;}
+.risk-metric > span, .risk-metric strong {display: block;}
+.risk-metric > span {color: var(--muted); font-size: 13px; margin-bottom: 4px;}
 .fund-facts {display: grid; grid-template-columns: minmax(100px,auto) 1fr; gap: 8px; font-size: 14px;}
 .fund-facts dt {color: var(--muted);}
 .fund-facts dd {margin: 0; overflow-wrap: anywhere;}
@@ -149,7 +164,10 @@
   .metric time {white-space: nowrap;}
   .risk-grid {grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; margin-bottom: 8px;}
   .risk-metric {padding: 8px;}
-  .risk-metric span {margin-bottom: 2px;}
+  .risk-metric > span {margin-bottom: 2px;}
+  .risk-metric-help summary {padding-block: 6px;}
+  .risk-rating-ranges {display: grid; grid-template-columns: 1fr; gap: 2px;}
+  .risk-rating-ranges dd {margin-bottom: 4px;}
   .risk-metric strong {font-size: 16px; line-height: 1.25;}
   .risk-metric small {display: block; overflow-wrap: anywhere;}
   .risk-metric small:empty {display: none;}

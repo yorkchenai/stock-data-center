@@ -322,7 +322,11 @@ try {
     body:file.replace("<html ",`<html data-analysis-origin="${service}" `)}));
   const requests = [];
   let failedHistoryCode = null;
-  await context.route("https://fund.eastmoney.com/**",(route)=>route.abort());
+  // Give the browser an explicit HTTP outage. An aborted CORS fetch triggers
+  // the sandbox script fallback, whose requests can escape this test fixture.
+  await context.route("https://fund.eastmoney.com/**",(route)=>route.fulfill({
+    status:503,headers:{"Access-Control-Allow-Origin":"*"},body:"NAV fixture unavailable",
+  }));
   await context.route(service+"/api/analysis**",(route)=>{
     const {searchParams:query} = new URL(route.request().url());
     const symbol = query.get("symbol");

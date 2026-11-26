@@ -9,7 +9,6 @@ on:
       - "web/funds/**"
       - "web/funds.html"
       - "scripts/test_live_fund_charts.mjs"
-      - "scripts/verify_fund_chart_observations.py"
       - "scripts/audit_sector_volume.py"
   workflow_dispatch:
 
@@ -69,7 +68,6 @@ jobs:
             sleep 1
           done
           node scripts/test_live_fund_charts.mjs
-          python -m scripts.verify_fund_chart_observations work/fund-chart-review/observations.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

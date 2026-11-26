@@ -4,15 +4,20 @@ import { createServer } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
+import { normalizeFund } from "../web/funds/data.mjs";
+import { analyzePerformance, periodStart, selectWindow } from "../web/funds/performance.mjs";
 
 const site = path.resolve(process.env.PAGES_SITE || "work/pages-site");
 const output = path.resolve(process.env.BROWSER_OUTPUT || "work/pages-browser");
 const prefix = "/stock-data-center/";
 const mime = {".html":"text/html",".mjs":"text/javascript",".js":"text/javascript",".css":"text/css",".json":"application/json"};
 await mkdir(output,{recursive:true});
+let fixtureSina;
 const server = createServer(async (request,response)=>{
   try {
-    const location = new URL(request.url,"http://localhost").pathname;
+    const url = new URL(request.url,"http://localhost");
+    const location = url.pathname;
+    if (location==="/__fixture-sina" && fixtureSina) return fixtureSina(url.searchParams,response);
     if (!location.startsWith(prefix)) return response.writeHead(404).end();
     const file = path.resolve(site,location.slice(prefix.length) || "index.html");
     if (!file.startsWith(site+path.sep)) return response.writeHead(403).end();
@@ -78,6 +83,14 @@ function fixtureBundle() {
       volume:i?null:100,VOL5:i?null:100,VOL10:i?null:100})),
   }))};
 }
+const expectedDisclosures = {
+  "014194": ["中证芯片产业指数收益率 × 95% + 银行人民币活期存款利率（税后） × 5%", "2021-12-02",
+    "https://www.99fund.com/main/products/pofund/014194/fundyield.shtml"],
+  "018993": ["中证数字经济主题指数收益率 × 65% + 中证港股通综合指数（人民币）收益率 × 15% + 银行活期存款利率（税后） × 20%",
+    "2023-09-12", "https://www.zofund.com/index2015/018993.shtml"],
+  "110022": ["中证内地消费主题指数收益率 × 85% + 中债总指数收益率 × 15%", "2010-08-20",
+    "https://www.efunds.com.cn/Mobile/fund/110022.shtml"],
+};
 const report = {mode:"explicitly labeled synthetic fund test",viewports:[]};
 try {
   for (const [width,height,mobile] of [[1440,900,false],[390,844,true]]) {
@@ -163,7 +176,11 @@ try {
       await page.mouse.move(bound.x+bound.width/2,bound.y+100);
       assert.equal(await page.locator("#core-metrics").innerText(),stats);
     }
-    assert.equal(await page.locator("#benchmark-disclosure").innerText(),"官方业绩比较基准：合成比较基准");
+    assert.equal(await page.locator("#benchmark-disclosure").innerText(),"合成比较基准");
+    assert.equal(await page.locator("#benchmark-source [data-date-kind=effective]").textContent(),first.inception);
+    assert.match(await page.locator("#benchmark-source").innerText(),/披露日期 未披露/);
+    assert.equal(await page.locator("#benchmark-validity").innerText(),"当前有效性待核实");
+    assert.equal(await page.getByRole("heading",{name:"强关联板块指数分析"}).count(),0);
     assert.equal(await page.locator("#benchmark-line").count(),0);
     assert.equal(await page.locator("[data-metric='excess'] strong").innerText(),"—");
     assert.notEqual(await page.locator("[data-metric='sharpe'] strong").innerText(),"—");
@@ -183,40 +200,16 @@ try {
     await page.screenshot({path:path.join(output,`funds-detail-${width}.png`),fullPage:true});
     await page.locator("#detail-import").setInputFiles({name:"test-fund-bundle.json",mimeType:"application/json",
       buffer:Buffer.from(JSON.stringify(fixtureBundle()))});
-    await page.locator('#sector-chart[data-chart-mode="candles"]').waitFor();
-    assert.equal(await page.locator("#sector-vol label").count(),3);
-    assert.match(await page.locator("#sector-vol").innerText(),/手/);
-    assert.equal(await page.locator('#sector-chart table tr').count()>=3,true);
-    assert.match(await page.locator('#sector-volume-note').innerText(),/日成交量 · 手/);
-    if (!mobile) {
-      await page.locator("#sector-chart").scrollIntoViewIfNeeded();
-      const plot=await page.locator("#sector-chart").boundingBox();
-      const x=plot.x+plot.width*.52;
-      await page.mouse.move(x,plot.y+plot.height*.30);
-      const previous=await page.locator("#sector-ohlc").innerText();
-      assert.match(previous,/^\d{4}-\d{2}-\d{2}/);
-      assert.notEqual(previous.slice(0,10),first.rows.at(-1).date);
-      await page.mouse.move(x,plot.y+plot.height*.78);
-      assert.equal(await page.locator("#sector-ohlc").innerText(),previous);
-      assert.equal(await page.locator('[data-readout="volume"]').innerText(),"100");
-    }
-    await page.locator("[data-indicator='VOL10']").uncheck();
-    assert.equal(await page.locator("[data-indicator='VOL10']").isChecked(),false);
+    await page.waitForFunction(()=>document.getElementById("detail-status").textContent === "已载入 000001。");
     await page.locator("#nav-raw").click();
     assert.match(await page.locator("#nav-basis").innerText(),/原始单位净值/);
-    await page.locator("[data-index='932139']").click();
-    await page.locator('#sector-chart[data-chart-mode="close"]').waitFor();
-    assert.equal(await page.locator("#sector-vol label").count(),0);
-    assert.equal(await page.locator("#sector-chart.with-volume").count(),0);
-    assert.match(await page.locator("#sector-evidence").innerText(),/持仓资料存在冲突/);
-    assert.match(await page.locator("#sector-volume-note").innerText(),/暂不可用/);
+    assert.equal(await page.locator("#sector-chart").count(),0);
     await page.getByRole("link",{name:"返回基金列表"}).click();
     await page.getByRole("link",{name:second.name}).click();
-    assert.equal(await page.locator("#benchmark-disclosure").innerText(),"官方业绩比较基准：暂未核实");
+    assert.equal(await page.locator("#benchmark-disclosure").innerText(),"业绩比较基准暂未核实");
     assert.equal(await page.locator("[data-metric='sharpe'] strong").innerText(),"—");
     assert.equal(await page.locator("[data-metric='excess'] strong").innerText(),"—");
     assert.match(await page.locator("#holdings-data").innerText(),/暂无/);
-    assert.equal(await page.locator("#sector-tabs button").count(),0);
     await page.getByRole("link",{name:"返回基金列表"}).click();
     await page.reload();
     await page.getByRole("link",{name:first.name}).waitFor();
@@ -228,6 +221,133 @@ try {
     await context.close();
     report.viewports.push({width,height,pass:true});
   }
+  const context = await browser.newContext({viewport:{width:390,height:844}});
+  const service = "https://snapshot.test";
+  const file = await readFile(path.join(site,"funds.html"),"utf8");
+  const {analysis_model_version:model} = JSON.parse(await readFile(path.join(site,"build-info.json"),"utf8"));
+  await context.route(origin+"funds.html**",(route)=>route.fulfill({contentType:"text/html",
+    body:file.replace("<html ",`<html data-analysis-origin="${service}" `)}));
+  const requests = [];
+  await context.route(service+"/api/analysis**",(route)=>{
+    const {searchParams:query} = new URL(route.request().url());
+    const symbol = query.get("symbol");
+    const category = query.get("category");
+    requests.push([symbol,category]);
+    const fund = {...first,code:symbol,valuation_frequency:null};
+    const data = {snapshot_id:"11111111-1111-4111-8111-111111111111",asset_type:"fund",symbol,
+      status:"partial",model_version:model,schema_version:1,data_as_of:fund.rows.at(-1).date,
+      expires_at:new Date(Date.now()+60_000).toISOString()};
+    if (category === "page") {
+      const normalized = normalizeFund(fund);
+      const range = selectWindow(normalized,periodStart(data.data_as_of,"1y"),data.data_as_of);
+      Object.assign(data,{detail_status:"available",data:{fund,risk:{windows:{"1y":{...range,
+        ...analyzePerformance(normalized,range)}}}}});
+    }
+    return route.fulfill({json:data,headers:{"Access-Control-Allow-Origin":"*"}});
+  });
+  const valuationRequests = [];
+  let networkFailure = false;
+  let staleQuotes = false;
+  await context.route("https://fundcomapi.tiantianfunds.com/**",(route)=>{
+    const code = new URL(route.request().url()).searchParams.get("FCODES");
+    valuationRequests.push(["eastmoney",code]);
+    return route.fulfill({status:networkFailure ? 503 : 200,headers:{"Access-Control-Allow-Origin":"*"},
+      json:{success:true,data:code==="014194" ? [{FCODE:code,GSZ:1.2297,GSZZL:-1.06,GZTIME:"2026-11-26 11:30"}] : []}});
+  });
+  fixtureSina = (query,response)=>{
+    const code = query.get("symbol");
+    valuationRequests.push(["sina",code]);
+    const price = code==="018993" ? 2.4485 : 2.9550;
+    const payload = {result:{status:{code:0},data:{symbol:code,networth:[{
+      pre_date:staleQuotes ? "2026-11-25" : "2026-11-26",min_time:"11:33:00",
+      pre_nav:price,growthrate:code==="110022" ? null : 0.011762,pre_nav2:price+0.0198,growthrate2:0.01996,
+    }]}}};
+    return response.writeHead(networkFailure ? 503 : 200,{"Content-Type":"application/json"}).end(JSON.stringify(payload));
+  };
+  const estimateScript = await readFile(path.join(site,"funds/valuation.mjs"),"utf8");
+  // The live browser suite exercises the real JSONP sandbox; the clock test uses an exact local source.
+  await context.route(origin+"funds/valuation.mjs",(route)=>route.fulfill({contentType:"text/javascript",
+    body:estimateScript.replace("await readSinaValuation(url,signal)",
+      'await fetch("/__fixture-sina"+new URL(url).search,{signal}).then((response)=>{if (!response.ok) throw new Error("fixture outage"); return response.json();})')}));
+  await context.addInitScript(()=>{
+    Object.defineProperty(document,"hidden",{get:()=>window.fixtureHidden===true});
+  });
+  const page = await context.newPage();
+  await page.clock.install({time:new Date("2026-11-26T04:25:00Z")});
+  const navigate = (code)=>page.evaluate((symbol)=>{
+    history.pushState(null,"",`?fund=${symbol}`);
+    dispatchEvent(new PopStateEvent("popstate"));
+  },code);
+  const expectedEstimates = {
+    "014194":[["fundgz","估值1","-1.06%"]],
+    "018993":[["sina_ds2","估值2","+1.18%"],["sina_ds3","估值3","+2.00%"]],
+    "110022":[["sina_ds3","估值3","+2.00%"]],
+  };
+  for (const [code,[formula,since,source]] of Object.entries(expectedDisclosures)) {
+    if (page.url()==="about:blank") await page.goto(origin+"funds.html?fund="+code);
+    else await navigate(code);
+    await page.locator("#fund-source").getByText(/共享快照/).waitFor();
+    assert.equal(await page.locator("#benchmark-disclosure").innerText(),formula);
+    assert.equal(await page.locator("#benchmark-source [data-date-kind=effective]").textContent(),since);
+    assert.equal(await page.locator("#benchmark-source a").last().getAttribute("href"),source);
+    assert.equal(await page.locator("#tracking-index").isVisible(),code==="014194");
+    if (code==="014194") assert.equal(await page.locator("#tracking-index").innerText(),"跟踪指数 · 中证芯片产业指数");
+    assert.equal(await page.getByRole("heading",{name:"强关联板块指数分析"}).count(),0);
+    assert.equal(await page.locator("#benchmark-source [data-date-kind=published]").textContent(),
+      code==="018993" ? "2026-10-20" : "2026-10-27");
+    assert.equal(await page.locator("#benchmark-validity").isVisible(),false);
+    const estimates = page.locator("#valuation-quotes article");
+    await estimates.first().waitFor({timeout:18_000}).catch(async (error)=>{
+      throw new Error(`${code} · ${await page.locator("#valuation-status").innerText()} · ${JSON.stringify(valuationRequests)}`,{cause:error});
+    });
+    assert.deepEqual(await estimates.evaluateAll((items)=>items.map((item)=>[
+      item.dataset.valuationSource,...Array.from(item.children,(child)=>child.textContent),
+    ])),expectedEstimates[code]);
+    assert.equal(await page.locator("#fund-nav").innerText(),first.rows.at(-1).unit_nav.toFixed(4));
+  }
+  assert.deepEqual(requests,Object.keys(expectedDisclosures).flatMap((code)=>[[code,null],[code,"page"]]));
+  const quote = page.locator("#valuation-quotes article").first();
+  const previous = await quote.innerText();
+  const currentCode = "018993";
+  const navCount = requests.length;
+  let valuationCount = valuationRequests.length;
+  await page.clock.fastForward(60_000);
+  await page.waitForFunction(()=>!document.getElementById("valuation-refresh").disabled);
+  assert.deepEqual(valuationRequests.slice(valuationCount),[["eastmoney",currentCode],["sina",currentCode]]);
+
+  valuationCount = valuationRequests.length;
+  await page.evaluate(()=>{
+    window.fixtureHidden = true;
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.fastForward(120_000);
+  assert.equal(valuationRequests.length,valuationCount);
+  await page.evaluate(()=>{
+    window.fixtureHidden = false;
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.waitForFunction(()=>!document.getElementById("valuation-refresh").disabled);
+  assert.deepEqual(valuationRequests.slice(valuationCount),[["eastmoney",currentCode],["sina",currentCode]]);
+
+  networkFailure = true;
+  await page.getByRole("button",{name:"刷新估值"}).click();
+  await page.getByText("更新失败 · 保留上次成功估值").waitFor();
+  assert.equal(await quote.innerText(),previous);
+  networkFailure = false;
+  staleQuotes = true;
+  await page.getByRole("button",{name:"刷新估值"}).click();
+  await page.getByText("暂无当日估值",{exact:true}).waitFor();
+  assert.equal(await page.locator("#valuation-quotes article").count(),0);
+  assert.equal(requests.length,navCount);
+  await navigate("003095");
+  await page.getByText("历史基准披露",{exact:true}).click();
+  const old = page.locator("#benchmark-history-list li").first();
+  assert.match(await old.innerText(),/65%.*35%/);
+  assert.equal(await old.locator("[data-date-kind=published]").textContent(),"2026-10-27");
+  assert.equal(await old.locator("[data-date-kind=effective]").textContent(),"2026-07-01");
+  assert.equal(await old.locator("a").count(),1);
+  report.valuation = {fixedLabels:true,automatic:true,background:true,manual:true,retainsLastQuote:true,historyLoads:0};
+  await context.close();
 } finally {
   await browser.close();
   await new Promise((resolve)=>server.close(resolve));

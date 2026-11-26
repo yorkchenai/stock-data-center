@@ -7,14 +7,14 @@ const output=process.env.FUND_CHART_OUTPUT??"work/fund-chart-review";
 await mkdir(output,{recursive:true});
 const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH??"/usr/bin/chromium",
   headless:true,args:["--no-sandbox"]});
-const chartCanvas="#sector-chart canvas";
-const cases=[["110022","399997"],["006751","000994"],["003095","000991"]];
-const report={mode:"live fund data, CSI rankings and stock-engine charts",funds:{},closeOnly:null};
+const codes=["110022","006751","003095"];
+const report={mode:"live fund NAV, returns, and risk charts",funds:{}};
 const disclosures={
-  "110022":["暂未核实",null],
-  "006751":["中证互联网指数收益率×65%＋恒生科技指数收益率×20%＋中债-国债总财富（1-3年）指数收益率×15%（2026-07-27起）",
+  "110022":["中证内地消费主题指数收益率 × 85% + 中债总指数收益率 × 15%","2010-08-20",
+    "https://www.efunds.com.cn/Mobile/fund/110022.shtml"],
+  "006751":["中证互联网指数收益率 × 65% + 恒生科技指数收益率 × 20% + 中债-国债总财富（1-3年）指数收益率 × 15%","2026-07-27",
     "https://www.fullgoal.com.cn/noticedetails/107041/index.html"],
-  "003095":["中证医药卫生指数收益率×90%＋中证综合债指数收益率×10%（2026-09-21起）",
+  "003095":["中证医药卫生指数收益率 × 90% + 中证综合债指数收益率 × 10%","2026-09-21",
     "https://www.zofund.com/2026/wsnotice/20261027/ebc7404b0b5b47b8a35e82b4fc5607f6.pdf"],
 };
 const formatReturn=(value)=>`${value*100>=.005?"+":""}${(value*100).toFixed(2)}%`;
@@ -23,24 +23,6 @@ async function lookup(path) {
   assert.equal(response.status,200,await response.clone().text().then((body)=>body.slice(0,200)));
   return response.json();
 }
-function checkAverages(payload, field, label, periods) {
-  const last=payload.rows.at(-1);
-  const checks={};
-  for (const n of periods) {
-    const key=label+n;
-    const period=payload.rows.slice(-n);
-    const enough=period.length===n && period.every((value)=>Number.isFinite(value[field]));
-    if (!enough) {
-      assert.equal(last[key],null);
-      continue;
-    }
-    const mean=period.reduce((total,x)=>total+x[field],0)/n;
-    assert.ok(Number.isFinite(last[key])&&Math.abs(mean-last[key])<1e-7,key);
-    checks[key]=last[key];
-  }
-  return checks;
-}
-
 async function open(page,code) {
   await page.addInitScript(()=>{
     let library;
@@ -49,7 +31,6 @@ async function open(page,code) {
       set:(original)=>{
         library={...original,createChart(element,options){
           const chart=original.createChart(element,options);
-          if (element.id==="sector-chart") window.testSector=chart;
           if (element.id==="returns-chart") {
             const series=[];
             window.testReturns={chart,series};
@@ -67,13 +48,12 @@ async function open(page,code) {
   });
   await page.goto(`${origin}/funds.html?fund=${code}`);
   await page.locator("#nav-chart canvas").first().waitFor({timeout:30000});
-  await page.locator(chartCanvas).first().waitFor({timeout:300_000});
 }
 
 async function verifyLayout(page, width, height, mobile) {
   await page.evaluate(()=>new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const dimensions=await page.evaluate(()=>{
-    const ids=["nav-chart","returns-chart","drawdown-chart","sector-chart"];
+    const ids=["nav-chart","returns-chart","drawdown-chart"];
     const charts=ids.map((id)=>{
       const node=document.getElementById(id);
       const rect=node.getBoundingClientRect();
@@ -84,26 +64,16 @@ async function verifyLayout(page, width, height, mobile) {
           return bounds.right<=rect.right+1 && bounds.bottom<=rect.bottom+3;
         })};
     });
-    const panes=[...document.querySelectorAll("#sector-chart table tr")]
-      .map((row)=>row.getBoundingClientRect().height).filter((height)=>height>30);
     const columns=getComputedStyle(document.getElementById("core-metrics")).gridTemplateColumns.split(" ").length;
-    const targets=[...document.querySelectorAll("#sector-tabs button,#sector-periods button,#fund-periods button,#sector-refresh")];
+    const targets=[...document.querySelectorAll("#fund-periods button")];
     const disclosure=document.getElementById("benchmark-disclosure");
     const axisWidth=window.testReturns.chart.priceScale("right").width();
     const fontSize=(selector)=>parseFloat(getComputedStyle(document.querySelector(selector)).fontSize);
-    const indicators=[...document.querySelectorAll(".indicator-toggles label")].map((label)=>{
-      const rect=label.getBoundingClientRect();
-      return {size:parseFloat(getComputedStyle(label).fontSize),height:rect.height,
-        fit:label.scrollWidth<=label.clientWidth && rect.bottom<=document.getElementById("sector-chart").getBoundingClientRect().top};
-    });
-    const volumeTicksFullyVisible=window.testSector.priceScale("right",1).options().entireTextOnly;
-    return {width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,charts,panes,columns,axisWidth,
-      volumeTicksFullyVisible,
-      indicators,titleSize:fontSize("#fund-title"),metricSize:fontSize(".metric strong"),
-      riskSize:fontSize(".risk-metric strong"),rankingSize:fontSize("#sector-metrics"),
+    return {width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,charts,columns,axisWidth,
+      titleSize:fontSize("#fund-title"),metricSize:fontSize(".metric strong"),
+      riskSize:fontSize(".risk-metric strong"),
       disclosureFits:disclosure.scrollWidth<=disclosure.clientWidth,
       minimumTarget:Math.min(...targets.map((button)=>button.getBoundingClientRect().height)),
-      tabLabelFits:[...document.querySelectorAll("#sector-tabs button")].every((tab)=>tab.scrollWidth<=tab.clientWidth),
       navTextNodes:[...document.getElementById("nav-chart").childNodes].some((node)=>node.nodeType===3&&node.textContent.trim())};
   });
   assert.equal(dimensions.width,width);
@@ -113,22 +83,11 @@ async function verifyLayout(page, width, height, mobile) {
     JSON.stringify(dimensions));
   assert.equal(dimensions.navTextNodes,false,"loading or empty-state text must not cover the live NAV chart");
   assert.equal(dimensions.columns,mobile?2:3);
-  assert.equal(dimensions.tabLabelFits,true);
   assert.equal(dimensions.disclosureFits,true);
   assert.ok(dimensions.axisWidth>=57,JSON.stringify(dimensions));
   assert.ok(dimensions.minimumTarget>=(mobile?44:36));
-  assert.equal(dimensions.panes.length,2,JSON.stringify(dimensions.panes));
-  assert.ok(Math.abs(dimensions.panes[1]/(dimensions.panes[0]+dimensions.panes[1])-.3)<.04,
-    JSON.stringify(dimensions.panes));
-  const sectorHeight=dimensions.charts.find(({id})=>id==="sector-chart").height;
-  assert.equal(sectorHeight,mobile ? {390:450,430:490}[width] : 510);
   assert.deepEqual([dimensions.titleSize,dimensions.metricSize],mobile ? [20,20] : [27,25]);
-  assert.equal(dimensions.rankingSize,14);
-  assert.equal(dimensions.volumeTicksFullyVisible,mobile);
-  assert.equal(dimensions.indicators.length,7);
-  assert.ok(dimensions.indicators.every(({size,height,fit})=>fit && (mobile ? size===14 && height>=44 : size===13)),
-    JSON.stringify(dimensions.indicators));
-  return {height,sectorHeight,panes:dimensions.panes,columns:dimensions.columns,
+  return {height,columns:dimensions.columns,
     titleSize:dimensions.titleSize,metricSize:dimensions.metricSize,riskSize:dimensions.riskSize};
 }
 
@@ -140,11 +99,11 @@ async function hoverMiddle(page, selector) {
 }
 
 async function checkDisclosure(page, code) {
-  const [formula,url]=disclosures[code];
+  const [formula,since,url]=disclosures[code];
   const disclosure=page.locator("#benchmark-disclosure");
-  assert.equal(await disclosure.textContent(),`官方业绩比较基准：${formula}${url?" 查看披露":""}`);
-  assert.equal(await disclosure.locator("a").count(),url?1:0);
-  if (url) assert.equal(await disclosure.locator("a").getAttribute("href"),url);
+  assert.equal(await disclosure.textContent(),formula);
+  assert.equal(await page.locator("#benchmark-source [data-date-kind=effective]").textContent(),since);
+  assert.equal(await page.locator("#benchmark-source a").last().getAttribute("href"),url);
   assert.equal(await page.locator("#benchmark-line,#benchmark-status").count(),0);
   return {formula,url};
 }
@@ -196,10 +155,14 @@ async function checkReturns(page, fund, checkHover=true) {
 }
 
 try {
-  for (const [code,target] of cases) {
+  for (const code of codes) {
     const page=await browser.newPage({viewport:{width:1440,height:1000}});
     const errors=[];
+    const sectorRequests=[];
     page.on("pageerror",(error)=>errors.push(error.message));
+    page.on("request",(request)=>{
+      if (new URL(request.url()).pathname.includes("/sectors")) sectorRequests.push(request.url());
+    });
     await open(page,code);
     const fund=await lookup(code);
     const latestFund=fund.rows.at(-1);
@@ -211,34 +174,7 @@ try {
     assert.ok((await page.locator("#returns-source").textContent()).includes(latestFund.date));
     assert.ok((await page.locator("#returns-source").textContent()).includes(fund.source.name));
     const headings=await page.locator("#fund-detail h2").allTextContents();
-    assert.deepEqual(headings.slice(0,4),["基金历史净值","基金累计收益率","风险分析","强关联板块指数分析"]);
-    const model=await lookup(`${code}/sectors`);
-    const slots=await page.locator("#sector-tabs button").count();
-    assert.equal(slots,model.sectors.length);
-    assert.ok(slots>=1&&slots<=5);
-    const index=model.sectors.find((item)=>item.code===target);
-    assert.ok(index,`${target} should be in the live ranking for ${code}`);
-    if (code==="110022") assert.equal(index.holdings.status,"direct_support");
-    if (model.sectors[0].code!==target) {
-      await page.locator(`[data-index="${target}"]`).click();
-      await page.locator(chartCanvas).first().waitFor();
-    }
-    const price=await lookup(`${code}/sectors/${index.code}`);
-    assert.equal(await page.locator("#sector-index-title").textContent(),`${index.name} ${index.code}`);
-    const ma=checkAverages(price,"close","MA",[5,10,20,60]);
-    const vol=checkAverages(price,"volume","VOL",[5,10]);
-    assert.equal(Object.keys(vol).length,2);
-    assert.ok(["eastmoney","tencent"].includes(price.source.id));
-    const chartMode=await page.locator("#sector-chart").getAttribute("data-chart-mode");
-    assert.equal(chartMode,"candles");
-    assert.equal(price.volume_unit,"手");
-    assert.equal(price.quality.volume_status,"available");
-    assert.ok(price.quality.volume_coverage?.last);
-    assert.equal(await page.locator("#sector-vol label").count(),3);
-    assert.match(await page.locator("#sector-volume-note").textContent(),/日成交量 · 手/);
-    assert.equal(await page.locator("#sector-chart.with-volume").count(),1);
-    assert.match(await page.locator("#sector-metrics").textContent(),/60\/120 日/);
-    if (code==="110022") assert.match(await page.locator("#sector-evidence").textContent(),/直接支持/);
+    assert.deepEqual(headings.slice(0,5),["盘中参考估值","基金历史净值","基金累计收益率","业绩比较基准","风险分析"]);
     const incoming=await page.locator("#nav-hover").textContent();
     assert.match(incoming,/^最新可见 \d{4}-\d{2}-\d{2} · \d+\.\d{4}$/);
     assert.match(await page.locator("#nav-basis").textContent(),/净值按每份显示/);
@@ -295,76 +231,6 @@ try {
       assert.match(await page.locator("#returns-chart").textContent(),/当前统计区间暂无可计算的曲线/);
       await page.locator('#fund-periods [data-period="1y"]').click();
     }
-    await page.locator('[data-indicator="MA5"]').uncheck();
-    await page.locator("#sector-chart").scrollIntoViewIfNeeded();
-    const chart=await page.locator("#sector-chart").boundingBox();
-    const hoverX=chart.x+chart.width*.55;
-    let intervalRequests=0;
-    const countSectorRequests=(request)=>{if (new URL(request.url()).pathname.includes("/sectors/")) intervalRequests++;};
-    page.on("request",countSectorRequests);
-    await page.mouse.move(hoverX,chart.y+chart.height*.37);
-    await page.waitForTimeout(150);
-    const hover=await page.locator("#sector-ohlc").textContent();
-    assert.match(hover,/\d{4}-\d{2}-\d{2} · 开/);
-    assert.notEqual(hover.slice(0,10),price.last);
-    const hovered=price.rows.find((row)=>row.date===hover.slice(0,10));
-    const locale=new Intl.NumberFormat("zh-CN",{maximumFractionDigits:2});
-    assert.ok(hovered);
-    const hoverMA5=await page.locator('[data-readout="MA5"]').textContent();
-    assert.equal(hoverMA5,hovered.MA5==null?"—":locale.format(hovered.MA5));
-    await page.mouse.move(hoverX,chart.y+chart.height*.82);
-    assert.equal(await page.locator("#sector-ohlc").textContent(),hover);
-    for (const field of ["volume","VOL5","VOL10"]) {
-      assert.equal(await page.locator(`[data-readout="${field}"]`).textContent(),
-        hovered[field]==null?"—":locale.format(hovered[field]));
-    }
-    for (const field of ["volume","VOL5","VOL10"]) {
-      await page.locator(`[data-indicator="${field}"]`).uncheck();
-      await page.locator(`[data-indicator="${field}"]`).check();
-    }
-    await page.mouse.move(hoverX,chart.y+chart.height*.37);
-    const before=await page.locator("#sector-chart").getAttribute("data-visible-from");
-    await page.mouse.wheel(0,-520);
-    await page.waitForTimeout(300);
-    const zoomed=await page.locator("#sector-chart").getAttribute("data-visible-from");
-    assert.notEqual(zoomed,before);
-    await page.mouse.move(chart.x+chart.width*.55,chart.y+chart.height*.43);
-    await page.mouse.down();
-    await page.mouse.move(chart.x+chart.width*.72,chart.y+chart.height*.43,{steps:12});
-    await page.mouse.up();
-    await page.waitForTimeout(250);
-    const panned=await page.locator("#sector-chart").getAttribute("data-visible-from");
-    assert.notEqual(panned,zoomed);
-    await page.locator('#sector-periods [data-period="3m"]').click();
-    assert.equal(await page.locator('[data-indicator="MA5"]').isChecked(),false);
-    await page.locator('[data-indicator="MA5"]').check();
-    await page.locator('#sector-periods [data-period="custom"]').click();
-    await page.locator("#sector-from").fill(price.last.slice(0,7)+"-01");
-    await page.locator("#sector-range button").click();
-    assert.match(await page.locator("#sector-range-status").textContent(),/显示/);
-    assert.equal(await page.locator('[data-readout="VOL10"]').textContent(),locale.format(vol.VOL10));
-    assert.equal(intervalRequests,0);
-    page.off("request",countSectorRequests);
-    if (slots>1) {
-      const other=model.sectors.find((item)=>item.code!==index.code);
-      await page.locator(`[data-index="${other.code}"]`).click();
-      await page.locator(chartCanvas).first().waitFor();
-      const alternate=await lookup(`${code}/sectors/${other.code}`);
-      assert.ok((await page.locator("#sector-index-meta").textContent()).includes(alternate.source.name));
-      assert.equal(await page.locator("#sector-index-title").textContent(),`${other.name} ${other.code}`);
-      const lastRow=alternate.rows.at(-1);
-      const expectedOHLC=[alternate.last,...["open","high","low","close"].map((field,i)=>
-        `${["开","高","低","收"][i]} ${lastRow[field]==null?"—":locale.format(lastRow[field])}`)].join(" · ");
-      assert.equal(await page.locator("#sector-ohlc").textContent(),expectedOHLC);
-      if (code==="110022") {
-        await page.locator('.sector-panel').screenshot({path:`${output}/detail-${code}-switched-${other.code}.png`});
-        report.switchScreenshot={fund:code,index:other.code};
-      }
-      if (await page.locator("#sector-chart").getAttribute("data-chart-mode")==="close") report.closeOnly={fund:code,index:other.code};
-      await page.locator(`[data-index="${index.code}"]`).click();
-      await page.locator(chartCanvas).first().waitFor();
-    }
-    await page.locator('#sector-periods [data-period="1y"]').click();
     await page.mouse.move(0,0);
     const viewports={};
     for (const width of [1440,1920]) {
@@ -375,18 +241,10 @@ try {
         path:`${output}/detail-returns-${code}-desktop-${width}.png`,
       });
     }
-    await page.locator(".sector-panel").screenshot({path:`${output}/detail-${code}-index-${index.code}.png`});
     assert.deepEqual(errors,[]);
-    report.funds[code]={selected:index.code,quality:price.quality,first:price.first,last:price.last,
+    report.funds[code]={
       nav:{date:rawNav[1],unit_nav:Number(rawNav[2]),adjusted_readout:incoming,gapCount:navGaps.length},
-      mode:chartMode,viewports,benchmark,returns:{oneYear,threeMonths},
-      ohlc:(({date,open,high,low,close})=>({date,open,high,low,close}))(price.rows.at(-1)),
-      ma,vol,volume:price.rows.at(-1).volume,source:price.source.id,model_index_as_of:price.model_index_as_of,
-      volume_unit:price.volume_unit,volume_status:price.quality.volume_status,ranked:model.sectors.map((item)=>({
-        code:item.code,quality:item.quality,rank:item.rank,beta:item.beta,stability:item.stability,
-        holdings:item.holdings.status,pearson60:item.windows[60].pearson,pearson120:item.windows[120].pearson,
-        partial60:item.windows[60].partial,partial120:item.windows[120].partial,
-      })),hover,zoom:true,pan:true};
+      viewports,benchmark,returns:{oneYear,threeMonths}};
 
     if (code==="110022") {
       // Same document navigation checks lifecycle, not just a reload.
@@ -394,14 +252,12 @@ try {
         history.pushState(null,"","funds.html?fund=003095");
         dispatchEvent(new PopStateEvent("popstate"));
       });
-      assert.equal(await page.locator("#sector-tabs button").count(),0);
       await page.waitForFunction(()=>document.getElementById("fund-title").textContent.includes("中欧医疗"));
-      await page.locator(chartCanvas).first().waitFor({timeout:300_000});
-      assert.equal(await page.locator('[data-index="399997"]').count(),0);
       await checkDisclosure(page,"003095");
       assert.equal(await page.locator("#hover-values").textContent(),"");
       report.funds[code].switch_cleared=true;
     }
+    assert.deepEqual(sectorRequests,[]);
     await page.close();
 
     const touchViewport=code==="006751" ? {width:430,height:932} : {width:390,height:844};
@@ -439,40 +295,6 @@ try {
     await phone.locator('#fund-periods [data-period="1y"]').tap();
     assert.equal(await touchLocator.textContent(),"");
     report.funds[code].returns.touch=returnTouchReadout;
-    if (model.sectors[0].code!==target) {
-      await phone.locator(`[data-index="${target}"]`).tap();
-      await phone.locator(chartCanvas).first().waitFor();
-    }
-    assert.equal(await phone.locator("#sector-vol label").count(),3);
-    await phone.locator("#sector-chart").scrollIntoViewIfNeeded();
-    const bounds=await phone.locator("#sector-chart").boundingBox();
-    const x=bounds.x+bounds.width*.48,y=bounds.y+bounds.height*.5;
-    const touch=(type,x,y)=>cdp.send("Input.dispatchTouchEvent",{
-      type,touchPoints:type==="touchEnd"?[]:[{x,y,id:1}],
-    });
-    const base=await phone.locator("#sector-chart").getAttribute("data-visible-from");
-    const send=(type,margin)=>cdp.send("Input.dispatchTouchEvent",{type,touchPoints:margin==null?[]:[
-      {x:x-margin,y,id:1},{x:x+margin,y,id:2},
-    ]});
-    await send("touchStart",18);
-    for (let d=26;d<=75;d+=7) await send("touchMove",d);
-    await send("touchEnd");
-    await phone.waitForTimeout(300);
-    const pinch=await phone.locator("#sector-chart").getAttribute("data-visible-from");
-    assert.notEqual(pinch,base,"pinch zoom should change the visible first date");
-    await touch("touchStart",x,y);
-    for (let d=12;d<=84;d+=12) await touch("touchMove",x+d,y);
-    await touch("touchEnd",x+84,y);
-    await phone.waitForFunction((first)=>document.getElementById("sector-chart").dataset.visibleFrom!==first,pinch);
-    await touch("touchStart",x,y);
-    await phone.waitForFunction((last)=>!document.getElementById("sector-ohlc").textContent.startsWith(last),price.last);
-    const touchReadout=await phone.locator("#sector-ohlc").textContent();
-    const touched=price.rows.find((row)=>row.date===touchReadout.slice(0,10));
-    assert.ok(touched);
-    assert.equal(await phone.locator('[data-readout="volume"]').textContent(),locale.format(touched.volume));
-    await touch("touchEnd",x,y);
-    await phone.locator('#sector-periods [data-period="3m"]').tap();
-    assert.match(await phone.locator("#sector-range-status").textContent(),/显示 \d{4}-\d{2}-\d{2}/);
     const missingFacts=phone.locator("#fund-missing-facts");
     if (await missingFacts.isVisible()) {
       assert.equal(await missingFacts.getAttribute("open"),null);
@@ -490,36 +312,14 @@ try {
       await phone.locator('#fund-periods [data-period="1y"]').tap();
       await phone.waitForFunction(({start,end})=>
         document.getElementById("fund-visible-range").textContent===`图表视窗 ${start} 至 ${end}`,oneYear);
-      await phone.locator('#sector-periods [data-period="1y"]').tap();
       viewports[width]=await verifyLayout(phone,width,height,true);
       await phone.screenshot({path:`${output}/full-${code}-mobile-${width}.png`,fullPage:true});
       await phone.locator('[aria-labelledby="returns-title"]').screenshot({path:`${output}/detail-returns-${code}-mobile-${width}.png`});
-      await phone.locator(".sector-panel").screenshot({path:`${output}/detail-sector-${code}-mobile-${width}.png`});
     }
-    report.funds[code].touch=touchReadout;
-    report.funds[code].pinch=true;
     report.funds[code].touchViewport=touchViewport;
     await phone.close();
   }
 
-  if (!report.closeOnly) {
-    const page=await browser.newPage({viewport:{width:1440,height:1000}});
-    await open(page,"519674");
-    const model=await lookup("519674/sectors");
-    for (const item of model.sectors) {
-      const data=await lookup(`519674/sectors/${item.code}`);
-      if (data.quality.ohlc_rows!==0) continue;
-      await page.locator(`[data-index="${item.code}"]`).click();
-      await page.locator('#sector-chart[data-chart-mode="close"]').waitFor();
-      assert.match(await page.locator("#sector-history-note").textContent(),/收盘价/);
-      report.closeOnly={fund:"519674",index:item.code,quality:data.quality};
-      await page.screenshot({path:`${output}/full-519674-desktop-1440-close-only.png`,fullPage:true});
-      break;
-    }
-    await page.close();
-  }
-  assert.ok(report.closeOnly,"a real close-only index must exercise the downgrade");
-  assert.ok(report.switchScreenshot,"a switched real index must be captured");
 } finally {
   await writeFile(`${output}/observations.json`,JSON.stringify(report,null,2));
   await browser.close();

@@ -1,6 +1,61 @@
 {
   "schema_version": 1,
   "funds": {
+    "014194": {
+      "share_codes": ["014194"],
+      "share_source_url": "https://www.99fund.com/main/products/pofund/014194/fundinfo.shtml",
+      "display_only": true,
+      "tracking_index": {"name": "中证芯片产业指数"},
+      "regimes": [
+        {
+          "effective_from": "2021-12-02",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "中证芯片产业指数收益率×95%＋银行人民币活期存款利率（税后）×5%",
+          "source_url": "https://static.cninfo.com.cn/finalpage/2021-11-11/1211558272.PDF",
+          "disclosed_on": "2026-10-27",
+          "disclosure_source_url": "https://notice.10jqka.com.cn/api/pdf/8a2d1425ac881f5d.pdf",
+          "current_verified_on": "2026-11-26",
+          "display_source_url": "https://www.99fund.com/main/products/pofund/014194/fundyield.shtml"
+        }
+      ]
+    },
+    "018993": {
+      "share_codes": ["018993"],
+      "share_source_url": "https://www.zofund.com/index2015/018993.shtml",
+      "display_only": true,
+      "regimes": [
+        {
+          "effective_from": "2023-09-12",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "中证数字经济主题指数收益率×65%＋中证港股通综合指数（人民币）收益率×15%＋银行活期存款利率（税后）×20%",
+          "source_url": "https://www.zofund.com/tempdir/minisite/20240328/61842561-d2d6-4d1b-86b1-560bc3bde502_1711643419098.pdf",
+          "disclosed_on": "2026-10-20",
+          "disclosure_source_url": "https://m.etf88.com/jjb/2026/1020/9952972.html",
+          "current_verified_on": "2026-11-26",
+          "display_source_url": "https://www.zofund.com/index2015/018993.shtml"
+        }
+      ]
+    },
+    "110022": {
+      "share_codes": ["110022"],
+      "share_source_url": "https://www.efunds.com.cn/Mobile/fund/110022.shtml",
+      "display_only": true,
+      "regimes": [
+        {
+          "effective_from": "2010-08-20",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "中证内地消费主题指数收益率×85%＋中债总指数收益率×15%",
+          "source_url": "https://epaper.stcn.com/paper/zqsb/page/1/2011-01-22/B027/7761295633739185.pdf",
+          "disclosed_on": "2026-10-27",
+          "disclosure_source_url": "https://hongdianfund.com/FundAnnouncement/Detail/110022/0000000000001sk1ig",
+          "current_verified_on": "2026-11-26",
+          "display_source_url": "https://www.efunds.com.cn/Mobile/fund/110022.shtml"
+        }
+      ]
+    },
     "024808": {
       "share_codes": [
         "024808"
@@ -49,6 +104,7 @@
           "verification": "official_verified",
           "formula": "中证医药卫生指数收益率×90%＋中证综合债指数收益率×10%",
           "source_url": "https://www.zofund.com/2026/wsnotice/20261027/ebc7404b0b5b47b8a35e82b4fc5607f6.pdf",
+          "disclosed_on": "2026-10-27",
           "announced_on": "2026-08-22",
           "change_confirmed": true
         }

@@ -244,12 +244,15 @@ def benchmark_metadata(code, as_of):
 
     benchmark = official_benchmarks().get(code)
     disclosure = None
-    if code in reviewed_disclosures():
+    reviewed = reviewed_disclosures().get(code)
+    if reviewed:
         verified = identify(code, [], as_of)
         active = verified["effective_regime"]
         if active and active["verification"] == "official_verified":
             disclosure = {"formula": active["formula"], "effective_from": active["effective_from"],
                           "source_url": active.get("display_source_url", active["source_url"])}
+            if reviewed.get("tracking_index"):
+                disclosure["tracking_index"] = reviewed["tracking_index"]
         benchmark = benchmark or verified["benchmark"]
     return {"benchmark": benchmark, "benchmark_disclosure": disclosure}
 

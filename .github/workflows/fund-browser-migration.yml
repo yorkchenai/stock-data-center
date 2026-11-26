@@ -31,8 +31,6 @@ jobs:
         run: |
           export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
           node scripts/test_browser_fund_migration.mjs
-      - name: Compare with Python on matching history
-        run: python -m scripts.verify_browser_fund_migration work/browser-fund-parity-input.json work/browser-funds/python-summary.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

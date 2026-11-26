@@ -119,6 +119,37 @@ def effective_regime(regimes, as_of):
                  and (not item.get("effective_to") or as_of <= item["effective_to"])), None)
 
 
+def benchmark_page_disclosures(as_of):
+    """Expose dated, reviewed disclosures without changing the snapshot model inputs."""
+    disclosures = {}
+    for code, entry in reviewed_disclosures().items():
+        regimes = known_regimes(review_regimes(code, entry), as_of)
+        active = effective_regime(regimes, as_of)
+        versions = []
+        for item in regimes:
+            published = item.get("disclosed_on") or item.get("announced_on")
+            if item["verification"] != "official_verified" or (published and published > as_of):
+                continue
+            checked = item.get("current_verified_on")
+            if published:
+                iso_day(published)
+            if checked:
+                iso_day(checked)
+            versions.append({
+                "formula": item["formula"], "effective_from": item["effective_from"],
+                "effective_to": item.get("effective_to"), "start_basis": item.get("start_basis"),
+                "disclosed_on": published,
+                "source_url": https_source(item.get("disclosure_source_url") or item["source_url"]),
+                "manager_url": item.get("display_source_url"),
+                "current_verified": item is active and bool(
+                    item.get("effective_to") or item.get("change_confirmed") or (checked and checked <= as_of)
+                ),
+            })
+        if versions:
+            disclosures[code] = {"versions": versions, "tracking_index": entry.get("tracking_index")}
+    return {"schema_version": 1, "disclosures": disclosures}
+
+
 def export_engine(active, regimes, as_of):
     if not active or not active["engine_compatible"]:
         return None

@@ -246,12 +246,13 @@ try {
     return route.fulfill({json:data,headers:{"Access-Control-Allow-Origin":"*"}});
   });
   const valuationRequests = [];
-  let networkFailure = false;
+  const failedProviders = new Set();
+  let retryFixture = false;
   let staleQuotes = false;
   await context.route("https://fundcomapi.tiantianfunds.com/**",(route)=>{
     const code = new URL(route.request().url()).searchParams.get("FCODES");
     valuationRequests.push(["eastmoney",code]);
-    return route.fulfill({status:networkFailure ? 503 : 200,headers:{"Access-Control-Allow-Origin":"*"},
+    return route.fulfill({status:failedProviders.has("eastmoney") ? 503 : 200,headers:{"Access-Control-Allow-Origin":"*"},
       json:{success:true,data:code==="014194" ? [{FCODE:code,GSZ:1.2297,GSZZL:-1.06,GZTIME:"2026-11-26 11:30"}] : []}});
   });
   fixtureSina = (query,response)=>{
@@ -262,13 +263,15 @@ try {
       pre_date:staleQuotes ? "2026-11-25" : "2026-11-26",min_time:"11:33:00",
       pre_nav:price,growthrate:code==="110022" ? null : 0.011762,pre_nav2:price+0.0198,growthrate2:0.01996,
     }]}}};
-    return response.writeHead(networkFailure ? 503 : 200,{"Content-Type":"application/json"}).end(JSON.stringify(payload));
+    const failed = failedProviders.has("sina") || retryFixture;
+    retryFixture = false;
+    return response.writeHead(failed ? 503 : 200,{"Content-Type":"application/json"}).end(JSON.stringify(payload));
   };
   const estimateScript = await readFile(path.join(site,"funds/valuation.mjs"),"utf8");
   // The live browser suite exercises the real JSONP sandbox; the clock test uses an exact local source.
   await context.route(origin+"funds/valuation.mjs",(route)=>route.fulfill({contentType:"text/javascript",
-    body:estimateScript.replace("await readSinaValuation(url,signal)",
-      'await fetch("/__fixture-sina"+new URL(url).search,{signal}).then((response)=>{if (!response.ok) throw new Error("fixture outage"); return response.json();})')}));
+    body:estimateScript.replace("return readSinaValuation(url.href,signal);",
+      'return fetch("/__fixture-sina"+url.search,{signal}).then((response)=>{if (!response.ok) throw new Error("fixture outage"); return response.json();});')}));
   await context.addInitScript(()=>{
     Object.defineProperty(document,"hidden",{get:()=>window.fixtureHidden===true});
   });
@@ -279,10 +282,13 @@ try {
     dispatchEvent(new PopStateEvent("popstate"));
   },code);
   const expectedEstimates = {
-    "014194":[["fundgz","估值1","-1.06%"]],
+    "014194":[["fundgz","估值1","-1.06%"],["sina_ds2","估值2","+1.18%"],["sina_ds3","估值3","+2.00%"]],
     "018993":[["sina_ds2","估值2","+1.18%"],["sina_ds3","估值3","+2.00%"]],
     "110022":[["sina_ds3","估值3","+2.00%"]],
   };
+  const renderedEstimates = () => page.locator("#valuation-quotes article").evaluateAll((items)=>items.map((item)=>[
+    item.dataset.valuationSource,...Array.from(item.children,(child)=>child.textContent),
+  ]));
   for (const [code,[formula,since,source]] of Object.entries(expectedDisclosures)) {
     if (page.url()==="about:blank") await page.goto(origin+"funds.html?fund="+code);
     else await navigate(code);
@@ -300,9 +306,14 @@ try {
     await estimates.first().waitFor({timeout:18_000}).catch(async (error)=>{
       throw new Error(`${code} · ${await page.locator("#valuation-status").innerText()} · ${JSON.stringify(valuationRequests)}`,{cause:error});
     });
-    assert.deepEqual(await estimates.evaluateAll((items)=>items.map((item)=>[
-      item.dataset.valuationSource,...Array.from(item.children,(child)=>child.textContent),
-    ])),expectedEstimates[code]);
+    assert.deepEqual(await renderedEstimates(),expectedEstimates[code]);
+    if (code==="014194") {
+      failedProviders.add("sina");
+      await page.getByRole("button",{name:"刷新估值"}).click();
+      await page.getByText("部分估值来源更新失败 · 保留上次成功估值",{exact:true}).waitFor();
+      assert.deepEqual(await renderedEstimates(),expectedEstimates[code]);
+      failedProviders.clear();
+    }
     assert.equal(await page.locator("#fund-nav").innerText(),first.rows.at(-1).unit_nav.toFixed(4));
   }
   assert.deepEqual(requests,Object.keys(expectedDisclosures).flatMap((code)=>[[code,null],[code,"page"]]));
@@ -313,7 +324,7 @@ try {
   let valuationCount = valuationRequests.length;
   await page.clock.fastForward(60_000);
   await page.waitForFunction(()=>!document.getElementById("valuation-refresh").disabled);
-  assert.deepEqual(valuationRequests.slice(valuationCount),[["eastmoney",currentCode],["sina",currentCode]]);
+  assert.deepEqual(valuationRequests.slice(valuationCount).sort(),[["eastmoney",currentCode],["sina",currentCode]]);
 
   valuationCount = valuationRequests.length;
   await page.evaluate(()=>{
@@ -327,13 +338,30 @@ try {
     document.dispatchEvent(new Event("visibilitychange"));
   });
   await page.waitForFunction(()=>!document.getElementById("valuation-refresh").disabled);
-  assert.deepEqual(valuationRequests.slice(valuationCount),[["eastmoney",currentCode],["sina",currentCode]]);
+  assert.deepEqual(valuationRequests.slice(valuationCount).sort(),[["eastmoney",currentCode],["sina",currentCode]]);
 
-  networkFailure = true;
+  failedProviders.add("eastmoney");
   await page.getByRole("button",{name:"刷新估值"}).click();
-  await page.getByText("更新失败 · 保留上次成功估值").waitFor();
+  await page.getByText("部分估值来源更新失败",{exact:true}).waitFor();
+  assert.deepEqual(await renderedEstimates(),expectedEstimates[currentCode]);
+  failedProviders.clear();
+
+  retryFixture = true;
+  valuationCount = valuationRequests.length;
+  await page.getByRole("button",{name:"刷新估值"}).click();
+  await page.locator("#valuation-refresh:enabled").waitFor();
+  assert.deepEqual(valuationRequests.slice(valuationCount).sort(),[
+    ["eastmoney",currentCode],["sina",currentCode],["sina",currentCode],
+  ]);
+  assert.deepEqual(await renderedEstimates(),expectedEstimates[currentCode]);
+  assert.equal(await page.locator("#valuation-status").isVisible(),false);
+
+  failedProviders.add("eastmoney");
+  failedProviders.add("sina");
+  await page.getByRole("button",{name:"刷新估值"}).click();
+  await page.getByText("更新失败 · 保留上次成功估值",{exact:true}).waitFor();
   assert.equal(await quote.innerText(),previous);
-  networkFailure = false;
+  failedProviders.clear();
   staleQuotes = true;
   await page.getByRole("button",{name:"刷新估值"}).click();
   await page.getByText("暂无当日估值",{exact:true}).waitFor();

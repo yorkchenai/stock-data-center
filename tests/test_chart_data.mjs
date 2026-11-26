@@ -38,6 +38,7 @@ const sample = {
 test("volume bars and VOL lines retain first-stage lot values exactly", () => {
   const result = seriesData([sample]);
   assert.equal(result.volume[0].value, sample.volume_lots);
+  assert.equal(result.volume[0].color, COLORS.histogramRise);
   assert.equal(result.lines.VOL5[0].value, sample.VOL5);
   assert.equal(result.lines.VOL10[0].value, sample.VOL10);
   assert.match(PANELS[1].title, /手/);
@@ -52,7 +53,7 @@ test("MACD, RSI, ADX and moving averages are read without formulas", () => {
         assert.equal(result.lines[field][0].value, sample[field]);
     }
   }
-  assert.equal(result.macd[0].color, COLORS.fall);
+  assert.equal(result.macd[0].color, COLORS.histogramFall);
 });
 
 test("warmup nulls are whitespace at their real dates, with zero preserved", () => {

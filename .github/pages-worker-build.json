@@ -1,0 +1,8 @@
+{
+    "schema_version": 1,
+    "commit_sha": "9adcabcd0564adc5b1be1e287dd503be9c77bcba",
+    "generated_at_utc": "2026-11-25T08:11:16.326899+00:00",
+    "calendar_end": "2026-12-26",
+    "snapshot_last_date": "2026-11-20",
+    "analysis_model_version": "analysis-v1-8ea238b017daab1d6201"
+}

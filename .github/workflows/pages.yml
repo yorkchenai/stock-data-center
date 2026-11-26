@@ -11,6 +11,7 @@ on:
         "package*.json",
         "requirements.txt",
         ".github/workflows/pages.yml",
+        ".github/pages-worker-build.json",
       ]
   push:
     branches: [main]
@@ -24,10 +25,15 @@ on:
         "package*.json",
         "requirements.txt",
         ".github/workflows/pages.yml",
+        ".github/pages-worker-build.json",
       ]
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  SNAPSHOT_SERVICE: https://stock-data-center-voice-probe.finalnoodle2.chatgpt.site
+  PAGES_ORIGIN: https://yorkchenai.github.io
+  PAGES_URL: https://yorkchenai.github.io/stock-data-center
 concurrency:
   group: pages-${{ github.ref }}
   cancel-in-progress: false
@@ -103,29 +109,48 @@ jobs:
   production-artifact:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
+    outputs:
+      files_sha: ${{ steps.build.outputs.files_sha }}
     steps:
-      - name: Verify the paired Worker v14 Pages payload
-        env:
-          PAGES_ARCHIVE: https://raw.githubusercontent.com/yorkchenai/stock-data-center/26e8b02fd36dc012625f417b95278385837bfdd8/pages-candidate.tar.gz
-          ANALYSIS_URL: https://stock-data-center-voice-probe.finalnoodle2.chatgpt.site/api/analysis
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -r requirements.txt
+      - name: Build the current main commit against the deployed Worker contract
+        id: build
         run: |
-          curl -fsS --retry 3 --max-time 25 "$PAGES_ARCHIVE" -o pages-candidate.tar.gz
-          echo 'ab710cd97ca34e24db3ca0c6936bd3567f486183e71272e6724f8015a784ce04  pages-candidate.tar.gz' | sha256sum -c -
-          mkdir -p work/pages-site
-          tar -xzf pages-candidate.tar.gz -C work/pages-site
-          echo 'd98ff21cad7a08593c58cea437c1a5d9254e63c3ee5031f56053a520f0a76499  work/pages-site/build-info.json' | sha256sum -c -
-          for attempt in $(seq 1 24); do
-            status="$(curl -sS --max-time 8 -D worker-response.headers -o worker-response.json -w '%{http_code}' \
-              -H 'Origin: https://yorkchenai.github.io' "$ANALYSIS_URL?release_probe=$GITHUB_RUN_ID-$attempt")"
-            if [ "$status" = 400 ] \
-                && jq -e '.status == "invalid_arguments"' worker-response.json >/dev/null \
-                && grep -qi '^access-control-allow-origin: https://yorkchenai.github.io' worker-response.headers; then
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python -m stock_analysis.pages --output work/pages-site --snapshot-service "$SNAPSHOT_SERVICE" \
+            --snapshot-reference .github/pages-worker-build.json
+          cd work/pages-site
+          jq -e --arg sha "$GITHUB_SHA" '.commit_sha == $sha and .schema_version == 1' build-info.json
+          sha256sum build-info.json index.html app.mjs funds.html funds/app.mjs funds/valuation.mjs \
+            funds/funds.css fund-benchmark-disclosures.json fund-config.json calendar.json > release-sha256.txt
+          echo "files_sha=$(sha256sum release-sha256.txt | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Check worker inputs and Pages CORS before uploading
+        run: |
+          analysis_url="$SNAPSHOT_SERVICE/api/analysis"
+          expected_model="$(jq -r .analysis_model_version work/pages-site/build-info.json)"
+          cors_matches() {
+            test "$(tr -d '\r' < worker-response.headers | awk 'tolower($1) == "access-control-allow-origin:" {print $2}')" = "$PAGES_ORIGIN"
+          }
+          for attempt in $(seq 1 10); do
+            if status="$(curl -sS --max-time 12 -D worker-response.headers -o worker-response.json -w '%{http_code}' \
+                -H "Origin: $PAGES_ORIGIN" "$analysis_url?release_probe=$GITHUB_RUN_ID-$attempt")" \
+                && [ "$status" = 400 ] && cors_matches \
+                && jq -e '.schema_version == 1 and .status == "invalid_arguments"' worker-response.json >/dev/null \
+                && curl -fsS --max-time 12 -D worker-response.headers -o worker-response.json \
+                  -H "Origin: $PAGES_ORIGIN" "$analysis_url?asset_type=fund&symbol=110022" \
+                && cors_matches \
+                && jq -e --arg model "$expected_model" '.schema_version == 1 and .model_version == $model and
+                  (.status == "complete" or .status == "partial") and (.snapshot_id | type == "string")' worker-response.json >/dev/null; then
               exit 0
             fi
             sleep 5
           done
-          echo 'The paired Worker did not accept the Pages origin'
+          echo 'The deployed Worker did not serve a compatible snapshot to the Pages origin'
           exit 1
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -149,26 +174,44 @@ jobs:
       - uses: actions/deploy-pages@v4
         id: deployment
   deployed-probe:
-    needs: deploy
+    needs: [production-artifact, deploy]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
-      PAGES_URL: https://yorkchenai.github.io/stock-data-center
+      EXPECTED_FILES_SHA: ${{ needs.production-artifact.outputs.files_sha }}
     steps:
-      - name: Verify the published paired Pages build
+      - uses: actions/checkout@v4
+      - name: Verify the published build and its files against the release job
         run: |
+          mkdir -p work/published-pages
+          cd work/published-pages
           for attempt in $(seq 1 18); do
-            if curl -fsS --max-time 8 "$PAGES_URL/build-info.json?release=$GITHUB_RUN_ID-$attempt" -o build-info.json \
-              && echo 'd98ff21cad7a08593c58cea437c1a5d9254e63c3ee5031f56053a520f0a76499  build-info.json' | sha256sum -c --status; then
+            if curl -fsS --max-time 8 "$PAGES_URL/release-sha256.txt?release=$GITHUB_RUN_ID-$attempt" -o release-sha256.txt \
+                && echo "$EXPECTED_FILES_SHA  release-sha256.txt" | sha256sum -c --status; then
+              while read -r checksum file; do
+                mkdir -p "$(dirname "$file")"
+                curl -fsS --max-time 12 "$PAGES_URL/$file?release=$GITHUB_RUN_ID" -o "$file"
+              done < release-sha256.txt
+              sha256sum -c release-sha256.txt
+              jq -e --arg sha "$GITHUB_SHA" '.schema_version == 1 and .commit_sha == $sha' build-info.json
+              model="$(jq -r .analysis_model_version build-info.json)"
               for page in index.html funds.html; do
-                curl -fsS --max-time 12 "$PAGES_URL/$page?release=$GITHUB_RUN_ID" -o "$page"
-                grep -q 'data-analysis-model="analysis-v1-8ea238b017daab1d6201"' "$page"
-                grep -q 'data-analysis-origin="https://stock-data-center-voice-probe.finalnoodle2.chatgpt.site"' "$page"
+                grep -Fq "data-analysis-model=\"$model\"" "$page"
+                grep -Fq "data-analysis-origin=\"$SNAPSHOT_SERVICE\"" "$page"
               done
               exit 0
             fi
             sleep 5
           done
-          echo 'The matched Pages build did not become visible'
+          echo 'The matching Pages release did not become visible'
           exit 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify the live fund page and valuation refresh behavior
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          node scripts/verify_deployed_fund_pages.mjs

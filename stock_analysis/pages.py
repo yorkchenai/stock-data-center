@@ -58,7 +58,7 @@ def export_snapshot_runtime(destination, pages):
 
 
 def build_pages(destination, calendar_end=None, fund_index_snapshot=None, snapshot_service=None,
-                snapshot_runtime_output=None):
+                snapshot_runtime_output=None, snapshot_reference=None):
     if snapshot_runtime_output:
         runtime = Path(snapshot_runtime_output).resolve()
         pages = Path(destination).resolve()
@@ -67,6 +67,14 @@ def build_pages(destination, calendar_end=None, fund_index_snapshot=None, snapsh
         if fund_index_snapshot:
             raise ValueError("快照 Worker 尚不支持浏览器专用的静态指数输入。")
     now = datetime.now(ZoneInfo("UTC"))
+    model_day = now.astimezone(funds.SHANGHAI).date().isoformat()
+    if snapshot_reference is not None:
+        if not snapshot_service or calendar_end or fund_index_snapshot or snapshot_runtime_output:
+            raise ValueError("复用已部署 Worker 时须提供服务来源，并使用其模型输入。")
+        if snapshot_reference["schema_version"] != 1:
+            raise ValueError("已部署 Worker 的结构版本与 Pages 不兼容。")
+        calendar_end = snapshot_reference["calendar_end"]
+        model_day = datetime.fromisoformat(snapshot_reference["generated_at_utc"]).astimezone(funds.SHANGHAI).date().isoformat()
     # Calendar has an explicit validity window; it is never extrapolated in JS.
     end = calendar_end or min(now.date() + timedelta(days=31), now.date().replace(month=12, day=31)).isoformat()
     start = "2000-01-01"
@@ -96,8 +104,8 @@ def build_pages(destination, calendar_end=None, fund_index_snapshot=None, snapsh
     reviewed = reviewed_disclosures()
     # Disclosure-only additions belong to the website, outside the shared model inputs.
     display_codes = {code for code, record in reviewed.items() if record.get("display_only")}
-    config = {"schema_version": 1, "as_of": day, "events": funds.event_evidence(),
-              "benchmarks": {code: funds.benchmark_metadata(code, day)
+    config = {"schema_version": 1, "as_of": model_day, "events": funds.event_evidence(),
+              "benchmarks": {code: funds.benchmark_metadata(code, model_day)
                              for code in sorted(funds.official_benchmarks().keys() | (reviewed.keys() - display_codes))},
               "indices": read_catalog(),
               "holdings": json.loads((ROOT / "research/sector_holdings_evidence.json").read_text(encoding="utf-8"))}
@@ -120,6 +128,8 @@ def build_pages(destination, calendar_end=None, fund_index_snapshot=None, snapsh
         "fund_config": {key: value for key, value in config.items() if key != "as_of"},
         "special_indices": snapshot,
     })
+    if snapshot_reference is not None and model_version != snapshot_reference["analysis_model_version"]:
+        raise ValueError(f"当前源码生成的模型 {model_version} 与已部署 Worker 不兼容。")
     attributes = f'data-mode="pages" data-analysis-model="{model_version}"{service_attribute}'
     for filename in ("index.html", "funds.html"):
         page = output / filename
@@ -143,10 +153,12 @@ def main():
     parser.add_argument("--fund-index-snapshot", type=Path)
     parser.add_argument("--snapshot-service")
     parser.add_argument("--snapshot-runtime-output", type=Path)
+    parser.add_argument("--snapshot-reference", type=Path, help="Build metadata exported with the deployed Worker")
     args = parser.parse_args()
+    reference = json.loads(args.snapshot_reference.read_text(encoding="utf-8")) if args.snapshot_reference else None
     print(build_pages(args.output, fund_index_snapshot=args.fund_index_snapshot,
                       snapshot_service=args.snapshot_service,
-                      snapshot_runtime_output=args.snapshot_runtime_output))
+                      snapshot_runtime_output=args.snapshot_runtime_output, snapshot_reference=reference))
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ function status(id, text, error = false) {
   $(id).dataset.state = error ? "error" : "";
 }
 const pct = (v) => (100 * v).toFixed(2) + "%";
-const estimatePct = (v) => (v>0 ? "+" : "") + v.toFixed(2) + "%";
+const signedPercent = (v) => (v>0 ? "+" : "") + v.toFixed(2) + "%";
 const decimal = (v) => v.toFixed(2);
 const nav = (v) => v.toFixed(4);
 const shown = (v, format) => v == null ? "—" : format(v);
@@ -32,11 +32,13 @@ const beingLoaded = new Map();
 const listNavRequests = new Set();
 const listNavErrors = new Map();
 const maxListNavRequests = 3;
+let listRefresh = null;
 const sharedSnapshots = new Map();
 const snapshotFallback = new Map();
 const valuationLabels = new Map([["fundgz","估值1"],["sina_ds2","估值2"],["sina_ds3","估值3"]]);
 const columns = [
-  ["name","基金名称 / 代码"],["type","基金类型"],...valuationLabels,["nav","最新单位净值"],["date","净值日期"],...PERIODS,
+  ["name","基金名称 / 代码"],["type","基金类型"],...valuationLabels,["latest-change","最新涨幅"],
+  ["nav","最新单位净值"],["date","净值日期"],...PERIODS,
   ["source","来源"],["actions","操作"],
 ];
 const optionalColumns = columns.filter(([id])=>!["name","actions"].includes(id));
@@ -165,6 +167,9 @@ function loadFund(code,snapshotId=null) {
       const fund = normalizeFund(raw);
       if (fund.code !== code) throw new Error("查询结果的基金代码不一致。");
       if (!snapshotId && loaded.has(code) && loaded.get(code)!==before) return loaded.get(code);
+      if (!snapshotId && before?.mode==="reported" && fund.rows.at(-1).date<before.rows.at(-1).date) {
+        throw new Error("查询结果的净值日期早于已载入的数据。");
+      }
       fund.reviewedBenchmark = reviewed?.[code];
       if (snapshot) sharedSnapshots.set(code,snapshot);
       else sharedSnapshots.delete(code);
@@ -181,20 +186,52 @@ async function loadListFund(code) {
   catch (error) {listNavErrors.set(code,error.message);status("list-status",error.message,true);}
   renderList();
 }
+function visibleListRows() {
+  return state.list.filter((entry)=>(!state.favorites || entry.favorite) && (!state.type || state.type===entry.category));
+}
+function refreshList() {
+  if (selectedCode || listRefresh || !(local || online)) return;
+  const codes = visibleListRows().map(({code})=>code).filter((code)=>loaded.get(code)?.mode!=="synthetic");
+  if (!codes.length) return;
+  listRefresh = {pending:new Set(codes),failures:[],count:codes.length};
+  status("list-status",`正在查询 ${codes.length} 只基金的最新数据…`);
+  renderList();
+  void valuation.refresh();
+}
 function loadVisibleListFunds(rows) {
-  if (selectedCode || !(local || online)) return;
-  for (const {code} of rows) {
+  if (!(local || online) || (selectedCode && !listRefresh)) return;
+  const queue = listRefresh?.pending ?? rows.filter(({code})=>!loaded.has(code) && !listNavErrors.has(code)).map(({code})=>code);
+  for (const code of queue) {
     if (listNavRequests.size>=maxListNavRequests) break;
-    if (loaded.has(code) || listNavRequests.has(code) || listNavErrors.has(code)) continue;
+    if (listNavRequests.has(code)) continue;
     listNavRequests.add(code);
-    void loadFund(code).catch((error)=>listNavErrors.set(code,error.message)).finally(()=>{
+    void loadFund(code).then(()=>listNavErrors.delete(code),(error)=>listNavErrors.set(code,error.message)).finally(()=>{
       listNavRequests.delete(code);
+      if (listRefresh?.pending.delete(code)) {
+        if (listNavErrors.has(code)) listRefresh.failures.push(code);
+        if (!listRefresh.pending.size) {
+          const {failures,count} = listRefresh;
+          listRefresh = null;
+          status("list-status",failures.length
+            ? `净值查询完成，${failures.join("、")} 更新失败，保留已有数据。`
+            : `已查询 ${count} 只基金的确认净值。`,Boolean(failures.length));
+        }
+      }
       if (!selectedCode) renderList();
+      else if (listRefresh) loadVisibleListFunds([]);
     });
   }
 }
 function estimateValue(quote) {
-  return {value:quote?.change ?? null,format:estimatePct,reason:quote ? "" : "暂无当日估值",percent:true};
+  return {value:quote?.change ?? null,format:signedPercent,reason:quote ? "" : "暂无当日估值",percent:true};
+}
+function latestChangeValue(fund) {
+  const latest = fund?.rows.at(-1)?.return_index;
+  const previous = fund?.rows.at(-2)?.return_index;
+  const change = latest != null && previous != null ? (latest/previous - 1)*100 : null;
+  return Number.isFinite(change)
+    ? {value:change,format:signedPercent,percent:true}
+    : {value:null,reason:"缺少相邻两笔可比较的确认净值总回报。"};
 }
 function paintValue(cell,{value,format,reason,percent},suffix="") {
   cell.textContent = shown(value,format ?? String)+suffix;
@@ -212,6 +249,7 @@ function tableValue(id, row, fund, estimates) {
     return {value:null,reason};
   }
   const latest = fund.rows.at(-1);
+  if (id==="latest-change") return latestChangeValue(fund);
   if (id==="nav") return {value:latest.unit_nav,format:nav};
   if (id==="date") return {value:latest.date};
   if (id==="source") return {value:fund.source.name};
@@ -236,7 +274,8 @@ function renderList() {
       if (sorted) th.setAttribute("aria-sort",state.descending ? "descending" : "ascending");
       const button = tag("button",label + (sorted ? state.descending ? " ↓" : " ↑" : ""),{type:"button"});
       button.addEventListener("click",()=>{
-        state.descending = state.sort===id ? !state.descending : valuationLabels.has(id) || PERIODS.some(([period])=>period===id);
+        state.descending = state.sort===id ? !state.descending
+          : id==="latest-change" || valuationLabels.has(id) || PERIODS.some(([period])=>period===id);
         state.sort = id;
         save();
         renderList();
@@ -246,7 +285,11 @@ function renderList() {
     header.append(th);
   }
   $("fund-table").tHead.replaceChildren(header);
-  const rows = state.list.filter((entry)=>(!state.favorites || entry.favorite) && (!state.type || state.type===entry.category));
+  const rows = visibleListRows();
+  const refresh = $("refresh-fund-list");
+  refresh.hidden = !(local || online);
+  refresh.disabled = Boolean(listRefresh) || !rows.some(({code})=>loaded.get(code)?.mode!=="synthetic");
+  refresh.textContent = listRefresh ? "刷新中…" : "刷新数据";
   loadVisibleListFunds(rows);
   const items = rows.map((row)=>{
     const fund = loaded.get(row.code);
@@ -440,7 +483,7 @@ function renderDetailValuation(quotes,message,pending) {
   $("valuation-status").hidden = !text;
   $("valuation-quotes").replaceChildren(...quotes.map(({id,change})=>{
     const item = tag("article",null,{class:"risk-metric","data-valuation-source":id});
-    item.append(tag("span",valuationLabels.get(id)),tag("strong",estimatePct(change)));
+    item.append(tag("span",valuationLabels.get(id)),tag("strong",signedPercent(change)));
     return item;
   }));
 }
@@ -466,6 +509,7 @@ function renderIdentity(code,fund) {
   $("fund-title").textContent = fund?.name ?? entry?.name ?? "基金 " + code;
   $("fund-identity").textContent = `${code} · ${describe(fund?.category ?? entry?.category)} · 基金管理人 ${fund?.manager ?? "—"}`;
   const latest = fund?.rows.at(-1);
+  paintValue($("fund-latest-change"),latestChangeValue(fund));
   $("fund-nav").textContent = shown(latest?.unit_nav,nav);
   $("fund-nav-date").textContent = latest?.date ?? "—";
   const shared = fund && sharedSnapshots.get(code);
@@ -723,6 +767,7 @@ $("fund-search").addEventListener("submit",async (event)=>{
 });
 $("list-import").addEventListener("change",importFiles);
 $("detail-import").addEventListener("change",importFiles);
+$("refresh-fund-list").addEventListener("click",refreshList);
 $("back-to-funds").addEventListener("click",navigateLink);
 window.addEventListener("popstate",()=>void route());
 $("valuation-refresh").addEventListener("click",valuation.refresh);

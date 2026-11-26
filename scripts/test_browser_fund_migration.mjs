@@ -97,10 +97,12 @@ try {
     const nav = row.locator('[data-column="nav"]').getByText(/^\d+\.\d{4}$/);
     await nav.waitFor({timeout:35_000});
     const date = await row.locator('[data-column="date"]').textContent();
+    const change = await row.locator('[data-column="latest-change"]').textContent();
     const month = await row.locator('[data-column="1m"]').textContent();
     assert.match(date,/^\d{4}-\d{2}-\d{2}$/);
+    assert.match(change,/^[+-]?\d+\.\d{2}%$/);
     assert.match(month,/^-?\d+\.\d{2}%$/);
-    summary.list_after_reload[code]={unit_nav:await nav.textContent(),date,month};
+    summary.list_after_reload[code]={unit_nav:await nav.textContent(),date,change,month};
   }
   assert.deepEqual(pageErrors,[]);
   assert.deepEqual(unexpectedRequests,[]);

@@ -71,8 +71,11 @@
 .fund-identity {display: flex; align-items: center; gap: 18px; flex-wrap: wrap;}
 .fund-identity > :first-child {flex: 1 0 240px;}
 .fund-identity p {margin: 0; color: var(--muted);}
-.fund-nav-value, .fund-source {display: grid; gap: 4px; color: var(--muted); font-size: 14px;}
-.fund-nav-value strong {color: #243449; font-size: 24px; font-variant-numeric: tabular-nums;}
+.fund-latest-values {display: flex; align-items: flex-start; gap: 22px;}
+.fund-nav-value, .fund-source {display: grid; gap: 4px; font-size: 14px;}
+.fund-nav-value > span, .fund-source {color: var(--muted);}
+.fund-nav-value {color: #243449;}
+.fund-nav-value strong {font-size: 24px; font-variant-numeric: tabular-nums;}
 .fund-data-controls {display: flex; align-items: center; flex-wrap: wrap; gap: 12px;}
 .fund-data-controls .fund-source {flex: 1 1 360px; min-width: 0; overflow-wrap: anywhere;}
 #detail-import-status {margin: 8px 0 0;}
@@ -151,6 +154,7 @@
   #benchmark-history summary {display: list-item; min-height: 36px; padding-block: 7px;}
   .fund-nav-value, .fund-source {font-size: 13px;}
   .fund-nav-value strong {font-size: 20px;}
+  .fund-latest-values {gap: 14px;}
   #fund-detail .fund-note {line-height: 1.5; margin-block: 6px;}
   #fund-detail .chart-description {min-height: 18px;}
   #fund-detail :is(#fund-visible-range,#range-status,#returns-source) {

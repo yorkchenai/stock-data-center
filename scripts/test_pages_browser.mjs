@@ -169,7 +169,8 @@ try {
     const before = requests.length;
     await page.locator("#range-form button").click();
     await page.waitForFunction(() =>
-      document.querySelector("#status").textContent.includes("显示区间已调整"),
+      document.querySelector("#status").textContent.includes("显示区间已调整") &&
+      /2021-01-04.*2021-12-31/.test(document.querySelector("#visible-range").textContent),
     );
     await checkCloseMarkers(page,snapshot.rows);
     assert.equal(

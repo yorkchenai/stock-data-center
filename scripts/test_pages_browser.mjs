@@ -51,6 +51,35 @@ const report = {
   mode: "offline real-history fixture; NOT live provider verification",
   viewports: [],
 };
+async function checkCloseMarkers(page, rows) {
+  const range = await page.locator("#visible-range").textContent();
+  const [start, end] = range.match(/\d{4}-\d{2}-\d{2}/g);
+  const visible = rows.filter((row) => row.date >= start && row.date <= end);
+  const high = visible.reduce((best, row) => row.close > best.close ? row : best);
+  const low = visible.reduce((best, row) => row.close < best.close ? row : best);
+  const expected = (high===low ? [high] : [high, low]).map(({date, close})=>({
+    date, close, value:close.toLocaleString("zh-CN", {maximumFractionDigits:8}),
+  }));
+  await page.waitForFunction((points)=>{
+    const chart = document.querySelector("#chart").getBoundingClientRect();
+    const scale = window.stockChart.timeScale();
+    const pane = window.stockChart.panes()[0];
+    const candles = pane.getSeries()[0];
+    const paneHeight = pane.getHeight();
+    const paneTop = pane.getHTMLElement().getBoundingClientRect().top;
+    const labels = [...document.querySelectorAll(".close-extreme:not([hidden])")];
+    return labels.length===points.length && labels.every((label,index)=>{
+      const {date,close,value} = points[index];
+      const bounds = label.firstElementChild.getBoundingClientRect();
+      return label.dataset.date===date && label.textContent===value &&
+        Math.abs(parseFloat(label.style.left)-scale.timeToCoordinate(date))<1 &&
+        Math.abs(label.getBoundingClientRect().top-paneTop-candles.priceToCoordinate(close))<1 &&
+        bounds.left>=chart.left && bounds.right<=chart.left+scale.width() &&
+        bounds.top>=chart.top && bounds.bottom<=chart.top+paneHeight;
+    });
+  },expected,{timeout:4_000});
+  return expected;
+}
 try {
   const snapshot = JSON.parse(
     await readFile(path.join(site, "api/demo"), "utf8"),
@@ -68,6 +97,18 @@ try {
     });
     const page = await context.newPage(),
       errors = [];
+    await page.addInitScript(()=>{
+      let library;
+      Object.defineProperty(window,"LightweightCharts",{
+        get:()=>library,
+        set(value) {
+          library = {...value,createChart(...args) {
+            window.stockChart = value.createChart(...args);
+            return window.stockChart;
+          }};
+        },
+      });
+    });
     page.on("pageerror", (error) => errors.push(error.message));
     const requests = [];
     page.on("request", (request) => requests.push(request.url()));
@@ -110,12 +151,19 @@ try {
       /非最新行情/,
     );
     assert.equal(await page.locator(".pane-legend").count(), 5);
+    const paneHeights = await page.evaluate(()=>window.stockChart.panes().map((pane)=>pane.getHeight()));
+    const oldHeight = Math.min(1100,Math.max(mobile ? 790 : 770,height-300));
+    const originalPlotHeight = oldHeight - 22;
+    assert.ok(Math.abs(paneHeights[0] - originalPlotHeight*340/940)<4, "main pane retains its height");
+    assert.ok(paneHeights.slice(1).every((value)=>Math.abs(value - originalPlotHeight*225/940)<4),
+      "each indicator pane is 50% taller");
     await page.locator('[data-range="all"]').click();
     await page.waitForFunction(() =>
       document
         .querySelector("#visible-range")
         .textContent.includes("2020-07-01"),
     );
+    await checkCloseMarkers(page,snapshot.rows);
     await page.locator("#display-start").fill("2021-01-01");
     await page.locator("#display-end").fill("2021-12-31");
     const before = requests.length;
@@ -123,6 +171,7 @@ try {
     await page.waitForFunction(() =>
       document.querySelector("#status").textContent.includes("显示区间已调整"),
     );
+    await checkCloseMarkers(page,snapshot.rows);
     assert.equal(
       requests.length,
       before,
@@ -147,6 +196,7 @@ try {
       rows: snapshot.rows.length,
       mobile,
     });
+    const closeMarkers = await checkCloseMarkers(page,snapshot.rows);
     const layout = await page.evaluate(() => {
       const legends = [...document.querySelectorAll(".pane-legend")].map(
         (element) => {
@@ -181,6 +231,8 @@ try {
       mobile,
       status: "passed",
       controls,
+      paneHeights,
+      closeMarkers,
       ...layout,
     });
     // Explicit failure must leave old data clearly identified and show an error.

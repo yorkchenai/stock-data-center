@@ -20,14 +20,14 @@ export const COLORS = {
 };
 export const PANELS = [
   { title: "价格与均线", fields: ["MA5", "MA10", "MA20", "MA60"], height: 340 },
-  { title: "成交量 · 手", fields: ["VOL5", "VOL10"], height: 150 },
-  { title: "MACD · 两倍柱值", fields: ["DIF", "DEA"], height: 150 },
+  { title: "成交量 · 手", fields: ["VOL5", "VOL10"], height: 225 },
+  { title: "MACD · 两倍柱值", fields: ["DIF", "DEA"], height: 225 },
   {
     title: "RSI · 相对强弱",
     fields: ["RSI6", "RSI12", "RSI14", "RSI24"],
-    height: 150,
+    height: 225,
   },
-  { title: "ADX · 独立补充", fields: ["ADX14", "+DI", "-DI"], height: 150 },
+  { title: "ADX · 独立补充", fields: ["ADX14", "+DI", "-DI"], height: 225 },
 ];
 
 export function linePoints(rows, field) {

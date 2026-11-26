@@ -544,7 +544,7 @@ function navigateLink(event) {
   history.pushState(null,"",event.currentTarget.href);
   void route();
 }
-async function route() {
+async function route({scrollToTop=true}={}) {
   const version = ++routeNumber;
   const params = new URL(location.href).searchParams;
   const code = params.get("fund");
@@ -552,6 +552,7 @@ async function route() {
   selectedCode = FUND_CODE.test(code ?? "") ? code : null;
   $("fund-list").hidden = Boolean(selectedCode);
   $("fund-detail").hidden = !selectedCode;
+  status("detail-import-status","");
   showValuation(null);
   navChart.clear();
   navMode="adjusted";
@@ -572,7 +573,7 @@ async function route() {
   renderIdentity(current,loaded.get(current));
   renderAnalysis();
   status("detail-status",loaded.has(current) ? "" : noData);
-  window.scrollTo(0,0);
+  if (scrollToTop) window.scrollTo(0,0);
   if (loaded.has(current) && (local || online)) showValuation(current);
   if ((local || online) && !loaded.has(current)) {
     status("detail-status",`正在载入 ${current} 的确认净值…`);
@@ -590,7 +591,7 @@ async function route() {
 }
 
 async function importFiles(event) {
-  const mode = event.currentTarget.id==="detail-import" ? "detail-status" : "list-status";
+  const mode = event.currentTarget.id==="detail-import" ? "detail-import-status" : "list-status";
   const files = [...event.currentTarget.files];
   event.currentTarget.value = "";
   const loadedNames = [];
@@ -601,7 +602,7 @@ async function importFiles(event) {
       const raw = JSON.parse(await file.text());
       if (raw.kind!=="fund_chart_bundle" && file.size>MAX_FILE_BYTES) throw new Error("净值文件超出 4 MB。");
       const {fund:dataset}=normalizeChartFile(raw);
-      if (mode==="detail-status" && dataset.code!==selectedCode) throw new Error("文件基金代码与当前详情不一致。");
+      if (mode==="detail-import-status" && dataset.code!==selectedCode) throw new Error("文件基金代码与当前详情不一致。");
       sharedSnapshots.delete(dataset.code);
       snapshotFallback.delete(dataset.code);
       recordFund(dataset);
@@ -610,7 +611,7 @@ async function importFiles(event) {
     } catch (error) {failures.push(`${file.name} · ${error.message}`);}
   }
   save();
-  if (loadedNames.length && selectedCode) await route();
+  if (loadedNames.length && selectedCode) await route({scrollToTop:false});
   else renderList();
   status(mode,[loadedNames.length ? "已载入 " + loadedNames.join("、") + "。" : "",...failures].join(" "),Boolean(failures.length));
 }
@@ -660,7 +661,7 @@ $("fund-search").addEventListener("submit",async (event)=>{
 $("list-import").addEventListener("change",importFiles);
 $("detail-import").addEventListener("change",importFiles);
 $("back-to-funds").addEventListener("click",navigateLink);
-window.addEventListener("popstate",route);
+window.addEventListener("popstate",()=>void route());
 $("valuation-refresh").addEventListener("click",valuation.refresh);
 $("nav-adjusted").addEventListener("click",()=>{navMode="adjusted";renderNav(loaded.get(selectedCode),...navRange);});
 $("nav-raw").addEventListener("click",()=>{navMode="raw";renderNav(loaded.get(selectedCode),...navRange);});

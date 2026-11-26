@@ -148,6 +148,15 @@ try {
       [...chart.childNodes].some((node)=>node.nodeType===3&&node.textContent.trim())),false);
     assert.match(await page.locator("#returns-source").innerText(),/基金净值来源.*最新确认/);
     assert.ok(page.url().endsWith("/funds.html?fund=000001"));
+    const benchmarkCard = page.locator(".fund-identity .fund-benchmark");
+    await benchmarkCard.getByRole("heading",{name:"业绩比较基准"}).waitFor();
+    assert.ok((await benchmarkCard.boundingBox()).y < (await page.locator("#core-metrics").boundingBox()).y);
+    const dataPanel = page.locator("#fund-detail > section:last-child");
+    assert.equal(await dataPanel.getAttribute("id"),"fund-data-panel");
+    assert.match(await dataPanel.locator("#fund-source").innerText(),/合成界面测试/);
+    await dataPanel.locator("#fund-freshness").waitFor();
+    await dataPanel.getByText("导入该基金数据",{exact:true}).waitFor();
+    assert.equal(await page.locator("#detail-status").isVisible(),false);
     assert.equal(await page.locator("#core-metrics article").count(),6);
     const grid = await page.locator("#core-metrics").evaluate((el)=>getComputedStyle(el).gridTemplateColumns.split(" ").length);
     assert.equal(grid,mobile ? 2 : 3);
@@ -202,7 +211,7 @@ try {
     await page.screenshot({path:path.join(output,`funds-detail-${width}.png`),fullPage:true});
     await page.locator("#detail-import").setInputFiles({name:"test-fund-bundle.json",mimeType:"application/json",
       buffer:Buffer.from(JSON.stringify(fixtureBundle()))});
-    await page.waitForFunction(()=>document.getElementById("detail-status").textContent === "已载入 000001。");
+    await dataPanel.getByText("已载入 000001。",{exact:true}).waitFor();
     await page.locator("#nav-raw").click();
     assert.match(await page.locator("#nav-basis").innerText(),/原始单位净值/);
     assert.equal(await page.locator("#sector-chart").count(),0);

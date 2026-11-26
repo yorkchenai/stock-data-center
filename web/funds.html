@@ -71,8 +71,21 @@
           <p id="fund-identity"></p>
         </div>
         <div class="fund-nav-value"><span>最新确认单位净值</span><strong id="fund-nav">—</strong><span id="fund-nav-date">—</span></div>
-        <div class="fund-source"><span id="fund-source">来源 —</span><span id="fund-freshness">状态 —</span></div>
-        <label class="file-control">导入该基金数据<input id="detail-import" type="file" accept=".json,application/json"></label>
+        <section class="fund-benchmark" aria-labelledby="benchmark-title">
+          <div class="fund-benchmark-summary">
+            <h2 id="benchmark-title">业绩比较基准</h2>
+            <p id="benchmark-disclosure">业绩比较基准暂未核实</p>
+          </div>
+          <div class="fund-benchmark-meta">
+            <p id="benchmark-validity" class="fund-note" hidden></p>
+            <p id="benchmark-source" class="fund-note" hidden></p>
+            <p id="tracking-index" class="fund-note" hidden></p>
+            <details id="benchmark-history" hidden>
+              <summary>历史基准披露</summary>
+              <ul id="benchmark-history-list"></ul>
+            </details>
+          </div>
+        </section>
       </div>
       <p id="detail-status" class="fund-status" role="status"></p>
       <section id="valuation-panel" class="fund-panel" aria-labelledby="valuation-title" hidden>
@@ -113,17 +126,6 @@
         <p id="returns-source" class="fund-note" hidden></p>
         <a class="fund-note" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">图表由 TradingView Lightweight Charts™ 提供</a>
       </section>
-      <section class="fund-panel" aria-labelledby="benchmark-title">
-        <h2 id="benchmark-title">业绩比较基准</h2>
-        <p id="benchmark-disclosure">业绩比较基准暂未核实</p>
-        <p id="benchmark-validity" class="fund-note" hidden></p>
-        <p id="benchmark-source" class="fund-note" hidden></p>
-        <details id="benchmark-history" hidden>
-          <summary>历史基准披露</summary>
-          <ul id="benchmark-history-list"></ul>
-        </details>
-        <p id="tracking-index" class="fund-note" hidden></p>
-      </section>
       <section class="fund-panel chart-panel" aria-labelledby="risk-title">
         <h2 id="risk-title">风险分析</h2>
         <div id="risk-metrics" class="risk-grid"></div>
@@ -149,6 +151,14 @@
           </div>
           <button id="show-more-history" type="button">再显示 60 条</button>
         </details>
+      </section>
+      <section class="fund-panel" id="fund-data-panel" aria-labelledby="fund-data-title">
+        <h2 id="fund-data-title">基金数据来源</h2>
+        <div class="fund-data-controls">
+          <div class="fund-source"><span id="fund-source">来源 —</span><span id="fund-freshness">状态 —</span></div>
+          <label class="file-control">导入该基金数据<input id="detail-import" type="file" accept=".json,application/json"></label>
+        </div>
+        <p id="detail-import-status" class="fund-status" role="status"></p>
       </section>
     </section>
   </main>

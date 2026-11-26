@@ -11,6 +11,7 @@
 }
 .fund-status {min-height: 22px;}
 .fund-status[data-state="error"] {color: #a12b35;}
+#detail-status:empty, #detail-import-status:empty {display: none;}
 .fund-panel {
   min-width: 0; border: 1px solid var(--line); background: #fff;
   padding: 18px; border-radius: 8px; margin-bottom: 16px;
@@ -72,6 +73,9 @@
 .fund-identity p {margin: 0; color: var(--muted);}
 .fund-nav-value, .fund-source {display: grid; gap: 4px; color: var(--muted); font-size: 14px;}
 .fund-nav-value strong {color: #243449; font-size: 24px; font-variant-numeric: tabular-nums;}
+.fund-data-controls {display: flex; align-items: center; flex-wrap: wrap; gap: 12px;}
+.fund-data-controls .fund-source {flex: 1 1 360px; min-width: 0; overflow-wrap: anywhere;}
+#detail-import-status {margin: 8px 0 0;}
 .range-block {margin-bottom: 12px;}
 #fund-range {margin-top: 9px;}
 .metrics-grid {display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; margin-bottom: 16px;}
@@ -82,9 +86,16 @@
 .fund-chart {height: 320px; min-width: 0; position: relative;}
 .drawdown-chart {height: 190px;}
 .fund-chart.empty {display: grid; place-items: center; height: 115px; color: var(--muted); text-align: center; border: 1px dashed var(--line);}
-#benchmark-disclosure {margin: 0; overflow-wrap: anywhere;}
-#benchmark-source, #tracking-index {margin-bottom: 0;}
-#benchmark-history {margin-top: 8px;}
+.fund-benchmark {flex: 1 0 100%; min-width: 0; border-top: 1px solid var(--line); padding-top: 10px;}
+.fund-benchmark-summary {display: flex; align-items: baseline; gap: 4px 12px;}
+#fund-detail .fund-benchmark h2 {margin: 0; font-size: 15px; white-space: nowrap;}
+#benchmark-disclosure {color: inherit; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere;}
+.fund-benchmark-meta {display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px;}
+#fund-detail .fund-benchmark-meta .fund-note {margin: 0;}
+#benchmark-history {color: var(--muted); font-size: 14px;}
+#benchmark-history summary {cursor: pointer;}
+#benchmark-history[open] {flex-basis: 100%;}
+#benchmark-history-list {margin: 4px 0 0; padding-inline-start: 20px;}
 #benchmark-history-list li {overflow-wrap: anywhere;}
 #valuation-panel .risk-grid {margin-bottom: 0;}
 .chart-description {min-height: 20px;}
@@ -117,9 +128,11 @@
   #fund-detail .panel-heading h2 {margin: 0;}
   #fund-detail .fund-panel {margin-bottom: 12px;}
   #fund-detail .fund-controls button {min-width: 44px; min-height: 44px;}
-  #detail-status:empty {display: none;}
   .fund-identity {gap: 10px;}
   .fund-identity p {font-size: 13px;}
+  .fund-benchmark-summary {flex-direction: column;}
+  #benchmark-disclosure {font-size: 14px;}
+  #benchmark-history summary {display: list-item; min-height: 36px; padding-block: 7px;}
   .fund-nav-value, .fund-source {font-size: 13px;}
   .fund-nav-value strong {font-size: 20px;}
   #fund-detail .fund-note {line-height: 1.5; margin-block: 6px;}

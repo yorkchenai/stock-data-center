@@ -166,7 +166,9 @@ try {
     await open(page,code);
     const fund=await lookup(code);
     const latestFund=fund.rows.at(-1);
-    assert.equal(await page.locator("#core-metrics .metric").count(),6);
+    assert.equal(await page.locator("#core-metrics .metric").count(),5);
+    assert.match(await page.locator("#risk-reference-note").innerText(),/2\.5%.*252/);
+    assert.equal(await page.getByText("超额收益",{exact:true}).count(),0);
     assert.equal(await page.locator("#returns-chart canvas").count()>0,true);
     assert.equal(await page.locator("#drawdown-chart canvas").count()>0,true);
     assert.match(await page.locator("#fund-identity").textContent(),new RegExp(code));

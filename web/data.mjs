@@ -25,9 +25,9 @@ export const COLORS = {
   "-DI": "#168575",
 };
 export const PANELS = [
-  { title: "价格与均线", fields: ["MA5", "MA10", "MA20", "MA60"], height: 340, lineWidth: 2 },
-  { title: "成交量 · 手", fields: ["VOL5", "VOL10"], height: 225, lineWidth: 2 },
-  { title: "MACD · 两倍柱值", fields: ["DIF", "DEA"], height: 225, lineWidth: 2 },
+  { title: "价格与均线", fields: ["MA5", "MA10", "MA20", "MA60"], height: 340, lineWidth: 1.5 },
+  { title: "成交量 · 手", fields: ["VOL5", "VOL10"], height: 225, lineWidth: 1.5 },
+  { title: "MACD · 两倍柱值", fields: ["DIF", "DEA"], height: 225, lineWidth: 1.5 },
   {
     title: "RSI · 相对强弱",
     fields: ["RSI6", "RSI12", "RSI14", "RSI24"],

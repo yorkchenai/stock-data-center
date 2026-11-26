@@ -1,3 +1,5 @@
+import { fetchPublicValuation } from "./valuation.mjs";
+
 const headers = {"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"};
 
 export function mountSnapshotSite({analysis, legacy}) {
@@ -7,6 +9,9 @@ export function mountSnapshotSite({analysis, legacy}) {
       const expected=env.SNAPSHOT_MCP_OWNER_EMAIL?.trim().toLowerCase();
       if (pathname==="/api/analysis" && env.SNAPSHOT_PUBLIC_ENABLED==="1" && expected) {
         return analysis.fetch(request,env,ctx);
+      }
+      if (pathname==="/api/fund-valuation" && env.SNAPSHOT_PUBLIC_ENABLED==="1" && expected) {
+        return fetchPublicValuation(request,env.SNAPSHOT_PUBLIC_ORIGIN,ctx);
       }
       if (pathname==="/mcp" || pathname==="/") {
         // These identity headers must be supplied by the Sites dispatch gateway.

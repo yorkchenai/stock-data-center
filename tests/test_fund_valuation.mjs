@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { eastmoneyValuation, sinaValuation } from "../web/funds/valuation.mjs";
+import { eastmoneyValuation, parseSinaValuationJSONP, sinaValuation, valuationTime } from "../web/funds/valuation-source.mjs";
+import { mountSnapshotSite } from "../worker/snapshots/site-gateway.mjs";
 
 const now = "2026-11-26 12:24:00";
 
@@ -27,4 +28,37 @@ test("Sina returns separate last valid same-day points and converts growth rates
   assert.ok(Math.abs(values[1].change-1.996)<1e-12);
   assert.deepEqual(sinaValuation(payload,"018993","2026-11-27 11:30:00"),[]);
   assert.throws(()=>sinaValuation(payload,"110022",now));
+});
+
+test("Worker relay parses Sina JSONP without executing it and leaves private MCP protected",async (t)=>{
+  const code = "019830";
+  const origin = "https://yorkchenai.github.io";
+  const env = {SNAPSHOT_PUBLIC_ENABLED:"1",SNAPSHOT_PUBLIC_ORIGIN:origin,SNAPSHOT_MCP_OWNER_EMAIL:"owner@example.test"};
+  const site = mountSnapshotSite({analysis:{fetch:()=>new Response("analysis")},legacy:{fetch:()=>new Response("mcp")}});
+  const url = "https://worker.example.test/api/fund-valuation?symbol=019830&provider=sina";
+  const now = valuationTime();
+  const payload = {result:{status:{code:0},data:{symbol:code,networth:[{
+    pre_date:now.slice(0,10),min_time:"00:00:00",pre_nav:2.254,growthrate:0.012,
+    pre_nav2:2.30,growthrate2:0.025,
+  }]}}};
+  const jsonp = "/*<script>location.href='//sina.com';</script>*/\nsdcFundValuation("+JSON.stringify(payload)+");";
+  assert.throws(()=>parseSinaValuationJSONP(jsonp+"maliciousCode()"));
+  const upstream = t.mock.method(globalThis,"fetch",async (address,opts)=>{
+    assert.equal(address.hostname,"stock.finance.sina.com.cn");
+    assert.equal(address.searchParams.get("symbol"),code);
+    assert.equal(opts.redirect,"manual");
+    return new Response(jsonp);
+  });
+  const request = (address=url,options={})=>new Request(address,{headers:{Origin:origin},...options});
+  const response = await site.fetch(request(),env);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"),origin);
+  assert.deepEqual((await response.json()).values.map(({id,change})=>[id,change]),[
+    ["sina_ds2",1.2],["sina_ds3",2.5],
+  ]);
+  assert.equal((await site.fetch(request(url+"&symbol=110022"),env)).status,400);
+  assert.equal((await site.fetch(request(url,{method:"POST"}),env)).status,405);
+  assert.equal((await site.fetch(request(url,{headers:{Origin:"https://example.test"}}),env)).status,403);
+  assert.equal((await site.fetch(request(),{...env,SNAPSHOT_PUBLIC_ENABLED:"0"})).status,404);
+  assert.equal((await site.fetch(request("https://worker.example.test/mcp"),env)).status,403);
+  assert.equal(upstream.mock.callCount(),1);
 });

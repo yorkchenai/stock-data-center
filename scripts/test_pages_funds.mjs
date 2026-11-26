@@ -63,6 +63,9 @@ function synthetic(code, name, category, start, withBenchmark) {
 }
 const first = synthetic("000001","合成测试 · 混合基金（A 类份额）","mixed","2020-01-02",true);
 const second = synthetic("000002","合成测试 · 短历史债券","bond","2026-03-02",false);
+// Simulate a split while keeping the adjusted series continuous.
+second.rows.at(-1).unit_nav /= 2;
+second.rows.at(-1).split_factor = 2;
 const files = [first,second].map((fixture)=>({name:fixture.code+".json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(fixture))}));
 function fixtureBundle() {
   const end=first.rows.at(-1).date;
@@ -143,6 +146,13 @@ try {
     const tbody = page.locator("#fund-table tbody");
     const long = tbody.locator("tr",{hasText:first.name});
     const short = tbody.locator("tr",{hasText:second.name});
+    const change = (row)=>row.locator('[data-column="latest-change"]');
+    assert.equal(await change(long).textContent(),"+0.21%");
+    assert.equal(await change(long).getAttribute("class"),"fund-positive");
+    assert.equal(await change(short).textContent(),"-0.11%");
+    assert.equal(await change(short).getAttribute("class"),"fund-negative");
+    await page.getByRole("button",{name:"最新涨幅",exact:true}).click();
+    assert.equal(await tbody.locator("tr").first().getAttribute("data-fund-code"),"000001");
     assert.notEqual(await long.locator('[data-column="5y"]').textContent(),"—");
     assert.equal(await short.locator('[data-column="5y"]').textContent(),"—");
     await page.locator("#search-term").fill(first.name);
@@ -180,6 +190,10 @@ try {
     await page.getByRole("link",{name:first.name}).click();
     await page.locator("#returns-chart canvas").first().waitFor();
     await page.locator("#nav-chart canvas").first().waitFor();
+    assert.equal(await page.locator("#fund-latest-change").textContent(),"+0.21%");
+    const changeBox = await page.locator("#fund-latest-change").boundingBox();
+    const navBox = await page.locator("#fund-nav").boundingBox();
+    assert.ok(changeBox.x+changeBox.width<=navBox.x && Math.abs(changeBox.y-navBox.y)<1);
     assert.ok((await page.locator("#returns-title").boundingBox()).y < (await page.locator("#nav-chart-title").boundingBox()).y);
     const extrema = ()=>page.locator(".chart-extremes span").allTextContents();
     const oneYearExtrema = await extrema();
@@ -297,8 +311,16 @@ try {
     await page.getByRole("button",{name:"全部历史",exact:true}).click();
     await checkExtreme("nav-chart","2026-06-30","2.5550");
     await checkExtreme("nav-chart","2024-02-02","0.5099");
+    const gap = {...segmented,rows:segmented.rows.map((row,index)=>index===levels.length-1
+      ? {...row,return_index:null,return_issue:"unrecognized_event"} : row)};
+    await page.locator("#detail-import").setInputFiles({name:"missing-latest-return.json",mimeType:"application/json",
+      buffer:Buffer.from(JSON.stringify(gap))});
+    await page.locator("#fund-latest-change").getByText("—",{exact:true}).waitFor();
+    assert.equal(await page.locator("#fund-nav").textContent(),"1.2429");
     await page.getByRole("link",{name:"返回基金列表"}).click();
+    assert.equal(await change(long).textContent(),"—");
     await page.getByRole("link",{name:second.name}).click();
+    assert.equal(await page.locator("#fund-latest-change").textContent(),"-0.11%");
     assert.equal(await page.locator("#benchmark-disclosure").innerText(),"业绩比较基准暂未核实");
     assert.equal(await page.locator("[data-metric='sharpe'] strong").innerText(),"—");
     assert.equal(await page.locator("[data-metric='excess']").count(),0);
@@ -521,13 +543,14 @@ try {
   await savedFund.locator('[data-estimate="sina_ds3"]').getByText("+2.00%",{exact:true}).waitFor();
   const headings = await table.locator("th").allTextContents();
   const navColumn = headings.indexOf("最新单位净值");
-  assert.deepEqual(headings.slice(navColumn-3,navColumn),["估值1","估值2","估值3"]);
+  assert.deepEqual(headings.slice(navColumn-4,navColumn),["估值1","估值2","估值3","最新涨幅"]);
   assert.deepEqual(await savedFund.locator("td[data-estimate]").allTextContents(),["—","+1.18%","+2.00%"]);
   const checkedCodes = ["019830","014194","018993","110022"];
   const normalized = normalizeFund(first);
   for (const code of checkedCodes) {
     const row = table.locator(`tr[data-fund-code="${code}"]`);
     await row.locator('[data-column="nav"]').getByText(first.rows.at(-1).unit_nav.toFixed(4),{exact:true}).waitFor();
+    assert.equal(await row.locator('[data-column="latest-change"]').textContent(),"+0.21%");
     assert.equal(await row.locator('[data-column="date"]').textContent(),first.rows.at(-1).date);
     for (const [id] of PERIODS) {
       const {value} = periodReturn(normalized,id);

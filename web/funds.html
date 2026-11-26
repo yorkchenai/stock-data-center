@@ -55,13 +55,13 @@
         </div>
         <div class="fund-table-scroll" tabindex="0" aria-label="基金指标表，可横向滚动">
           <table id="fund-table">
-            <caption class="visually-hidden">所添加基金的当日参考估值、确认净值及历史收益</caption>
+            <caption class="visually-hidden">所添加基金的当日参考估值、最新涨幅、确认净值及历史收益</caption>
             <thead></thead>
             <tbody></tbody>
           </table>
         </div>
       </section>
-      <p class="fund-note">估值为当日参考涨跌幅，未取得有效估值时显示 —。收益周期截至各基金最后一笔确认净值。周按自然日、月和年按公历回推，取目标日期当日或之前最近一笔有效记录作为基准。历史覆盖不足显示 —。</p>
+      <p class="fund-note">估值为当日参考涨跌幅。最新涨幅按相邻两笔确认净值对应的复权总回报计算。收益周期截至各基金最后一笔确认净值。周按自然日、月和年按公历回推，取目标日期当日或之前最近一笔有效记录作为基准。数据不足显示 —。</p>
     </section>
     <section id="fund-detail" aria-labelledby="fund-title" hidden>
       <a class="back-link" href="./funds.html" id="back-to-funds">← 返回基金列表</a>
@@ -70,7 +70,13 @@
           <h1 id="fund-title">基金详情</h1>
           <p id="fund-identity"></p>
         </div>
-        <div class="fund-nav-value"><span>最新确认单位净值</span><strong id="fund-nav">—</strong><span id="fund-nav-date">—</span></div>
+        <div class="fund-latest-values">
+          <div class="fund-nav-value">
+            <span title="按相邻两笔确认净值对应的复权总回报计算">最新涨幅</span>
+            <strong id="fund-latest-change">—</strong>
+          </div>
+          <div class="fund-nav-value"><span>最新确认单位净值</span><strong id="fund-nav">—</strong><span id="fund-nav-date">—</span></div>
+        </div>
         <section class="fund-benchmark" aria-labelledby="benchmark-title">
           <div class="fund-benchmark-summary">
             <h2 id="benchmark-title">业绩比较基准</h2>

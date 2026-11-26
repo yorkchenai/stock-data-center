@@ -68,13 +68,19 @@ async function waitForEstimateRequest(code, timeout) {
 }
 
 async function fundAnalysis() {
-  return page.locator("#fund-nav, #fund-nav-date, #core-metrics, #risk-metrics").allTextContents();
+  return page.locator("#fund-latest-change, #fund-nav, #fund-nav-date, #core-metrics, #risk-metrics").allTextContents();
 }
 
 try {
   const estimates = {};
+  const confirmed = {};
   for (const code of ["019830","014194","018993"]) {
     await fund(code);
+    confirmed[code] = {
+      date:await page.locator("#fund-nav-date").textContent(),
+      change:await page.locator("#fund-latest-change").textContent(),
+    };
+    assert.match(confirmed[code].change,/^[+-]?\d+\.\d{2}%$/);
     estimates[code] = await quotes(code);
   }
 
@@ -115,7 +121,7 @@ try {
   const table = page.locator("#fund-table");
   const headings = await table.locator("th").allTextContents();
   const navColumn = headings.indexOf("最新单位净值");
-  assert.deepEqual(headings.slice(navColumn-3,navColumn),["估值1","估值2","估值3"]);
+  assert.deepEqual(headings.slice(navColumn-4,navColumn),["估值1","估值2","估值3","最新涨幅"]);
   const row = table.locator('tr[data-fund-code="019830"]');
   await row.locator("td[data-estimate]").filter({hasText:/^[+-]?\d+\.\d{2}%$/}).first().waitFor({timeout:20_000});
   const listEstimates = await row.locator("td[data-estimate]").allTextContents();
@@ -125,10 +131,13 @@ try {
     const nav = saved.locator('[data-column="nav"]').getByText(/^\d+\.\d{4}$/);
     await nav.waitFor({timeout:45_000});
     const date = await saved.locator('[data-column="date"]').textContent();
+    const change = await saved.locator('[data-column="latest-change"]').textContent();
     const month = await saved.locator('[data-column="1m"]').textContent();
     assert.match(date,/^\d{4}-\d{2}-\d{2}$/);
+    assert.match(change,/^[+-]?\d+\.\d{2}%$/);
+    if (date===confirmed[code].date) assert.equal(change,confirmed[code].change);
     assert.match(month,/^-?\d+\.\d{2}%$/);
-    listNav[code] = {nav:await nav.textContent(),date,month};
+    listNav[code] = {nav:await nav.textContent(),date,change,month};
   }
   assert.deepEqual(pageErrors,[]);
 

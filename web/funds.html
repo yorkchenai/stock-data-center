@@ -100,11 +100,16 @@
       </section>
       <section class="fund-panel chart-panel" aria-labelledby="returns-title">
         <div class="panel-heading"><h2 id="returns-title">基金累计收益率</h2><span id="fund-visible-range" class="fund-note"></span></div>
-        <p id="benchmark-disclosure" class="fund-note"></p>
         <div id="returns-chart" class="fund-chart" role="img" aria-label="以统计区间起点归零的基金累计收益率曲线"></div>
         <p id="hover-values" class="fund-note chart-description" aria-live="off"></p>
         <p id="returns-source" class="fund-note" hidden></p>
         <a class="fund-note" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">图表由 TradingView Lightweight Charts™ 提供</a>
+      </section>
+      <section class="fund-panel" aria-labelledby="benchmark-title">
+        <h2 id="benchmark-title">业绩比较基准</h2>
+        <p id="benchmark-disclosure">业绩比较基准暂未核实</p>
+        <p id="benchmark-source" class="fund-note" hidden></p>
+        <p id="tracking-index" class="fund-note" hidden></p>
       </section>
       <section class="fund-panel chart-panel" aria-labelledby="risk-title">
         <h2 id="risk-title">风险分析</h2>
@@ -113,38 +118,9 @@
         <p id="drawdown-values" class="fund-note chart-description"></p>
         <p id="risk-assumptions" class="fund-note"></p>
       </section>
-      <section class="fund-panel sector-panel" aria-labelledby="sector-title">
-        <div class="panel-heading">
-          <h2 id="sector-title">强关联板块指数分析</h2>
-          <button type="button" id="sector-refresh" hidden>检查更新</button>
-        </div>
-        <div id="sector-tabs" class="fund-controls sector-tabs" role="group" aria-label="关联板块"></div>
-        <p id="sector-analysis-meta" class="fund-note"></p>
-        <p id="sector-status" class="fund-status" role="status"></p>
-        <p id="sector-metrics" class="sector-metrics"></p>
-        <p id="sector-evidence" class="fund-note"></p>
-        <div id="sector-display" hidden>
-          <h3 id="sector-index-title"></h3>
-          <p id="sector-index-meta" class="fund-note"></p>
-          <div id="sector-periods" class="fund-controls" role="group" aria-label="指数显示区间"></div>
-          <form id="sector-range" class="fund-controls" hidden>
-            <label>开始日期<input id="sector-from" type="date" required></label>
-            <label>结束日期<input id="sector-to" type="date" required></label>
-            <button type="submit">应用区间</button>
-          </form>
-          <p id="sector-range-status" class="fund-note" role="status"></p>
-          <p id="sector-ohlc" class="fund-note chart-description"></p>
-          <div id="sector-ma" class="indicator-toggles" role="group" aria-label="移动均线"></div>
-          <div id="sector-vol" class="indicator-toggles" role="group" aria-label="成交量与均量"></div>
-          <div id="sector-chart" class="fund-chart sector-chart" role="img" aria-label="板块价格与成交量技术图"></div>
-          <p id="sector-history-note" class="fund-note"></p>
-          <p id="sector-volume-note" class="fund-note"></p>
-        </div>
-      </section>
       <section class="fund-panel" aria-labelledby="holdings-title">
         <h2 id="holdings-title">持仓与投资风格</h2>
         <div id="holdings-data"></div>
-        <p id="related-data" class="fund-note">暂无可核实的关联板块数据。</p>
       </section>
       <section class="fund-panel" aria-labelledby="fund-more-title">
         <h2 id="fund-more-title">更多基金信息及历史数据</h2>

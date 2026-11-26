@@ -6,13 +6,15 @@ import { chromium } from "playwright-core";
 const origin="https://yorkchenai.github.io/stock-data-center/";
 const site=path.resolve(process.env.PAGES_SITE??"work/pages-site");
 const output=process.env.FUND_MIGRATION_OUTPUT??"work/browser-funds";
-const comparePath=process.env.FUND_MIGRATION_INPUT??"work/browser-fund-parity-input.json";
-const codes={"110022":"399997","006751":"000994","003095":"000991"};
+const codes={
+  "014194":["95%","5%"],
+  "018993":["65%","15%","20%"],
+  "110022":["85%","15%"],
+};
 const mime={".html":"text/html; charset=utf-8",".mjs":"text/javascript",".js":"text/javascript",".css":"text/css",".json":"application/json"};
 await mkdir(output,{recursive:true});
 const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH??"/usr/bin/chromium",args:["--no-sandbox"]});
 const summary={origin,preview:"PR assets routed only inside this browser; provider requests and CORS are unmodified",funds:{}};
-const parity={funds:{}};
 async function serveAssets(context) {
   await context.route(origin+"**",async(route)=>{
     const url=new URL(route.request().url());
@@ -20,7 +22,7 @@ async function serveAssets(context) {
     if (!file.startsWith(site+path.sep)) return route.abort();
     try {
       let body=await readFile(file);
-      if (file===path.join(site,"funds/app.mjs")) body=body+"\nexport {loaded,browserSectors};\n";
+      if (file===path.join(site,"funds/app.mjs")) body=body+"\nexport {loaded};\n";
       return route.fulfill({contentType:mime[path.extname(file)]??"application/octet-stream",body});
     } catch { return route.fulfill({status:404,body:"Preview file not found"}); }
   });
@@ -37,103 +39,49 @@ async function selectCode(page,code) {
 }
 
 try {
-  const live=await browser.newPage();
-  const actual=await live.goto(origin,{waitUntil:"domcontentloaded",timeout:25_000});
-  summary.production_page_status=actual.status();
-  assert.equal(actual.status(),200);
-  await live.close();
   const context=await browser.newContext({viewport:{width:1440,height:1000}});
   await serveAssets(context);
   const page=await context.newPage();
-  const touchSession=await context.newCDPSession(page);
   const pageErrors=[];
-  const localRequests=[];
+  const unexpectedRequests=[];
   page.on("pageerror",(error)=>pageErrors.push(error.message));
-  page.on("request",(request)=>{if (new URL(request.url()).pathname.startsWith("/api/funds")) localRequests.push(request.url());});
+  page.on("request",(request)=>{
+    const url=new URL(request.url());
+    if ((url.origin===new URL(origin).origin && !url.pathname.startsWith("/api/funds/")) ||
+        (url.hostname==="fund.eastmoney.com" && /^\/(?:pingzhongdata\/\d{6}\.js|js\/fundcode_search\.js)$/.test(url.pathname))) return;
+    if (url.protocol==="https:" || url.protocol==="http:") unexpectedRequests.push(url.href);
+  });
   await page.goto(origin+"funds.html");
   assert.equal(new URL(page.url()).origin,"https://yorkchenai.github.io");
-  for (const [code,target] of Object.entries(codes)) {
+  for (const [code,weights] of Object.entries(codes)) {
     await selectCode(page,code);
-    await page.waitForFunction(()=>document.querySelector("#sector-tabs button")||
-      !document.querySelector("#sector-status").textContent.startsWith("正在识别"),null,{timeout:65_000});
-    const result=await page.evaluate(async ({base,code,target})=>{
-      const {loaded,browserSectors}=await import(base+"funds/app.mjs");
-      const fund=loaded.get(code);
-      const context=await browserSectors.analyze(fund);
-      const {report,histories,sessions}=context;
-      const matched=report.sectors.find((entry)=>entry.code===target);
-      return {fund,report,histories,sessions,chart:matched?browserSectors.history(code,matched,context):null};
-    },{base:origin,code,target});
-    assert.equal(result.fund.code,code);
-    assert.ok(result.fund.rows.length>1000);
-    assert.ok(["isolated-script","browser-cors"].includes(result.fund.source.transport));
+    const fund=await page.evaluate(async ({base,code})=>{
+      const {loaded}=await import(base+"funds/app.mjs");
+      const {name,rows,source}=loaded.get(code);
+      return {name,date:rows.at(-1).date,unit_nav:rows.at(-1).unit_nav,transport:source.transport};
+    },{base:origin,code});
+    assert.ok(["isolated-script","browser-cors"].includes(fund.transport));
+    await page.locator("#benchmark-source a").waitFor();
+    const benchmark=await page.locator("#benchmark-disclosure").innerText();
+    assert.deepEqual(benchmark.match(/\d+%/g),weights);
+    assert.equal(await page.locator("#tracking-index").isVisible(),code==="014194");
+    assert.equal(await page.getByRole("heading",{name:"强关联板块指数分析"}).count(),0);
     assert.equal(await page.locator("#core-metrics .metric").count(),6);
     assert.ok(await page.locator("#returns-chart canvas").count());
     assert.ok(await page.locator("#drawdown-chart canvas").count());
-    const entry=page.locator(`[data-index="${target}"]`);
-    const visibleCount=await page.locator("#sector-tabs button").count();
-    assert.equal(visibleCount,result.report.sectors.length,await page.locator("#sector-status").textContent());
-    const observed={nav_date:result.fund.rows.at(-1).date,net_value:result.fund.rows.at(-1).unit_nav,
-      fund_name:result.fund.name,category:result.fund.category,transport:result.fund.source.transport,
-      nav_rows:result.fund.rows.length,coverage:result.report.index_coverage,model_date:result.report.model_as_of,
-      ranked:result.report.sectors.map(({code})=>code),sector_status:result.report.status,
-      latest_chart:result.chart?.last??null};
-    result.visible_metrics=await page.locator("#core-metrics .metric").evaluateAll((items)=>
-      Object.fromEntries(items.map((item)=>[item.dataset.metric,item.querySelector("strong").textContent])));
-    observed.return_1y=result.visible_metrics.return;
-    observed.drawdown_1y=result.visible_metrics.drawdown;
-    summary.funds[code]=observed;
-    parity.funds[code]=result;
-    if (await entry.count()) {
-      await entry.click();
-      await page.locator('#sector-chart[data-chart-mode="candles"]').waitFor();
-      assert.equal(result.chart.volume_unit,"手");
-      assert.match(await page.locator("#sector-volume-note").textContent(),/日成交量 · 手/);
-      assert.equal(await page.locator("#sector-ma label").count(),4);
-      assert.equal(await page.locator("#sector-vol label").count(),3);
-      observed.index_source=result.chart.source.id;
-      const alternative=page.locator(`#sector-tabs button:not([data-index="${target}"])`).first();
-      if (await alternative.count()) {
-        const alternate=await alternative.getAttribute("data-index");
-        await alternative.click();
-        await page.waitForFunction((index)=>document.getElementById("sector-index-title").textContent.endsWith(index),alternate);
-        await entry.click();
-        await page.waitForFunction((index)=>document.getElementById("sector-index-title").textContent.endsWith(index),target);
-        observed.index_switch=true;
-      }
-    }
-    for (const [width,height] of [[1440,1000],[1920,1000],[390,844],[430,932]]) {
+    summary.funds[code]={...fund,benchmark,
+      effective_from:await page.locator("#benchmark-source time").innerText(),
+      source:await page.locator("#benchmark-source a").getAttribute("href")};
+    for (const [width,height] of [[1440,1000],[390,844]]) {
       await page.setViewportSize({width,height});
-      await touchSession.send("Emulation.setTouchEmulationEnabled",{enabled:width<500,maxTouchPoints:2});
-      await page.evaluate(()=>new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
       await page.screenshot({path:path.join(output,`fund-${code}-${width}.png`),fullPage:true});
-      if (await entry.count() && width===(code==="006751"?430:390)) {
-        const chart=page.locator("#sector-chart");
-        await chart.scrollIntoViewIfNeeded();
-        const box=await chart.boundingBox();
-        const x=box.x+box.width*.46,y=box.y+box.height*.42;
-        const before=await chart.getAttribute("data-visible-from");
-        const pinch=(type,d)=>touchSession.send("Input.dispatchTouchEvent",{type,touchPoints:d?[
-          {x:x-d,y,id:1},{x:x+d,y,id:2},
-        ]:[]});
-        await pinch("touchStart",16);
-        for (const distance of [26,36,46,56,66,76]) await pinch("touchMove",distance);
-        await pinch("touchEnd",0);
-        await page.waitForFunction((before)=>document.getElementById("sector-chart").dataset.visibleFrom!==before,before);
-        observed.mobile_pinch=width;
-      }
     }
     await page.setViewportSize({width:1440,height:1000});
-    await touchSession.send("Emulation.setTouchEmulationEnabled",{enabled:false});
   }
-  await page.locator("#back-to-funds").click();
-  await page.locator("#search-term").fill("富国互联科技");
-  await page.locator("#fund-search button").click();
-  await page.getByText(/006751/).first().waitFor();
   assert.deepEqual(pageErrors,[]);
-  assert.deepEqual(localRequests,[]);
-  summary.python_http_requests=localRequests.length;
+  assert.deepEqual(unexpectedRequests,[]);
+  summary.unexpected_requests=unexpectedRequests.length;
   await context.close();
 
   const outage=await browser.newContext();
@@ -147,6 +95,5 @@ try {
   await outage.close();
 } finally {
   await writeFile(path.join(output,"browser-summary.json"),JSON.stringify(summary,null,2)+"\n");
-  await writeFile(comparePath,JSON.stringify(parity));
   await browser.close();
 }

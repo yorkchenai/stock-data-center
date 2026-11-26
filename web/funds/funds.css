@@ -81,8 +81,8 @@
 .fund-chart {height: 320px; min-width: 0; position: relative;}
 .drawdown-chart {height: 190px;}
 .fund-chart.empty {display: grid; place-items: center; height: 115px; color: var(--muted); text-align: center; border: 1px dashed var(--line);}
-#benchmark-disclosure {margin: 0 0 10px;}
-#benchmark-disclosure a {white-space: nowrap;}
+#benchmark-disclosure {margin: 0; overflow-wrap: anywhere;}
+#benchmark-source, #tracking-index {margin-bottom: 0;}
 .chart-description {min-height: 20px;}
 .risk-grid {display: grid; grid-template-columns: repeat(auto-fit, minmax(145px,1fr)); gap: 8px; margin-bottom: 13px;}
 .risk-metric {padding: 9px; background: #f8fafb;}
@@ -91,7 +91,6 @@
 .fund-facts {display: grid; grid-template-columns: minmax(100px,auto) 1fr; gap: 8px; font-size: 14px;}
 .fund-facts dt {color: var(--muted);}
 .fund-facts dd {margin: 0; overflow-wrap: anywhere;}
-#related-data span {display: block;}
 .history-scroll {overflow: auto; max-height: 50vh; margin: 10px 0;}
 .visually-hidden {position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;}
 @media (max-width: 620px) {
@@ -104,25 +103,6 @@
   .drawdown-chart {height: 150px;}
 }
 
-.sector-panel .panel-heading {margin-bottom: 9px;}
-.sector-panel .panel-heading h2 {margin: 0;}
-.sector-panel p:empty {display: none;}
-.sector-tabs {margin: 9px 0;}
-.sector-tabs button {max-width: 100%; overflow-wrap: anywhere; text-align: left;}
-.sector-metrics {
-  padding: 9px 12px; border-left: 2px solid #63a39d; background: #f3f8f7;
-  font-size: 14px; line-height: 1.5; font-variant-numeric: tabular-nums;
-}
-.sector-chart {height: 430px; margin-top: 8px;}
-.sector-chart.with-volume {height: 510px;}
-#sector-index-title {margin: 16px 0 4px; font-size: 16px; line-height: 1.5;}
-#sector-index-meta {margin-top: 0;}
-#sector-range {margin-top: 9px;}
-#sector-ohlc {font-variant-numeric: tabular-nums;}
-.indicator-toggles {display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 6px 0;}
-.indicator-toggles:empty {display: none;}
-.indicator-toggles label {display: inline-flex; align-items: center; gap: 4px; font-size: 13px;}
-.indicator-toggles output {min-width: 38px; font-variant-numeric: tabular-nums; font-weight: 650;}
 #nav-gaps {color: var(--muted);}
 #nav-gaps ul {max-height: 150px; overflow: auto;}
 #fund-missing-facts {display: none;}
@@ -132,7 +112,7 @@
   #fund-detail .panel-heading {column-gap: 10px; row-gap: 4px; margin-bottom: 7px;}
   #fund-detail .panel-heading h2 {margin: 0;}
   #fund-detail .fund-panel {margin-bottom: 12px;}
-  #fund-detail .fund-controls button, #sector-refresh {min-width: 44px; min-height: 44px;}
+  #fund-detail .fund-controls button {min-width: 44px; min-height: 44px;}
   #detail-status:empty {display: none;}
   .fund-identity {gap: 10px;}
   .fund-identity p {font-size: 13px;}
@@ -140,11 +120,10 @@
   .fund-nav-value strong {font-size: 20px;}
   #fund-detail .fund-note {line-height: 1.5; margin-block: 6px;}
   #fund-detail .chart-description {min-height: 18px;}
-  #fund-detail :is(#fund-visible-range,#range-status,#sector-analysis-meta,#sector-index-meta,#sector-range-status,#returns-source) {
+  #fund-detail :is(#fund-visible-range,#range-status,#returns-source) {
     font-size: 13px;
   }
   #fund-detail #fund-visible-range {margin: 0;}
-  #fund-detail #benchmark-disclosure {margin: 0 0 8px;}
   .metric {padding: 10px;}
   .metric h3 {line-height: 1.35;}
   .metric strong {font-size: 20px; line-height: 1.2; margin: 4px 0;}
@@ -156,17 +135,6 @@
   .risk-metric strong {font-size: 16px; line-height: 1.25;}
   .risk-metric small {display: block; overflow-wrap: anywhere;}
   .risk-metric small:empty {display: none;}
-  .sector-chart {height: 335px;}
-  .sector-chart.with-volume {height: clamp(430px,calc(100vw + 60px),490px);}
-  .sector-metrics {padding: 8px 10px; margin: 6px 0; font-size: 14px;}
-  #sector-index-title {margin-top: 12px;}
-  #sector-index-meta a {display: inline-block;}
-  .indicator-toggles:not(:empty) {display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 8px;}
-  .indicator-toggles label {min-width: 0; min-height: 44px; align-content: center; flex-wrap: wrap; font-size: 14px;}
-  .indicator-toggles label > input {margin: 0 2px 0 0;}
-  .indicator-toggles output {min-width: 0; overflow-wrap: anywhere;}
-  #sector-ma:not(:empty) {border-bottom: 1px solid var(--line);}
-  #sector-vol label:first-child {grid-column: 1 / -1;}
   #fund-more > .fact-missing {display: none;}
   #fund-missing-facts {display: block; margin-bottom: 6px;}
   #fund-missing-facts summary {min-height: 44px; padding-block: 10px;}

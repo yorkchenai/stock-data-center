@@ -3,10 +3,8 @@ import { PERIODS, analyzePerformance, periodReturn, periodStart, selectWindow } 
 import { createFundCharts } from "./charts.mjs";
 import { BUNDLE_BYTES, normalizeChartFile } from "./chart-data.mjs";
 import { createNavChart } from "./nav-chart.mjs";
-import { createSectorPanel } from "./sector-panel.mjs";
 import { fetchFund, fetchFundDirectory, readPageData } from "./providers.mjs";
-import { createBrowserSectorProvider } from "./sector-browser.mjs";
-import { browserModelVersion, getPageSnapshot, getSnapshotIndex, snapshotNote, snapshotsEnabled } from "../snapshot-client.mjs";
+import { browserModelVersion, getPageSnapshot, snapshotNote, snapshotsEnabled } from "../snapshot-client.mjs";
 
 const $ = (id) => document.getElementById(id);
 function tag(name, text, attrs = {}) {
@@ -31,7 +29,6 @@ const catalog = new Map();
 const beingLoaded = new Map();
 const sharedSnapshots = new Map();
 const snapshotFallback = new Map();
-const verifiedWebCoverage = 14;
 const columns = [
   ["name","基金名称 / 代码"],["type","基金类型"],["nav","最新单位净值"],["date","净值日期"],...PERIODS,
   ["source","来源"],["actions","操作"],
@@ -48,8 +45,6 @@ const coreDefinitions = [
 ];
 const charts = createFundCharts();
 const navChart = createNavChart($("nav-chart"),$("nav-hover"));
-const sectors = createSectorPanel();
-const bundles = new Map();
 let navMode = "adjusted";
 let navRange = [];
 const loopback = ["127.0.0.1","localhost","[::1]"].includes(location.hostname);
@@ -58,13 +53,18 @@ let pageConfig;
 function fetchPageConfig() {
   if (!pageConfig) {
     pageConfig=readPageData("fund-config.json").then((config)=>{
-      if (config.schema_version!==1 || !config.indices) throw new Error("基金网页配置资料不完整。");
+      if (config.schema_version!==1) throw new Error("基金网页配置资料不完整。");
       return config;
     }).catch((error)=>{pageConfig=null;throw error;});
   }
   return pageConfig;
 }
-const browserSectors = online?createBrowserSectorProvider(fetchPageConfig):null;
+let pageDisclosures;
+function fetchPageDisclosures() {
+  pageDisclosures ??= readPageData("fund-benchmark-disclosures.json").then((data)=>
+    data.schema_version === 1 ? data.disclosures : null).catch(()=>null);
+  return pageDisclosures;
+}
 const url = (code) => new URL(code ? `?fund=${code}` : "funds.html", location.href);
 const localURL = (path) => new URL("/api/funds" + path, location.origin);
 const noData = "未载入可用净值。";
@@ -126,13 +126,6 @@ async function loadOnlineFund(code, snapshotId) {
           Date.parse(shanghaiToday())-Date.parse(snapshot.data_as_of)>7*86_400_000) {
         throw new Error("共享快照净值日期已超过 7 天。");
       }
-      if (!snapshotId && ["stock","mixed"].includes(snapshot.data.fund.category)) {
-        const coverage=snapshot.data.association?.index_coverage;
-        const covered=coverage?.available??0;
-        if (covered<verifiedWebCoverage) {
-          throw new Error(`共享快照指数覆盖 ${covered}/${coverage?.total??24}，低于网页已验证的 ${verifiedWebCoverage} 条。`);
-        }
-      }
       return {raw:snapshot.data.fund,snapshot};
     } catch (error) {
       if (snapshotId) throw error;
@@ -145,9 +138,15 @@ function loadFund(code,snapshotId=null) {
   const key=snapshotId??code;
   if (!beingLoaded.has(key)) {
     const pending=online?loadOnlineFund(code,snapshotId):readApi("/" + code).then((raw)=>({raw}));
-    beingLoaded.set(key,pending.then(({raw,snapshot})=>{
+    const disclosures = online ? fetchPageDisclosures() : null;
+    beingLoaded.set(key,Promise.all([pending,disclosures]).then(([{raw,snapshot},reviewed])=>{
       const fund = normalizeFund(raw);
       if (fund.code !== code) throw new Error("查询结果的基金代码不一致。");
+      const display = reviewed?.[code];
+      if (display && display.effective_from <= fund.rows.at(-1).date &&
+          (!fund.benchmark_disclosure || display.effective_from >= fund.benchmark_disclosure.effective_from)) {
+        fund.benchmark_disclosure = display;
+      }
       if (snapshot) sharedSnapshots.set(code,snapshot);
       else sharedSnapshots.delete(code);
       recordFund(fund);
@@ -299,10 +298,6 @@ function showFacts(target, fields) {
 function renderHoldings(fund) {
   const target = $("holdings-data");
   const holdings = fund?.holdings;
-  const related = fund?.related ?? [];
-  const kinds = {official_tracking:"官方跟踪指数",official_benchmark:"官方业绩比较基准",holdings_derived:"披露或第三方归类"};
-  $("related-data").replaceChildren(...(related.length ? related.map((item)=>tag("span",
-    [kinds[item.kind],item.name,item.code,item.source].filter(Boolean).join(" · "))) : ["暂无可核实的关联板块数据。"]));
   if (!holdings?.period_end || !holdings?.disclosed_at || !holdings?.source) {
     target.replaceChildren(tag("p","暂无带报告期和披露日期的可信持仓资料。",{class:"fund-note"}));
     return;
@@ -324,6 +319,36 @@ function historyTable(fund) {
   }));
   $("show-more-history").hidden = !fund || fund.rows.length<=historyLimit;
 }
+function renderBenchmark(fund, asOf) {
+  const benchmark = fund?.benchmark;
+  const disclosure = fund?.benchmark_disclosure;
+  const regime = benchmark?.regimes.find(({effective_from,effective_to})=>
+    effective_from <= asOf && (!effective_to || asOf <= effective_to));
+  const formula = disclosure?.formula ?? regime?.formula ?? benchmark?.formula;
+  const description = formula && /\d\s*[%％]/.test(formula) ? formula : benchmark?.name ?? formula;
+  $("benchmark-disclosure").textContent = description
+    ? description.replace(/\s*[＋+]\s*/g," + ").replace(/\s*×\s*/g," × ")
+    : "业绩比较基准暂未核实";
+
+  const source = $("benchmark-source");
+  const since = disclosure?.effective_from ?? regime?.effective_from ?? benchmark?.effective_from;
+  const url = disclosure?.source_url ?? regime?.source_url ?? benchmark?.source_url;
+  source.replaceChildren();
+  if (description && since) source.append("生效日期 ",tag("time",since,{datetime:since}));
+  if (description && typeof url === "string" && URL.canParse(url)) {
+    const link = new URL(url);
+    if (link.protocol === "https:" && !link.username && !link.password) {
+      if (source.hasChildNodes()) source.append(" · ");
+      source.append(tag("a","查看官方披露",{href:link.href,target:"_blank",rel:"noopener noreferrer"}));
+    }
+  }
+  source.hidden = !source.hasChildNodes();
+
+  const tracking = $("tracking-index");
+  const target = disclosure?.tracking_index ?? fund?.related.find(({kind})=>kind==="official_tracking");
+  tracking.hidden = !target?.name;
+  tracking.textContent = target?.name ? "跟踪指数 · " + target.name : "";
+}
 function renderIdentity(code,fund) {
   const entry = catalog.get(code);
   $("fund-title").textContent = fund?.name ?? entry?.name ?? "基金 " + code;
@@ -337,23 +362,12 @@ function renderIdentity(code,fund) {
       ? " · " + snapshotFallback.get(code):""}` : "";
   $("fund-source").textContent = "来源 " + (fund?.source.name ?? "—") + (origin?" · "+origin:"");
   $("fund-freshness").textContent = "状态 " + (fund ? fundFreshness(fund) : "未载入");
-  const benchmark = fund?.benchmark_disclosure ?? fund?.benchmark;
-  const formula = benchmark?.formula || benchmark?.name || "暂未核实";
-  const since = benchmark?.effective_from ? `（${benchmark.effective_from}起）` : "";
-  const comparison = $("benchmark-disclosure");
-  comparison.textContent = `官方业绩比较基准：${formula}${since}`;
-  if (typeof benchmark?.source_url === "string" && URL.canParse(benchmark.source_url)) {
-    const source = new URL(benchmark.source_url);
-    if (source.protocol === "https:" && !source.username && !source.password) {
-      comparison.append(" ",tag("a","查看披露",{href:source.href,target:"_blank",rel:"noopener noreferrer"}));
-    }
-  }
+  renderBenchmark(fund,latest?.date);
   const sourceTime = fund && new Intl.DateTimeFormat("zh-CN",{
     timeZone:"Asia/Shanghai",dateStyle:"medium",timeStyle:"short",
   }).format(new Date(fund.source.retrieved_at));
   const facts = [["基金成立日期",fund?.inception],["基金规模",fund?.size],["费率",fund?.fee],
-    ["基金经理",fund?.fund_manager],["业绩比较基准",fund?.benchmark?.name ?? fund?.reference],
-    ["基准公式",fund?.benchmark?.formula],["基准披露出处",fund?.benchmark?.source,fund?.benchmark?.source_url],["数据获取时间（上海）",sourceTime],
+    ["基金经理",fund?.fund_manager],["数据获取时间（上海）",sourceTime],
     ["原始数据口径",fund?.source.method],["总回报口径",fund?.return_note ?? (fund?.return_basis==="adjusted_nav" ? "来源提供的复权总回报序列" : null)]];
   showFacts($("fund-more"),facts);
   const missing = facts.filter(missingFact);
@@ -469,7 +483,6 @@ async function route() {
   selectedCode = FUND_CODE.test(code ?? "") ? code : null;
   $("fund-list").hidden = Boolean(selectedCode);
   $("fund-detail").hidden = !selectedCode;
-  sectors.clear();
   navChart.clear();
   navMode="adjusted";
   if (!selectedCode) {
@@ -490,12 +503,6 @@ async function route() {
   renderAnalysis();
   status("detail-status",loaded.has(current) ? "" : noData);
   window.scrollTo(0,0);
-  const startSectors=(fund)=>{
-    const snapshot=sharedSnapshots.get(current);
-    return sectors.start(current,{local,bundle:snapshot?null:bundles.get(current),
-      browser:browserSectors,fund,snapshot,loadSnapshotIndex:getSnapshotIndex});
-  };
-  if (loaded.has(current) || (!local && !online)) void startSectors(loaded.get(current));
   if ((local || online) && !loaded.has(current)) {
     status("detail-status",`正在载入 ${current} 的确认净值…`);
     try {
@@ -506,7 +513,6 @@ async function route() {
       syncButtons();
       renderIdentity(current,fund);
       renderAnalysis();
-      void startSectors(fund);
     } catch (error) {if (version===routeNumber) status("detail-status",error.message,true);}
   }
 }
@@ -522,13 +528,11 @@ async function importFiles(event) {
       if (file.size>BUNDLE_BYTES) throw new Error("图表包超出 16 MB。");
       const raw = JSON.parse(await file.text());
       if (raw.kind!=="fund_chart_bundle" && file.size>MAX_FILE_BYTES) throw new Error("净值文件超出 4 MB。");
-      const {fund:dataset,bundle}=normalizeChartFile(raw);
+      const {fund:dataset}=normalizeChartFile(raw);
       if (mode==="detail-status" && dataset.code!==selectedCode) throw new Error("文件基金代码与当前详情不一致。");
       sharedSnapshots.delete(dataset.code);
       snapshotFallback.delete(dataset.code);
       recordFund(dataset);
-      if (bundle) bundles.set(dataset.code,bundle);
-      else bundles.delete(dataset.code);
       addFund(catalog.get(dataset.code));
       loadedNames.push(dataset.code);
     } catch (error) {failures.push(`${file.name} · ${error.message}`);}
@@ -603,5 +607,5 @@ if (loopback && !online) {
   catch {local=false;}
 }
 $("data-mode").textContent = online ? "输入六位基金代码直接查询。名称可搜索并添加至列表。" :
-  local ? "本地模式可自动加载基金净值与相关板块，也可导入数据包。" : "静态页面支持导入净值 JSON 或基金图表包。";
+  local ? "本地模式可自动加载基金净值，也可导入数据包。" : "静态页面支持导入净值 JSON 或基金图表包。";
 await route();

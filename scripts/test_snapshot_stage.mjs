@@ -376,8 +376,10 @@ try {
         page.on("pageerror",(error)=>requestFailures.push(error.message));
         const url=isStock?"/index.html?symbol="+symbol:"/funds.html?fund="+symbol;
         const pageResponse=page.waitForResponse((response)=>response.url().includes("category=page"));
-        const firstSector=snapshot.data.association?.sectors[0];
-        const indexResponse=firstSector? page.waitForResponse((response)=>response.url().includes("category=index")):null;
+        const indexRequests=[];
+        page.on("request",(request)=>{
+          if (new URL(request.url()).searchParams.get("category")==="index") indexRequests.push(request.url());
+        });
         await page.goto(origin+url+"&snapshot_id="+snapshot_id);
         const view=await (await pageResponse).json();
         assert.deepEqual(view,snapshot);
@@ -404,15 +406,17 @@ try {
               [annual.start,annual.end]);
           }
         }
-        if (indexResponse) {
-          const index=await (await indexResponse).json();
+        const firstSector=snapshot.data.association?.sectors[0];
+        if (firstSector) {
+          const params=new URLSearchParams({...args,category:"index",index_code:firstSector.code});
+          const index=await fetch(service+"/api/analysis?"+params,{headers:{Origin:origin}}).then((response)=>response.json());
           const model=await rpc("get_analysis_details",{...args,category:"sectors",index_code:firstSector.code,limit:1});
           assert.equal(index.snapshot_id,snapshot_id);
           assert.equal(index.data.last,model.data.chart.last_index_trade_date);
           assert.deepEqual(index.data.rows.slice(-1),model.data.chart.rows);
-          if (smoke) await page.locator("#sector-display").waitFor({state:"visible"});
           row.sector_index={code:firstSector.code,last:index.data.last};
         }
+        assert.deepEqual(indexRequests,[]);
         assert.deepEqual(requestFailures,[]);
       } finally {await page.close();}
       row.browser_mcp_identical=true;

@@ -1,6 +1,52 @@
 {
   "schema_version": 1,
   "funds": {
+    "014194": {
+      "share_codes": ["014194"],
+      "share_source_url": "https://www.99fund.com/main/products/pofund/014194/fundinfo.shtml",
+      "display_only": true,
+      "tracking_index": {"name": "中证芯片产业指数"},
+      "regimes": [
+        {
+          "effective_from": "2021-12-02",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "中证芯片产业指数收益率×95%＋银行人民币活期存款利率（税后）×5%",
+          "source_url": "https://static.cninfo.com.cn/finalpage/2021-11-11/1211558272.PDF",
+          "display_source_url": "https://www.99fund.com/main/products/pofund/014194/fundyield.shtml"
+        }
+      ]
+    },
+    "018993": {
+      "share_codes": ["018993"],
+      "share_source_url": "https://www.zofund.com/index2015/018993.shtml",
+      "display_only": true,
+      "regimes": [
+        {
+          "effective_from": "2023-09-12",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "中证数字经济主题指数收益率×65%＋中证港股通综合指数（人民币）收益率×15%＋银行活期存款利率（税后）×20%",
+          "source_url": "https://www.zofund.com/tempdir/minisite/20240328/61842561-d2d6-4d1b-86b1-560bc3bde502_1711643419098.pdf",
+          "display_source_url": "https://www.zofund.com/index2015/018993.shtml"
+        }
+      ]
+    },
+    "110022": {
+      "share_codes": ["110022"],
+      "share_source_url": "https://www.efunds.com.cn/Mobile/fund/110022.shtml",
+      "display_only": true,
+      "regimes": [
+        {
+          "effective_from": "2010-08-20",
+          "effective_to": null,
+          "verification": "official_verified",
+          "formula": "中证内地消费主题指数收益率×85%＋中债总指数收益率×15%",
+          "source_url": "https://epaper.stcn.com/paper/zqsb/page/1/2011-01-22/B027/7761295633739185.pdf",
+          "display_source_url": "https://www.efunds.com.cn/Mobile/fund/110022.shtml"
+        }
+      ]
+    },
     "024808": {
       "share_codes": [
         "024808"

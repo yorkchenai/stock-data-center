@@ -31,7 +31,7 @@ def evidence(*regimes):
 
 class BenchmarkDisplayTest(unittest.TestCase):
     def test_reviewed_disclosures_are_available_without_computable_points(self):
-        self.assertIsNone(benchmark_metadata("110022", AS_OF)["benchmark_disclosure"])
+        self.assertIsNone(benchmark_metadata("999999", AS_OF)["benchmark_disclosure"])
         for code, effective, weight in [("006751", "2026-07-27", "65%"), ("003095", "2026-09-21", "90%")]:
             with self.subTest(code=code):
                 fields = benchmark_metadata(code, AS_OF)
@@ -42,6 +42,22 @@ class BenchmarkDisplayTest(unittest.TestCase):
                 self.assertTrue(disclosure["source_url"].startswith("https://"))
                 old = benchmark_metadata(code, "2026-07-01")["benchmark_disclosure"]
                 self.assertTrue(old is None or old["effective_from"] < effective)
+
+    def test_page_disclosures_use_effective_dates_and_keep_tracking_separate(self):
+        cases = {
+            "014194": ("2021-12-02", "2021-12-01", ("95%", "5%"), "中证芯片产业指数"),
+            "018993": ("2023-09-12", "2023-09-11", ("65%", "15%", "20%"), None),
+            "110022": ("2010-08-20", "2010-08-19", ("85%", "15%"), None),
+        }
+        for code, (effective, previous, weights, tracking) in cases.items():
+            with self.subTest(code=code):
+                current = benchmark_metadata(code, AS_OF)
+                self.assertIsNone(current["benchmark"])
+                disclosure = current["benchmark_disclosure"]
+                self.assertEqual(disclosure["effective_from"], effective)
+                self.assertTrue(all("×" + weight in disclosure["formula"] for weight in weights))
+                self.assertEqual(disclosure.get("tracking_index", {}).get("name"), tracking)
+                self.assertIsNone(benchmark_metadata(code, previous)["benchmark_disclosure"])
 
 
 class BenchmarkSourcesTest(unittest.TestCase):

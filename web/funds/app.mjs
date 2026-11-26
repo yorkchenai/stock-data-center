@@ -378,7 +378,7 @@ function renderBenchmark(fund, today) {
 const valuationLabels = {fundgz:"估值1",sina_ds2:"估值2",sina_ds3:"估值3"};
 const valuation = watchValuation((quotes,message,pending)=>{
   $("valuation-refresh").disabled = pending;
-  const text = [message,quotes.length ? "" : "暂无当日估值"].filter(Boolean).join(" · ");
+  const text = [message,quotes.length || pending ? "" : "暂无当日估值"].filter(Boolean).join(" · ");
   $("valuation-status").textContent = text;
   $("valuation-status").hidden = !text;
   $("valuation-quotes").replaceChildren(...quotes.map(({id,change})=>{
@@ -387,7 +387,7 @@ const valuation = watchValuation((quotes,message,pending)=>{
     item.append(tag("span",valuationLabels[id]),tag("strong",`${signed}${change.toFixed(2)}%`));
     return item;
   }));
-});
+},online ? document.documentElement.dataset.analysisOrigin : null);
 function showValuation(code) {
   $("valuation-panel").hidden = !code;
   valuation.select(code);

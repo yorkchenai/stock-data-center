@@ -24,7 +24,7 @@ MODEL_MODULES = ("web/engine.mjs", "web/providers.mjs", *(
         "risk-free", "sector-browser", "sector-model",
     )
 ))
-SNAPSHOT_TRANSPORT = {"compatibility.mjs", "details.mjs", "public.mjs", "service.mjs", "site-gateway.mjs", "store.mjs", "worker.mjs"}
+SNAPSHOT_TRANSPORT = {"compatibility.mjs", "details.mjs", "public.mjs", "service.mjs", "site-gateway.mjs", "store.mjs", "valuation.mjs", "worker.mjs"}
 
 
 def snapshot_modules():
@@ -47,7 +47,7 @@ def analysis_model_version(inputs):
 def export_snapshot_runtime(destination, pages):
     """Stage the exact engine and inputs from this build for a separately hosted Worker."""
     destination.mkdir(parents=True, exist_ok=False)
-    for path in [*(ROOT / name for name in MODEL_MODULES), *snapshot_modules()]:
+    for path in [*(ROOT / name for name in MODEL_MODULES), ROOT / "web/funds/valuation-source.mjs", *snapshot_modules()]:
         target = destination / path.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, target)

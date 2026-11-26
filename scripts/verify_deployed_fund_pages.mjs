@@ -7,16 +7,22 @@ const worker = new URL(process.env.SNAPSHOT_SERVICE);
 const browser = await chromium.launch({executablePath:process.env.CHROMIUM_PATH,args:["--no-sandbox"]});
 const page = await browser.newPage();
 const labels = {fundgz:"估值1",sina_ds2:"估值2",sina_ds3:"估值3"};
-const eastmoney = "fundcomapi.tiantianfunds.com";
 const estimateRequests = [];
 const historyRequests = [];
 const pageErrors = [];
 page.on("pageerror",(error)=>pageErrors.push(error.message));
+await page.route("https://fundcomapi.tiantianfunds.com/**",(route)=>route.abort());
+await page.route("https://stock.finance.sina.com.cn/**",(route)=>route.abort());
+function estimateQuery(request) {
+  const url = new URL(request.url());
+  if (url.origin===worker.origin && url.pathname==="/api/fund-valuation" && url.searchParams.get("provider")==="eastmoney") {
+    return url.searchParams.get("symbol");
+  }
+}
 page.on("request",(request)=>{
   const url = new URL(request.url());
-  if (url.hostname===eastmoney && url.pathname==="/mm/newCore/FundValuationLast") {
-    estimateRequests.push({code:url.searchParams.get("FCODES"),time:Date.now()});
-  }
+  const code = estimateQuery(request);
+  if (code) estimateRequests.push({code,time:Date.now()});
   if ((url.origin===worker.origin && url.pathname==="/api/analysis") ||
       (url.hostname==="fund.eastmoney.com" && /\/pingzhongdata\//.test(url.pathname))) historyRequests.push(url.href);
 });
@@ -42,6 +48,7 @@ async function quotes(code) {
   } catch (error) {
     throw new Error(`基金 ${code} 盘中估值未取得 · ${await page.locator("#valuation-status").innerText()}`,{cause:error});
   }
+  await page.locator("#valuation-refresh:enabled").waitFor({timeout:16_000});
   const results = await cards.evaluateAll((items)=>items.map((item)=>({
     id:item.dataset.valuationSource,fields:Array.from(item.children,(child)=>child.textContent),
   })));
@@ -55,11 +62,7 @@ async function quotes(code) {
 }
 
 async function waitForEstimateRequest(code, timeout) {
-  return page.waitForRequest((request)=>{
-    const url = new URL(request.url());
-    return url.hostname===eastmoney && url.pathname==="/mm/newCore/FundValuationLast" &&
-      url.searchParams.get("FCODES")===code;
-  },{timeout});
+  return page.waitForRequest((request)=>estimateQuery(request)===code,{timeout});
 }
 
 async function fundAnalysis() {
@@ -112,7 +115,8 @@ try {
 
   console.log(JSON.stringify({url:page.url(),estimates,
     benchmark:{code:"003095",disclosed_on:disclosure,effective_from:effective,historical:true},
-    auto_refresh_ms:elapsed,manual_refresh:true,history_requests_during_refresh:0,anonymous_mcp:anonymous.status},null,2));
+    browser_direct_estimates_blocked:true,auto_refresh_ms:elapsed,manual_refresh:true,
+    history_requests_during_refresh:0,anonymous_mcp:anonymous.status},null,2));
 } finally {
   await browser.close();
 }

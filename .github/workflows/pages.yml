@@ -126,7 +126,7 @@ jobs:
             --snapshot-reference .github/pages-worker-build.json
           cd work/pages-site
           jq -e --arg sha "$GITHUB_SHA" '.commit_sha == $sha and .schema_version == 1' build-info.json
-          sha256sum build-info.json index.html app.mjs funds.html funds/app.mjs funds/valuation.mjs \
+          sha256sum build-info.json index.html app.mjs funds.html funds/app.mjs funds/valuation.mjs funds/valuation-source.mjs \
             funds/funds.css fund-benchmark-disclosures.json fund-config.json calendar.json > release-sha256.txt
           echo "files_sha=$(sha256sum release-sha256.txt | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - name: Check worker inputs and Pages CORS before uploading

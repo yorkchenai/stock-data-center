@@ -1,57 +1,6 @@
 import { FUND_CODE, shanghaiToday } from "./data.mjs";
 import { readFundText } from "./providers.mjs";
-
-const eastmoney = "https://fundcomapi.tiantianfunds.com/mm/newCore/FundValuationLast";
-const sina = "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic";
-const shanghaiTime = new Intl.DateTimeFormat("sv-SE", {timeZone:"Asia/Shanghai",
-  year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"});
-const sources = {
-  fundgz:["天天基金","FundValuationLast 平台估算"],
-  sina_ds2:["新浪财经","ds2 估算序列"],
-  sina_ds3:["新浪财经","ds3 估算序列"],
-};
-
-function number(value) {
-  return typeof value === "number" || (typeof value === "string" && /^-?\d+(?:\.\d+)?$/.test(value.trim()))
-    ? Number(value) : NaN;
-}
-
-function quote(id, value, change, updatedAt, asOf) {
-  if (typeof updatedAt!=="string" || updatedAt.slice(0,10)!==asOf.slice(0,10) ||
-      !/^ (?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(updatedAt.slice(10))) return null;
-  const time = updatedAt.length===16 ? updatedAt+":00" : updatedAt;
-  if (time>asOf || !Number.isFinite(value) || value<=0 || !Number.isFinite(change)) return null;
-  const [source,method] = sources[id];
-  return {id,value,change,updatedAt,source,method};
-}
-
-export function eastmoneyValuation(payload, code, asOf) {
-  if (payload?.success!==true || !Array.isArray(payload.data)) throw new Error("天天基金估值响应无效");
-  const row = payload.data.find((item)=>item?.FCODE===code);
-  if (!row) return [];
-  const result = quote("fundgz",number(row.GSZ),number(row.GSZZL),row.GZTIME,asOf);
-  return result ? [result] : [];
-}
-
-export function sinaValuation(payload, code, asOf) {
-  const result = payload?.result;
-  if (result?.status?.code!==0) throw new Error("新浪估值响应无效");
-  const reported = result.data?.symbol ?? result.data?.fundcode;
-  if (reported != null && String(reported)!==code) throw new Error("新浪估值返回了其他基金");
-  const rows = result.data?.networth;
-  if (rows == null) return [];
-  if (!Array.isArray(rows)) throw new Error("新浪估值序列无效");
-  return [2,3].flatMap((series)=>{
-    const suffix = series===2 ? "" : "2";
-    let newest;
-    for (const row of rows) {
-      const point = quote("sina_ds"+series,number(row?.["pre_nav"+suffix]),number(row?.["growthrate"+suffix])*100,
-        `${row?.pre_date ?? ""} ${row?.min_time ?? ""}`,asOf);
-      if (point && (!newest || point.updatedAt>=newest.updatedAt)) newest = point;
-    }
-    return newest ? [newest] : [];
-  });
-}
+import { eastmoneyValuation, quote, sina, sinaValuation, sources, valuationTime, valuationURL } from "./valuation-source.mjs";
 
 // Sina's endpoint has no CORS. Execute the fixed JSONP URL in an opaque sandbox, as with legacy fund NAV scripts.
 function readSinaValuation(url, signal) {
@@ -77,7 +26,7 @@ function readSinaValuation(url, signal) {
       const payload = event.data.payload;
       finish(payload ? null : new Error("新浪估值加载失败"),payload);
     }
-    const timer = setTimeout(()=>finish(new Error("新浪估值加载超时")),12_000);
+    const timer = setTimeout(()=>finish(new Error("新浪估值加载超时")),7_000);
     signal.addEventListener("abort",cancel,{once:true});
     window.addEventListener("message",receive);
     frame.srcdoc = `<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer">
@@ -112,37 +61,60 @@ function readSinaValuation(url, signal) {
 }
 
 async function fetchEastmoneyValuation(code, signal) {
-  const params = new URLSearchParams({FCODES:code,FIELDS:"FCODE,GSZ,GSZZL,GZTIME"});
-  const data = JSON.parse(await readFundText(eastmoney+"?"+params,{signal}));
-  return eastmoneyValuation(data,code,shanghaiTime.format(new Date()));
+  const data = JSON.parse(await readFundText(valuationURL("eastmoney",code),{signal}));
+  return eastmoneyValuation(data,code,valuationTime());
 }
 
 async function fetchSinaValuation(code, signal) {
-  const url = new URL(sina);
-  url.search = new URLSearchParams({symbol:code,callback:"sdcFundValuation"});
-  const read = ()=>{
-    url.searchParams.set("_",String(Date.now()));
-    return readSinaValuation(url.href,signal);
-  };
-  const data = await read().catch(()=>{
-    signal.throwIfAborted();
-    return read();
-  });
-  return sinaValuation(data,code,shanghaiTime.format(new Date()));
+  const url = valuationURL("sina",code);
+  url.searchParams.set("_",String(Date.now()));
+  const data = await readSinaValuation(url.href,signal);
+  return sinaValuation(data,code,valuationTime());
 }
 
-export async function fetchValuation(code, signal) {
+const providers = [
+  ["eastmoney",["fundgz"],fetchEastmoneyValuation],
+  ["sina",["sina_ds2","sina_ds3"],fetchSinaValuation],
+];
+
+async function fetchProvider(provider, ids, direct, code, signal, origin) {
+  if (origin) {
+    try {
+      const url = new URL("/api/fund-valuation",origin);
+      url.search = new URLSearchParams({symbol:code,provider});
+      const deadline = AbortSignal.any([signal,AbortSignal.timeout(6_000)]);
+      const result = JSON.parse(await readFundText(url,{signal:deadline}));
+      if (result.symbol!==code || result.provider!==provider || !Array.isArray(result.values) ||
+          result.values.length>ids.length || result.values.some(({id})=>!ids.includes(id)) ||
+          new Set(result.values.map(({id})=>id)).size!==result.values.length) {
+        throw new Error("估值服务响应无效");
+      }
+      const now = valuationTime();
+      return result.values.map(({id,value,change,updatedAt})=>quote(id,value,change,updatedAt,now)).filter(Boolean);
+    } catch {
+      signal.throwIfAborted();
+    }
+  }
+  return direct(code,AbortSignal.any([signal,AbortSignal.timeout(7_000)]));
+}
+
+async function fetchValuation(code, signal, origin, onResult) {
   if (!FUND_CODE.test(code)) throw new Error("请输入六位基金代码");
-  const results = await Promise.allSettled([fetchEastmoneyValuation(code,signal),fetchSinaValuation(code,signal)]);
-  signal.throwIfAborted();
-  const series = [["fundgz"],["sina_ds2","sina_ds3"]];
-  return {
-    values:results.flatMap((result)=>result.status==="fulfilled" ? result.value : []),
-    failed:results.flatMap((result,index)=>result.status==="rejected" ? series[index] : []),
-  };
+  await Promise.all(providers.map(async ([provider,ids,direct])=>{
+    let values, failed;
+    try {
+      values = await fetchProvider(provider,ids,direct,code,signal,origin);
+      failed = [];
+    } catch {
+      values = [];
+      failed = ids;
+    }
+    signal.throwIfAborted();
+    onResult({ids,values,failed});
+  }));
 }
 
-export function watchValuation(render) {
+export function watchValuation(render, origin) {
   const cache = new Map();
   let code, controller, timer;
 
@@ -161,11 +133,17 @@ export function watchValuation(render) {
     const previous = ()=> (cache.get(symbol) ?? []).filter(({updatedAt})=>updatedAt.startsWith(shanghaiToday()+" "));
     render(previous(),"正在更新估值…",true);
     try {
-      const {values,failed} = await fetchValuation(symbol,request.signal);
+      const failed = [];
+      const retained = [];
+      await fetchValuation(symbol,request.signal,origin,({ids,values,failed:failures})=>{
+        failed.push(...failures);
+        const old = previous();
+        retained.push(...old.filter(({id})=>failures.includes(id)));
+        const mixed = [...values,...old.filter(({id})=>!ids.includes(id) || failures.includes(id))];
+        cache.set(symbol,Object.keys(sources).flatMap((id)=>mixed.filter((item)=>item.id===id)));
+        render(previous(),"正在更新估值…",true);
+      });
       if (controller!==request) return;
-      const retained = previous().filter(({id})=>failed.includes(id));
-      const mixed = [...values,...retained];
-      cache.set(symbol,Object.keys(sources).flatMap((id)=>mixed.filter((quote)=>quote.id===id)));
       const failure = failed.length===Object.keys(sources).length ? "更新失败" : failed.length ? "部分估值来源更新失败" : "";
       const message = retained.length ? failure+" · 保留上次成功估值" : failure;
       render(previous(),message,false);

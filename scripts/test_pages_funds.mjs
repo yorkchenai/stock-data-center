@@ -247,8 +247,18 @@ try {
   });
   const valuationRequests = [];
   const failedProviders = new Set();
-  let retryFixture = false;
   let staleQuotes = false;
+  let delaySina = null;
+  let relaySina = false;
+  const relayRequests = [];
+  await context.route(service+"/api/fund-valuation**",(route)=>{
+    const {searchParams} = new URL(route.request().url());
+    const symbol = searchParams.get("symbol"), provider = searchParams.get("provider");
+    const relay = relaySina && provider==="sina";
+    if (relay) relayRequests.push(symbol);
+    return route.fulfill({status:relay ? 200 : 502,headers:{"Access-Control-Allow-Origin":"*"},
+      json:{symbol,provider,values:[{id:"sina_ds3",value:2.51,change:1.5,updatedAt:"2026-11-26 11:33:00"}]}});
+  });
   await context.route("https://fundcomapi.tiantianfunds.com/**",(route)=>{
     const code = new URL(route.request().url()).searchParams.get("FCODES");
     valuationRequests.push(["eastmoney",code]);
@@ -263,15 +273,16 @@ try {
       pre_date:staleQuotes ? "2026-11-25" : "2026-11-26",min_time:"11:33:00",
       pre_nav:price,growthrate:code==="110022" ? null : 0.011762,pre_nav2:price+0.0198,growthrate2:0.01996,
     }]}}};
-    const failed = failedProviders.has("sina") || retryFixture;
-    retryFixture = false;
-    return response.writeHead(failed ? 503 : 200,{"Content-Type":"application/json"}).end(JSON.stringify(payload));
+    const failed = failedProviders.has("sina");
+    const send = ()=>response.writeHead(failed ? 503 : 200,{"Content-Type":"application/json"}).end(JSON.stringify(payload));
+    if (delaySina) return void delaySina.then(send);
+    return send();
   };
   const estimateScript = await readFile(path.join(site,"funds/valuation.mjs"),"utf8");
   // The live browser suite exercises the real JSONP sandbox; the clock test uses an exact local source.
   await context.route(origin+"funds/valuation.mjs",(route)=>route.fulfill({contentType:"text/javascript",
-    body:estimateScript.replace("return readSinaValuation(url.href,signal);",
-      'return fetch("/__fixture-sina"+url.search,{signal}).then((response)=>{if (!response.ok) throw new Error("fixture outage"); return response.json();});')}));
+    body:estimateScript.replace("const data = await readSinaValuation(url.href,signal);",
+      'const data = await fetch("/__fixture-sina"+url.search,{signal}).then((response)=>{if (!response.ok) throw new Error("fixture outage"); return response.json();});')}));
   await context.addInitScript(()=>{
     Object.defineProperty(document,"hidden",{get:()=>window.fixtureHidden===true});
   });
@@ -290,6 +301,8 @@ try {
     item.dataset.valuationSource,...Array.from(item.children,(child)=>child.textContent),
   ]));
   for (const [code,[formula,since,source]] of Object.entries(expectedDisclosures)) {
+    let resumeSina;
+    if (code==="014194") delaySina = new Promise((resolve)=>{resumeSina=resolve;});
     if (page.url()==="about:blank") await page.goto(origin+"funds.html?fund="+code);
     else await navigate(code);
     await page.locator("#fund-source").getByText(/共享快照/).waitFor();
@@ -306,6 +319,13 @@ try {
     await estimates.first().waitFor({timeout:18_000}).catch(async (error)=>{
       throw new Error(`${code} · ${await page.locator("#valuation-status").innerText()} · ${JSON.stringify(valuationRequests)}`,{cause:error});
     });
+    if (resumeSina) {
+      assert.deepEqual(await renderedEstimates(),[expectedEstimates[code][0]]);
+      await page.getByText("正在更新估值…",{exact:true}).waitFor();
+      resumeSina();
+      delaySina = null;
+    }
+    await page.locator("#valuation-refresh:enabled").waitFor();
     assert.deepEqual(await renderedEstimates(),expectedEstimates[code]);
     if (code==="014194") {
       failedProviders.add("sina");
@@ -346,15 +366,25 @@ try {
   assert.deepEqual(await renderedEstimates(),expectedEstimates[currentCode]);
   failedProviders.clear();
 
-  retryFixture = true;
   valuationCount = valuationRequests.length;
   await page.getByRole("button",{name:"刷新估值"}).click();
   await page.locator("#valuation-refresh:enabled").waitFor();
   assert.deepEqual(valuationRequests.slice(valuationCount).sort(),[
-    ["eastmoney",currentCode],["sina",currentCode],["sina",currentCode],
+    ["eastmoney",currentCode],["sina",currentCode],
   ]);
   assert.deepEqual(await renderedEstimates(),expectedEstimates[currentCode]);
   assert.equal(await page.locator("#valuation-status").isVisible(),false);
+
+  relaySina = true;
+  valuationCount = valuationRequests.length;
+  await page.getByRole("button",{name:"刷新估值"}).click();
+  await page.locator("#valuation-refresh:enabled").waitFor();
+  assert.deepEqual(relayRequests,[currentCode]);
+  assert.deepEqual(valuationRequests.slice(valuationCount),[["eastmoney",currentCode]]);
+  assert.deepEqual(await renderedEstimates(),[["sina_ds3","估值3","+1.50%"]]);
+  relaySina = false;
+  await page.getByRole("button",{name:"刷新估值"}).click();
+  await page.locator("#valuation-refresh:enabled").waitFor();
 
   failedProviders.add("eastmoney");
   failedProviders.add("sina");

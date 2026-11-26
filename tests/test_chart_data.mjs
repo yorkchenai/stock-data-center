@@ -102,6 +102,7 @@ test("history loading and local display adjustments use separate actions", async
         contains: (name) => (this.className || "").split(" ").includes(name),
       };
       this.offsetHeight = 25;
+      this.offsetWidth = 35;
       created.push(this);
     }
     append(...children) {
@@ -158,6 +159,9 @@ test("history loading and local display adjustments use separate actions", async
     },
     fitContent() {},
     setVisibleLogicalRange() {},
+    getVisibleLogicalRange: () => ({ from: 0, to: 2 }),
+    width: () => 600,
+    timeToCoordinate: () => 100,
     setVisibleRange(range) {
       displayedRange = range;
     },
@@ -170,6 +174,7 @@ test("history loading and local display adjustments use separate actions", async
         },
         applyOptions() {},
         createPriceLine() {},
+        priceToCoordinate: () => 90,
       };
       series.push(item);
       return item;
@@ -231,6 +236,9 @@ test("history loading and local display adjustments use separate actions", async
     assert.equal(element("instrument-name").textContent, "科创50");
     assert.match(element("status").textContent, /已载入历史/);
     const legend = element("legends").children[0];
+    const closeMarkers = element("legends").children.filter((node) => node.dataset.extreme);
+    assert.equal(closeMarkers.filter((node) => !node.hidden).length, 1, "flat closes have one marker");
+    assert.equal(closeMarkers[0].dataset.date, rows[0].date);
     legend.offsetHeight = 70; // Simulate a wrapped legend after a resize.
     element("display-start").value = rows[1].date;
     element("display-start").listeners.input();

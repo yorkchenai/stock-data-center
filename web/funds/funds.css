@@ -51,6 +51,7 @@
 .fund-main table {border-spacing: 0; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums;}
 .fund-main th, .fund-main td {border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left;}
 #fund-table th, #fund-table td {white-space: nowrap; min-width: 92px; text-align: right;}
+#fund-table [data-estimate] {min-width: 64px;}
 #fund-table th {position: sticky; top: 0; z-index: 2; background: #f4f7fa;}
 #fund-table th button {border: 0; min-height: 30px; padding: 2px; background: transparent; font-weight: 650;}
 #fund-table th:first-child, #fund-table td:first-child {

@@ -106,6 +106,16 @@ try {
   await quotes(code);
   assert.equal(historyRequests.length,historyCount);
   assert.deepEqual(await fundAnalysis(),before);
+
+  await page.locator("#back-to-funds").click();
+  const table = page.locator("#fund-table");
+  const headings = await table.locator("th").allTextContents();
+  const navColumn = headings.indexOf("最新单位净值");
+  assert.deepEqual(headings.slice(navColumn-3,navColumn),["估值1","估值2","估值3"]);
+  const row = table.locator('tr[data-fund-code="019830"]');
+  await row.locator("td[data-estimate]").filter({hasText:/^[+-]?\d+\.\d{2}%$/}).first().waitFor({timeout:20_000});
+  const listEstimates = await row.locator("td[data-estimate]").allTextContents();
+  assert.equal(historyRequests.length,historyCount);
   assert.deepEqual(pageErrors,[]);
 
   const anonymous = await fetch(new URL("/mcp",worker),{method:"POST",headers:{
@@ -115,6 +125,7 @@ try {
 
   console.log(JSON.stringify({url:page.url(),estimates,
     benchmark:{code:"003095",disclosed_on:disclosure,effective_from:effective,historical:true},
+    list_019830_estimates:listEstimates,
     browser_direct_estimates_blocked:true,auto_refresh_ms:elapsed,manual_refresh:true,
     history_requests_during_refresh:0,anonymous_mcp:anonymous.status},null,2));
 } finally {

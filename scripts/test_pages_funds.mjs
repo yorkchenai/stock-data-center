@@ -95,6 +95,8 @@ const report = {mode:"explicitly labeled synthetic fund test",viewports:[]};
 try {
   for (const [width,height,mobile] of [[1440,900,false],[390,844,true]]) {
     const context = await browser.newContext({viewport:{width,height},isMobile:mobile,hasTouch:mobile});
+    await context.route("https://fundcomapi.tiantianfunds.com/**",(route)=>route.abort());
+    await context.route("https://stock.finance.sina.com.cn/**",(route)=>route.abort());
     const page = await context.newPage();
     const errors=[];
     page.on("pageerror",(error)=>errors.push(error.message));
@@ -105,8 +107,8 @@ try {
     const tbody = page.locator("#fund-table tbody");
     const long = tbody.locator("tr",{hasText:first.name});
     const short = tbody.locator("tr",{hasText:second.name});
-    assert.equal(await long.locator("td").nth(10).textContent() === "—",false);
-    assert.equal(await short.locator("td").nth(10).textContent(),"—");
+    assert.notEqual(await long.locator('[data-column="5y"]').textContent(),"—");
+    assert.equal(await short.locator('[data-column="5y"]').textContent(),"—");
     await page.locator("#search-term").fill(first.name);
     await page.getByRole("button",{name:"搜索",exact:true}).click();
     assert.match(await page.locator("#search-result").innerText(),/已添加/);
@@ -233,7 +235,7 @@ try {
     const symbol = query.get("symbol");
     const category = query.get("category");
     requests.push([symbol,category]);
-    const fund = {...first,code:symbol,valuation_frequency:null};
+    const fund = {...first,code:symbol,synthetic:false,valuation_frequency:null};
     const data = {snapshot_id:"11111111-1111-4111-8111-111111111111",asset_type:"fund",symbol,
       status:"partial",model_version:model,schema_version:1,data_as_of:fund.rows.at(-1).date,
       expires_at:new Date(Date.now()+60_000).toISOString()};
@@ -404,7 +406,25 @@ try {
   assert.equal(await old.locator("[data-date-kind=published]").textContent(),"2026-10-27");
   assert.equal(await old.locator("[data-date-kind=effective]").textContent(),"2026-07-01");
   assert.equal(await old.locator("a").count(),1);
-  report.valuation = {fixedLabels:true,automatic:true,background:true,manual:true,retainsLastQuote:true,historyLoads:0};
+
+  const listHistoryLoads = requests.length;
+  staleQuotes = false;
+  await page.goto(origin+"funds.html");
+  const table = page.locator("#fund-table");
+  const savedFund = table.locator('tr[data-fund-code="018993"]');
+  await savedFund.locator('[data-estimate="sina_ds3"]').getByText("+2.00%",{exact:true}).waitFor();
+  const headings = await table.locator("th").allTextContents();
+  const navColumn = headings.indexOf("最新单位净值");
+  assert.deepEqual(headings.slice(navColumn-3,navColumn),["估值1","估值2","估值3"]);
+  assert.deepEqual(await savedFund.locator("td[data-estimate]").allTextContents(),["—","+1.18%","+2.00%"]);
+  assert.equal(await savedFund.locator('[data-column="nav"]').textContent(),"—");
+  await table.getByRole("button",{name:"估值1",exact:true}).click();
+  assert.equal(await table.locator("tbody tr").first().getAttribute("data-fund-code"),"014194");
+  staleQuotes = true;
+  await page.clock.fastForward(60_000);
+  await savedFund.locator('[data-estimate="sina_ds3"]').getByText("—",{exact:true}).waitFor();
+  assert.equal(requests.length,listHistoryLoads);
+  report.valuation = {fixedLabels:true,listColumns:true,automatic:true,background:true,manual:true,retainsLastQuote:true,historyLoads:0};
   await context.close();
 } finally {
   await browser.close();

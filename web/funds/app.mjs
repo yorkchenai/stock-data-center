@@ -19,6 +19,7 @@ function status(id, text, error = false) {
   $(id).dataset.state = error ? "error" : "";
 }
 const pct = (v) => (100 * v).toFixed(2) + "%";
+const estimatePct = (v) => (v>0 ? "+" : "") + v.toFixed(2) + "%";
 const pp = (v) => (100 * v).toFixed(2) + " 个百分点";
 const decimal = (v) => v.toFixed(2);
 const nav = (v) => v.toFixed(4);
@@ -30,8 +31,9 @@ const catalog = new Map();
 const beingLoaded = new Map();
 const sharedSnapshots = new Map();
 const snapshotFallback = new Map();
+const valuationLabels = new Map([["fundgz","估值1"],["sina_ds2","估值2"],["sina_ds3","估值3"]]);
 const columns = [
-  ["name","基金名称 / 代码"],["type","基金类型"],["nav","最新单位净值"],["date","净值日期"],...PERIODS,
+  ["name","基金名称 / 代码"],["type","基金类型"],...valuationLabels,["nav","最新单位净值"],["date","净值日期"],...PERIODS,
   ["source","来源"],["actions","操作"],
 ];
 const optionalColumns = columns.filter(([id])=>!["name","actions"].includes(id));
@@ -159,9 +161,18 @@ async function loadListFund(code) {
   catch (error) {status("list-status",error.message,true);}
   renderList();
 }
-function tableValue(id, row, fund) {
+function estimateValue(quote) {
+  return {value:quote?.change ?? null,format:estimatePct,reason:quote ? "" : "暂无当日估值",percent:true};
+}
+function paintValue(cell,{value,format,reason,percent},suffix="") {
+  cell.textContent = shown(value,format ?? String)+suffix;
+  cell.title = reason ?? "";
+  cell.className = reason ? "fund-missing" : percent && value ? (value>0 ? "fund-positive" : "fund-negative") : "";
+}
+function tableValue(id, row, fund, estimates) {
   if (id==="name") return {value:row.name};
   if (id==="type") return {value:describe(row.category)};
+  if (valuationLabels.has(id)) return estimateValue(estimates.find((quote)=>quote.id===id));
   if (!fund) return {value:null,reason:"本会话尚未载入净值。"};
   const latest = fund.rows.at(-1);
   if (id==="nav") return {value:latest.unit_nav,format:nav};
@@ -181,13 +192,14 @@ function renderList() {
   const header = tag("tr");
   for (const [id,label] of active) {
     const sorted = state.sort===id;
-    const th = tag("th",null,{scope:"col"});
+    const th = tag("th",null,{scope:"col","data-column":id});
+    if (valuationLabels.has(id)) th.dataset.estimate = id;
     if (id==="actions") th.textContent = label;
     else {
       if (sorted) th.setAttribute("aria-sort",state.descending ? "descending" : "ascending");
       const button = tag("button",label + (sorted ? state.descending ? " ↓" : " ↑" : ""),{type:"button"});
       button.addEventListener("click",()=>{
-        state.descending = state.sort===id ? !state.descending : PERIODS.some(([period])=>period===id);
+        state.descending = state.sort===id ? !state.descending : valuationLabels.has(id) || PERIODS.some(([period])=>period===id);
         state.sort = id;
         save();
         renderList();
@@ -200,7 +212,8 @@ function renderList() {
   const items = state.list.filter((entry)=>(!state.favorites || entry.favorite) && (!state.type || state.type===entry.category))
     .map((row)=>{
       const fund = loaded.get(row.code);
-      const entries = Object.fromEntries(active.filter(([id])=>id!=="actions").map(([id])=>[id,tableValue(id,row,fund)]));
+      const estimates = fund?.mode==="synthetic" ? [] : valuation.quotes(row.code);
+      const entries = Object.fromEntries(active.filter(([id])=>id!=="actions").map(([id])=>[id,tableValue(id,row,fund,estimates)]));
       return {row,fund,entries};
     });
   items.sort((a,b)=>{
@@ -211,17 +224,21 @@ function renderList() {
     return (state.descending ? -diff : diff) || a.row.code.localeCompare(b.row.code);
   });
   const target = $("fund-table").tBodies[0];
+  const estimateCodes = !selectedCode && (local || online) && active.some(([id])=>valuationLabels.has(id))
+    ? items.filter(({fund})=>fund?.mode!=="synthetic").map(({row})=>row.code) : [];
   if (!items.length) {
     const message = state.list.length ? "当前筛选下没有基金。" : "搜索并添加基金，或导入确认净值 JSON。";
     target.replaceChildren(tag("tr"));
     target.firstChild.append(tag("td",message,{colspan:active.length,class:"empty-cell"}));
+    if (!selectedCode) valuation.select(estimateCodes);
     return;
   }
   const fragment = document.createDocumentFragment();
   for (const {row,entries,fund} of items) {
-    const tr = tag("tr");
+    const tr = tag("tr",null,{"data-fund-code":row.code});
     for (const [id] of active) {
-      const td = tag("td");
+      const td = tag("td",null,{"data-column":id});
+      if (valuationLabels.has(id)) td.dataset.estimate = id;
       if (id==="name") {
         const link = tag("a",row.name ?? row.code,{href:url(row.code),title:row.name ?? row.code});
         link.addEventListener("click",navigateLink);
@@ -238,16 +255,14 @@ function renderList() {
           td.append(" ",refresh);
         }
       } else {
-        const {value,format,reason,percent} = entries[id];
-        td.textContent = shown(value,format ?? String) + (id==="date" && fund?.mode==="synthetic" ? " · 测试" : "");
-        if (reason) {td.title=reason;td.className="fund-missing";}
-        else if (percent && value) td.className = value>0 ? "fund-positive" : "fund-negative";
+        paintValue(td,entries[id],id==="date" && fund?.mode==="synthetic" ? " · 测试" : "");
       }
       tr.append(td);
     }
     fragment.append(tr);
   }
   target.replaceChildren(fragment);
+  if (!selectedCode) valuation.select(estimateCodes);
 }
 
 function renderSearch(results, term) {
@@ -375,22 +390,33 @@ function renderBenchmark(fund, today) {
   tracking.hidden = !target?.name;
   tracking.textContent = target?.name ? "跟踪指数 · " + target.name : "";
 }
-const valuationLabels = {fundgz:"估值1",sina_ds2:"估值2",sina_ds3:"估值3"};
-const valuation = watchValuation((quotes,message,pending)=>{
+function renderDetailValuation(quotes,message,pending) {
   $("valuation-refresh").disabled = pending;
   const text = [message,quotes.length || pending ? "" : "暂无当日估值"].filter(Boolean).join(" · ");
   $("valuation-status").textContent = text;
   $("valuation-status").hidden = !text;
   $("valuation-quotes").replaceChildren(...quotes.map(({id,change})=>{
     const item = tag("article",null,{class:"risk-metric","data-valuation-source":id});
-    const signed = change>0 ? "+" : "";
-    item.append(tag("span",valuationLabels[id]),tag("strong",`${signed}${change.toFixed(2)}%`));
+    item.append(tag("span",valuationLabels.get(id)),tag("strong",estimatePct(change)));
     return item;
   }));
+}
+const valuation = watchValuation((code,quotes,message,pending)=>{
+  if (selectedCode) {
+    if (selectedCode===code) renderDetailValuation(quotes,message,pending);
+    return;
+  }
+  if (!pending && valuationLabels.has(state.sort)) renderList();
+  for (const cell of $("fund-table").querySelectorAll(`tr[data-fund-code="${code}"] td[data-estimate]`)) {
+    const quote = quotes.find(({id})=>id===cell.dataset.estimate);
+    paintValue(cell,estimateValue(quote));
+    if (quote && !pending && message) cell.title = message;
+  }
 },online ? document.documentElement.dataset.analysisOrigin : null);
 function showValuation(code) {
   $("valuation-panel").hidden = !code;
-  valuation.select(code);
+  renderDetailValuation(valuation.quotes(code),"",false);
+  valuation.select(code ? [code] : []);
 }
 function renderIdentity(code,fund) {
   const entry = catalog.get(code);

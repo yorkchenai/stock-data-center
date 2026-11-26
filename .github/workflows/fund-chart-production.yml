@@ -1,0 +1,105 @@
+name: Verify deployed fund chart labels
+on:
+  push:
+    branches: [ops/valuation-live-diagnostics]
+    paths: [.github/workflows/fund-chart-production.yml]
+permissions:
+  contents: read
+jobs:
+  chart-labels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - name: Confirm the exact production build and the drawn numeric extremes
+        env:
+          EXPECTED_RELEASE: 7a3a896ecf3f1366cb5fb5fef9e93226958d228a
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          node --input-type=module <<'JS'
+          import assert from "node:assert/strict";
+          import { createHash } from "node:crypto";
+          import { chromium } from "playwright-core";
+          const release = process.env.EXPECTED_RELEASE;
+          const root = "https://yorkchenai.github.io/stock-data-center";
+          const files = {
+            "funds/chart-extremes.mjs":"f9642df0635a5f1ea4776d77004ccc5a4cdbc51a70e8675ceaf9d26d2facc00d",
+            "funds/nav-chart.mjs":"5e2a0b1c90ec270506546d697fdfbdc17069a09b8fd92575cbf758e2c67b43d0",
+            "funds/charts.mjs":"d91367797b7e4e2eeb8d3c57f6d48fa6a6ac2da56c7efb99be4787aff6951d90",
+          };
+          let build;
+          for (let attempt=0;attempt<32;attempt++) {
+            try {
+              const response = await fetch(root+"/build-info.json?release="+release+"-"+attempt,{signal:AbortSignal.timeout(5000)});
+              if (response.ok) build=await response.json();
+            } catch {}
+            if (build?.commit_sha===release) break;
+            await new Promise(resolve=>setTimeout(resolve,3500));
+          }
+          assert.equal(build?.commit_sha,release);
+          for (const [path,expected] of Object.entries(files)) {
+            const response = await fetch(root+"/"+path+"?release="+release,{signal:AbortSignal.timeout(10000)});
+            assert.equal(response.status,200);
+            assert.equal(createHash("sha256").update(Buffer.from(await response.arrayBuffer())).digest("hex"),expected,path);
+          }
+          const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH,args:["--no-sandbox"]});
+          try {
+            const page=await browser.newPage({viewport:{width:1440,height:900}});
+            const errors=[];
+            page.on("pageerror",error=>errors.push(error.message));
+            await page.addInitScript(()=>{
+              const charts=new Map(), labels=new Map();
+              const fillText=CanvasRenderingContext2D.prototype.fillText;
+              CanvasRenderingContext2D.prototype.fillText=function(text,x,y,...rest) {
+                const chart=this.canvas.closest(".fund-chart");
+                if (chart && ["#a94344","#087e75","#536579"].includes(this.fillStyle) && this.textBaseline==="middle") {
+                  const length=this.measureText(text).width;
+                  labels.set(chart.id+":"+text,{left:x,x:x+length/2,right:x+length,y,width:this.canvas.clientWidth,height:this.canvas.clientHeight});
+                }
+                return fillText.call(this,text,x,y,...rest);
+              };
+              let library;
+              Object.defineProperty(window,"LightweightCharts",{
+                get:()=>library,
+                set(original) {
+                  library={...original,createChart(element,options) {
+                    const chart=original.createChart(element,options);
+                    charts.set(element.id,chart);
+                    return chart;
+                  }};
+                },
+              });
+              window.verifyLabel=({chart,date,value})=>{
+                const label=labels.get(chart+":"+value);
+                const x=charts.get(chart)?.timeScale().timeToCoordinate(date);
+                return label && Number.isFinite(x) && Math.abs(label.x-x)<1 &&
+                  label.left>=0 && label.right<=label.width && label.y>0 && label.y<label.height;
+              };
+            });
+            const url=root+"/funds.html?fund=014194&release="+release;
+            assert.equal((await page.goto(url)).status(),200);
+            await page.locator("#nav-chart canvas").first().waitFor({timeout:40000});
+            await page.getByRole("button",{name:"全部历史",exact:true}).click();
+            const result={};
+            for (const [chart,details] of [["returns-chart","returns-extremes"],["nav-chart","nav-extremes"],["drawdown-chart","drawdown-extremes"]]) {
+              const rows=page.locator("#"+details+" span");
+              await rows.nth(1).waitFor({timeout:8000});
+              const labels=await rows.allTextContents();
+              assert.equal(labels.length,2);
+              for (const label of labels) {
+                const [,date,,value]=label.split(" ");
+                assert.match(value,/^[+-]?\d+\.\d+(?:%)?$/);
+                await page.waitForFunction(args=>window.verifyLabel(args),{chart,date,value},{timeout:8000});
+              }
+              result[chart]=labels;
+            }
+            assert.deepEqual(errors,[]);
+            console.log(JSON.stringify({url,release,model:build.analysis_model_version,labels:result},null,2));
+          } finally {
+            await browser.close();
+          }
+          JS

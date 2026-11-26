@@ -4,6 +4,7 @@ import { createFundCharts } from "./charts.mjs";
 import { BUNDLE_BYTES, normalizeChartFile } from "./chart-data.mjs";
 import { createNavChart } from "./nav-chart.mjs";
 import { fetchFund, fetchFundDirectory, readPageData } from "./providers.mjs";
+import { watchValuation } from "./valuation.mjs";
 import { browserModelVersion, getPageSnapshot, snapshotNote, snapshotsEnabled } from "../snapshot-client.mjs";
 
 const $ = (id) => document.getElementById(id);
@@ -138,15 +139,11 @@ function loadFund(code,snapshotId=null) {
   const key=snapshotId??code;
   if (!beingLoaded.has(key)) {
     const pending=online?loadOnlineFund(code,snapshotId):readApi("/" + code).then((raw)=>({raw}));
-    const disclosures = online ? fetchPageDisclosures() : null;
+    const disclosures = (online || local) ? fetchPageDisclosures() : null;
     beingLoaded.set(key,Promise.all([pending,disclosures]).then(([{raw,snapshot},reviewed])=>{
       const fund = normalizeFund(raw);
       if (fund.code !== code) throw new Error("查询结果的基金代码不一致。");
-      const display = reviewed?.[code];
-      if (display && display.effective_from <= fund.rows.at(-1).date &&
-          (!fund.benchmark_disclosure || display.effective_from >= fund.benchmark_disclosure.effective_from)) {
-        fund.benchmark_disclosure = display;
-      }
+      fund.reviewedBenchmark = reviewed?.[code];
       if (snapshot) sharedSnapshots.set(code,snapshot);
       else sharedSnapshots.delete(code);
       recordFund(fund);
@@ -319,35 +316,82 @@ function historyTable(fund) {
   }));
   $("show-more-history").hidden = !fund || fund.rows.length<=historyLimit;
 }
-function renderBenchmark(fund, asOf) {
-  const benchmark = fund?.benchmark;
-  const disclosure = fund?.benchmark_disclosure;
-  const regime = benchmark?.regimes.find(({effective_from,effective_to})=>
-    effective_from <= asOf && (!effective_to || asOf <= effective_to));
-  const formula = disclosure?.formula ?? regime?.formula ?? benchmark?.formula;
-  const description = formula && /\d\s*[%％]/.test(formula) ? formula : benchmark?.name ?? formula;
-  $("benchmark-disclosure").textContent = description
-    ? description.replace(/\s*[＋+]\s*/g," + ").replace(/\s*×\s*/g," × ")
-    : "业绩比较基准暂未核实";
-
-  const source = $("benchmark-source");
-  const since = disclosure?.effective_from ?? regime?.effective_from ?? benchmark?.effective_from;
-  const url = disclosure?.source_url ?? regime?.source_url ?? benchmark?.source_url;
-  source.replaceChildren();
-  if (description && since) source.append("生效日期 ",tag("time",since,{datetime:since}));
-  if (description && typeof url === "string" && URL.canParse(url)) {
+const formatFormula = (formula) => formula.replace(/\s*[＋+]\s*/g," + ").replace(/\s*[×*]\s*/g," × ");
+function disclosureDates(version) {
+  const parts = [];
+  for (const [kind,label,date] of [
+    ["published","披露日期",version.disclosed_on],
+    ["effective",version.start_basis ? "已核实起始日" : "生效日期",version.effective_from],
+  ]) {
+    if (parts.length) parts.push(" · ");
+    parts.push(label + " ",date ? tag("time",date,{datetime:date,"data-date-kind":kind}) : "未披露");
+  }
+  if (version.effective_to) parts.push(" · 截至 ",tag("time",version.effective_to,{datetime:version.effective_to}));
+  for (const [label,url] of [["查看官方披露",version.source_url],["管理人页面",version.manager_url]]) {
+    if (typeof url !== "string" || !URL.canParse(url)) continue;
     const link = new URL(url);
     if (link.protocol === "https:" && !link.username && !link.password) {
-      if (source.hasChildNodes()) source.append(" · ");
-      source.append(tag("a","查看官方披露",{href:link.href,target:"_blank",rel:"noopener noreferrer"}));
+      parts.push(" · ",tag("a",label,{href:link.href,target:"_blank",rel:"noopener noreferrer"}));
     }
   }
-  source.hidden = !source.hasChildNodes();
+  return parts;
+}
+function renderBenchmark(fund, today) {
+  const benchmark = fund?.benchmark;
+  const disclosure = fund?.benchmark_disclosure;
+  const reviewed = fund?.reviewedBenchmark;
+  const known = (reviewed?.versions ?? []).filter(({effective_from})=>effective_from<=today);
+  const latest = known.at(-1);
+  const regime = benchmark?.regimes.filter(({effective_from,method})=>effective_from<=today && method!=="none").at(-1);
+  const fallback = disclosure ?? (benchmark && {
+    ...regime, formula:regime?.formula ?? benchmark.formula, name:benchmark.name,
+    source_url:regime?.source_url ?? benchmark.source_url,
+  });
+  const version = latest ?? fallback;
+  const formula = version?.formula;
+  const main = formula && (/\d\s*[%％]/.test(formula) || !version.name) ? formula : version?.name;
+  $("benchmark-disclosure").textContent = main ? formatFormula(main) : "业绩比较基准暂未核实";
+
+  const validity = $("benchmark-validity");
+  validity.hidden = !main || (version.current_verified && (!version.effective_to || today<=version.effective_to));
+  validity.textContent = validity.hidden ? "" : "当前有效性待核实";
+  const source = $("benchmark-source");
+  source.hidden = !main;
+  source.replaceChildren(...(main ? disclosureDates(version) : []));
+
+  const previous = known.filter((item)=>item!==version).reverse();
+  $("benchmark-history").hidden = !previous.length;
+  $("benchmark-history").open = false;
+  $("benchmark-history-list").replaceChildren(...previous.map((item)=>{
+    const row = tag("li",formatFormula(item.formula));
+    const dates = tag("p",null,{class:"fund-note"});
+    dates.append(...disclosureDates(item));
+    row.append(dates);
+    return row;
+  }));
 
   const tracking = $("tracking-index");
-  const target = disclosure?.tracking_index ?? fund?.related.find(({kind})=>kind==="official_tracking");
+  const target = reviewed?.tracking_index ?? disclosure?.tracking_index ?? fund?.related.find(({kind})=>kind==="official_tracking");
   tracking.hidden = !target?.name;
   tracking.textContent = target?.name ? "跟踪指数 · " + target.name : "";
+}
+const valuation = watchValuation((quotes,message,pending)=>{
+  $("valuation-refresh").disabled = pending;
+  const text = [message,quotes.length ? "" : "暂无当日估值"].filter(Boolean).join(" · ");
+  $("valuation-status").textContent = text;
+  $("valuation-status").hidden = !text;
+  $("valuation-quotes").replaceChildren(...quotes.map(({id,value,change,updatedAt,source,method})=>{
+    const item = tag("article",null,{class:"risk-metric","data-valuation-source":id});
+    const signed = change>0 ? "+" : "";
+    item.append(tag("span",source+" · "+method),
+      tag("strong",`估算净值 ${nav(value)} · 涨跌幅 ${signed}${change.toFixed(2)}%`),
+      tag("small",`更新时间 ${updatedAt}（北京时间）`));
+    return item;
+  }));
+});
+function showValuation(code) {
+  $("valuation-panel").hidden = !code;
+  valuation.select(code);
 }
 function renderIdentity(code,fund) {
   const entry = catalog.get(code);
@@ -362,7 +406,7 @@ function renderIdentity(code,fund) {
       ? " · " + snapshotFallback.get(code):""}` : "";
   $("fund-source").textContent = "来源 " + (fund?.source.name ?? "—") + (origin?" · "+origin:"");
   $("fund-freshness").textContent = "状态 " + (fund ? fundFreshness(fund) : "未载入");
-  renderBenchmark(fund,latest?.date);
+  renderBenchmark(fund,shanghaiToday());
   const sourceTime = fund && new Intl.DateTimeFormat("zh-CN",{
     timeZone:"Asia/Shanghai",dateStyle:"medium",timeStyle:"short",
   }).format(new Date(fund.source.retrieved_at));
@@ -483,6 +527,7 @@ async function route() {
   selectedCode = FUND_CODE.test(code ?? "") ? code : null;
   $("fund-list").hidden = Boolean(selectedCode);
   $("fund-detail").hidden = !selectedCode;
+  showValuation(null);
   navChart.clear();
   navMode="adjusted";
   if (!selectedCode) {
@@ -503,6 +548,7 @@ async function route() {
   renderAnalysis();
   status("detail-status",loaded.has(current) ? "" : noData);
   window.scrollTo(0,0);
+  if (loaded.has(current) && (local || online)) showValuation(current);
   if ((local || online) && !loaded.has(current)) {
     status("detail-status",`正在载入 ${current} 的确认净值…`);
     try {
@@ -513,6 +559,7 @@ async function route() {
       syncButtons();
       renderIdentity(current,fund);
       renderAnalysis();
+      showValuation(current);
     } catch (error) {if (version===routeNumber) status("detail-status",error.message,true);}
   }
 }
@@ -589,6 +636,7 @@ $("list-import").addEventListener("change",importFiles);
 $("detail-import").addEventListener("change",importFiles);
 $("back-to-funds").addEventListener("click",navigateLink);
 window.addEventListener("popstate",route);
+$("valuation-refresh").addEventListener("click",valuation.refresh);
 $("nav-adjusted").addEventListener("click",()=>{navMode="adjusted";renderNav(loaded.get(selectedCode),...navRange);});
 $("nav-raw").addEventListener("click",()=>{navMode="raw";renderNav(loaded.get(selectedCode),...navRange);});
 for (const [id,label] of detailPeriods) {

@@ -75,6 +75,14 @@
         <label class="file-control">导入该基金数据<input id="detail-import" type="file" accept=".json,application/json"></label>
       </div>
       <p id="detail-status" class="fund-status" role="status"></p>
+      <section id="valuation-panel" class="fund-panel" aria-labelledby="valuation-title" hidden>
+        <div class="panel-heading">
+          <h2 id="valuation-title">盘中参考估值</h2>
+          <button type="button" id="valuation-refresh">刷新估值</button>
+        </div>
+        <p id="valuation-status" class="fund-note" role="status"></p>
+        <div id="valuation-quotes" class="risk-grid"></div>
+      </section>
       <div class="range-block">
         <div id="fund-periods" class="fund-controls" role="group" aria-label="统计分析区间"></div>
         <form id="fund-range" class="fund-controls" hidden>
@@ -108,7 +116,12 @@
       <section class="fund-panel" aria-labelledby="benchmark-title">
         <h2 id="benchmark-title">业绩比较基准</h2>
         <p id="benchmark-disclosure">业绩比较基准暂未核实</p>
+        <p id="benchmark-validity" class="fund-note" hidden></p>
         <p id="benchmark-source" class="fund-note" hidden></p>
+        <details id="benchmark-history" hidden>
+          <summary>历史基准披露</summary>
+          <ul id="benchmark-history-list"></ul>
+        </details>
         <p id="tracking-index" class="fund-note" hidden></p>
       </section>
       <section class="fund-panel chart-panel" aria-labelledby="risk-title">

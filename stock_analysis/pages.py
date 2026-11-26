@@ -90,7 +90,7 @@ def build_pages(destination, calendar_end=None, fund_index_snapshot=None, snapsh
         "suspensions": json.loads((ROOT / "stock_analysis/suspensions.json").read_text(encoding="utf-8")),
     }
     (output / "calendar.json").write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False), encoding="utf-8")
-    from .fund_benchmark_identification import reviewed_disclosures
+    from .fund_benchmark_identification import benchmark_page_disclosures, reviewed_disclosures
 
     day = now.astimezone(funds.SHANGHAI).date().isoformat()
     reviewed = reviewed_disclosures()
@@ -111,9 +111,8 @@ def build_pages(destination, calendar_end=None, fund_index_snapshot=None, snapsh
             raise ValueError("基金静态行情只接收已登记且股票接口未映射的特殊指数。")
         (output / config["index_snapshot"]).write_text(json.dumps(snapshot, ensure_ascii=False, allow_nan=False), encoding="utf-8")
     (output / "fund-config.json").write_text(json.dumps(config, ensure_ascii=False, allow_nan=False), encoding="utf-8")
-    disclosures = {code: funds.benchmark_metadata(code, day)["benchmark_disclosure"] for code in sorted(display_codes)}
     (output / "fund-benchmark-disclosures.json").write_text(
-        json.dumps({"schema_version": 1, "disclosures": disclosures}, ensure_ascii=False, allow_nan=False),
+        json.dumps(benchmark_page_disclosures(day), ensure_ascii=False, allow_nan=False),
         encoding="utf-8",
     )
     model_version = analysis_model_version({

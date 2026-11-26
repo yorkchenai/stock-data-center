@@ -83,6 +83,9 @@
 .fund-chart.empty {display: grid; place-items: center; height: 115px; color: var(--muted); text-align: center; border: 1px dashed var(--line);}
 #benchmark-disclosure {margin: 0; overflow-wrap: anywhere;}
 #benchmark-source, #tracking-index {margin-bottom: 0;}
+#benchmark-history {margin-top: 8px;}
+#benchmark-history-list li {overflow-wrap: anywhere;}
+#valuation-panel .risk-grid {margin-bottom: 0;}
 .chart-description {min-height: 20px;}
 .risk-grid {display: grid; grid-template-columns: repeat(auto-fit, minmax(145px,1fr)); gap: 8px; margin-bottom: 13px;}
 .risk-metric {padding: 9px; background: #f8fafb;}

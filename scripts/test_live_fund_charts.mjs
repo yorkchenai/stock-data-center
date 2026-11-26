@@ -102,8 +102,8 @@ async function checkDisclosure(page, code) {
   const [formula,since,url]=disclosures[code];
   const disclosure=page.locator("#benchmark-disclosure");
   assert.equal(await disclosure.textContent(),formula);
-  assert.equal(await page.locator("#benchmark-source time").textContent(),since);
-  assert.equal(await page.locator("#benchmark-source a").getAttribute("href"),url);
+  assert.equal(await page.locator("#benchmark-source [data-date-kind=effective]").textContent(),since);
+  assert.equal(await page.locator("#benchmark-source a").last().getAttribute("href"),url);
   assert.equal(await page.locator("#benchmark-line,#benchmark-status").count(),0);
   return {formula,url};
 }
@@ -174,7 +174,7 @@ try {
     assert.ok((await page.locator("#returns-source").textContent()).includes(latestFund.date));
     assert.ok((await page.locator("#returns-source").textContent()).includes(fund.source.name));
     const headings=await page.locator("#fund-detail h2").allTextContents();
-    assert.deepEqual(headings.slice(0,4),["基金历史净值","基金累计收益率","业绩比较基准","风险分析"]);
+    assert.deepEqual(headings.slice(0,5),["盘中参考估值","基金历史净值","基金累计收益率","业绩比较基准","风险分析"]);
     const incoming=await page.locator("#nav-hover").textContent();
     assert.match(incoming,/^最新可见 \d{4}-\d{2}-\d{2} · \d+\.\d{4}$/);
     assert.match(await page.locator("#nav-basis").textContent(),/净值按每份显示/);

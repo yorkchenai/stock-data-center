@@ -1,5 +1,5 @@
 """Local interactive chart server and portable real-history demo export."""
-from datetime import date
+from datetime import date, datetime
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -12,7 +12,8 @@ from threading import Lock
 
 import pandas as pd
 
-from .funds import CODE, load_fund, search_funds
+from .funds import CODE, SHANGHAI, load_fund, search_funds
+from .fund_benchmark_identification import benchmark_page_disclosures
 from .fund_charts import sector_analysis, sector_history
 from .indicators import calculate_indicators
 from .pipeline import ANALYSIS_LAYERS, run_analysis
@@ -106,6 +107,8 @@ class ChartHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/demo":
             self.send_json(200, self.dataset)
+        elif self.path == "/fund-benchmark-disclosures.json":
+            self.send_json(200, benchmark_page_disclosures(datetime.now(SHANGHAI).date().isoformat()))
         elif self.path.startswith("/api/funds/"):
             self.do_get_fund()
         elif self.path.startswith("/api/"):

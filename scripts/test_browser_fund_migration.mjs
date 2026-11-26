@@ -49,6 +49,8 @@ try {
     const url=new URL(request.url());
     if ((url.origin===new URL(origin).origin && !url.pathname.startsWith("/api/funds/")) ||
         (url.hostname==="fund.eastmoney.com" && /^\/(?:pingzhongdata\/\d{6}\.js|js\/fundcode_search\.js)$/.test(url.pathname))) return;
+    if ((url.hostname==="fundcomapi.tiantianfunds.com" && url.pathname==="/mm/newCore/FundValuationLast") ||
+        (url.hostname==="stock.finance.sina.com.cn" && url.pathname.endsWith("/FdFundService.getEstimateNetworthPic"))) return;
     if (url.protocol==="https:" || url.protocol==="http:") unexpectedRequests.push(url.href);
   });
   await page.goto(origin+"funds.html");
@@ -61,7 +63,7 @@ try {
       return {name,date:rows.at(-1).date,unit_nav:rows.at(-1).unit_nav,transport:source.transport};
     },{base:origin,code});
     assert.ok(["isolated-script","browser-cors"].includes(fund.transport));
-    await page.locator("#benchmark-source a").waitFor();
+    await page.locator("#benchmark-source a").first().waitFor();
     const benchmark=await page.locator("#benchmark-disclosure").innerText();
     assert.deepEqual(benchmark.match(/\d+%/g),weights);
     assert.equal(await page.locator("#tracking-index").isVisible(),code==="014194");
@@ -69,9 +71,12 @@ try {
     assert.equal(await page.locator("#core-metrics .metric").count(),6);
     assert.ok(await page.locator("#returns-chart canvas").count());
     assert.ok(await page.locator("#drawdown-chart canvas").count());
-    summary.funds[code]={...fund,benchmark,
-      effective_from:await page.locator("#benchmark-source time").innerText(),
-      source:await page.locator("#benchmark-source a").getAttribute("href")};
+    await page.locator("#valuation-refresh:enabled").waitFor({timeout:27_000});
+    const valuations=await page.locator("#valuation-quotes article").allTextContents();
+    summary.funds[code]={...fund,benchmark,valuations,
+      valuation_status:await page.locator("#valuation-status").textContent(),
+      effective_from:await page.locator("#benchmark-source [data-date-kind=effective]").innerText(),
+      source:await page.locator("#benchmark-source a").last().getAttribute("href")};
     for (const [width,height] of [[1440,1000],[390,844]]) {
       await page.setViewportSize({width,height});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);

@@ -8,10 +8,10 @@ export function renderChartExtremes(points, readout, format) {
 
   // A flat interval has one point that represents both extremes.
   const extremes = !peak ? [] : peak===trough ? [
-    {point:peak,label:"峰谷值",text:"峰谷",color:"#536579",shape:"circle",position:"aboveBar"},
+    {point:peak,label:"峰谷值",color:"#536579",shape:"circle",position:"aboveBar"},
   ] : [
-    {point:peak,label:"峰值",text:"峰",color:"#a94344",shape:"arrowDown",position:"aboveBar"},
-    {point:trough,label:"谷值",text:"谷",color:"#087e75",shape:"arrowUp",position:"belowBar"},
+    {point:peak,label:"峰值",color:"#a94344",shape:"arrowDown",position:"aboveBar"},
+    {point:trough,label:"谷值",color:"#087e75",shape:"arrowUp",position:"belowBar"},
   ];
   readout.hidden = !extremes.length;
   readout.replaceChildren(...extremes.map(({point,label})=>{
@@ -19,15 +19,16 @@ export function renderChartExtremes(points, readout, format) {
     item.textContent = `${label} ${point.time} · ${format(point.value)}`;
     return item;
   }));
-  return extremes.map(({point,text,color,shape,position})=>({time:point.time,text,color,shape,position}))
+  return extremes.map(({point,color,shape,position})=>({time:point.time,text:format(point.value),color,shape,position}))
     .sort((a,b)=>a.time.localeCompare(b.time));
 }
 
-export function fitChartWithMarkers(chart, pointCount) {
+export function fitChartWithMarkers(chart, pointCount, markers) {
   const scale = chart.timeScale();
-  const gutter = 12;
+  const fontSize = chart.options().layout.fontSize;
+  const gutter = Math.max(12,...markers.map(({text})=>Math.ceil(text.length*fontSize*0.38+4)));
   const width = scale.width();
-  if (pointCount<2 || width<=2*gutter) {
+  if (!pointCount || width<=2*gutter) {
     scale.fitContent();
     return;
   }

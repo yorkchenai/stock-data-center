@@ -97,7 +97,40 @@ try {
     const context = await browser.newContext({viewport:{width,height},isMobile:mobile,hasTouch:mobile});
     await context.route("https://fundcomapi.tiantianfunds.com/**",(route)=>route.abort());
     await context.route("https://stock.finance.sina.com.cn/**",(route)=>route.abort());
+    await context.addInitScript(()=>{
+      const charts = new Map();
+      const labels = new Map();
+      const fillText = CanvasRenderingContext2D.prototype.fillText;
+      CanvasRenderingContext2D.prototype.fillText = function(text,x,y,...args) {
+        const chart = this.canvas.closest(".fund-chart");
+        if (chart && (this.fillStyle==="#a94344" || this.fillStyle==="#087e75")) {
+          const width = this.measureText(text).width;
+          labels.set(`${chart.id}:${text}`,{left:x,x:x+width/2,y,right:x+width,
+            width:this.canvas.clientWidth,height:this.canvas.clientHeight});
+        }
+        return fillText.call(this,text,x,y,...args);
+      };
+      let chartLibrary;
+      Object.defineProperty(window,"LightweightCharts",{
+        get:()=>chartLibrary,
+        set(library) {
+          chartLibrary = {...library,createChart(element,options) {
+            const chart = library.createChart(element,options);
+            charts.set(element.id,chart);
+            return chart;
+          }};
+        },
+      });
+      window.extremeLabelIsDrawn = (id,date,value)=>{
+        const label = labels.get(`${id}:${value}`);
+        const point = charts.get(id)?.timeScale().timeToCoordinate(date);
+        return label && Number.isFinite(point) && Math.abs(label.x-point)<1 &&
+          label.left>=0 && label.right<=label.width && label.y>0 && label.y<label.height;
+      };
+    });
     const page = await context.newPage();
+    const checkExtreme = (id,date,value)=>page.waitForFunction(({id,date,value})=>window.extremeLabelIsDrawn(id,date,value),
+      {id,date,value},{timeout:4_000});
     const errors=[];
     page.on("pageerror",(error)=>errors.push(error.message));
     await page.goto(origin+"funds.html");
@@ -149,6 +182,12 @@ try {
     const oneYearExtrema = await extrema();
     assert.equal(oneYearExtrema.length,6);
     assert.ok(oneYearExtrema.every((label,index)=>new RegExp(`${index%2 ? "谷" : "峰"}值 \\d{4}-\\d{2}-\\d{2} ·`).test(label)));
+    for (const [index,id] of ["returns-chart","nav-chart","drawdown-chart"].entries()) {
+      for (const label of oneYearExtrema.slice(index*2,index*2+2)) {
+        const [,date,,value] = label.split(" ");
+        await checkExtreme(id,date,value);
+      }
+    }
     assert.equal(await page.locator("#nav-chart").evaluate((chart)=>
       [...chart.childNodes].some((node)=>node.nodeType===3&&node.textContent.trim())),false);
     assert.match(await page.locator("#returns-source").innerText(),/基金净值来源.*最新确认/);
@@ -243,6 +282,18 @@ try {
     await page.locator("#nav-raw").click();
     assert.match(await page.locator("#nav-basis").innerText(),/原始单位净值/);
     assert.equal(await page.locator("#sector-chart").count(),0);
+    const levels = [["2024-02-01",1],["2024-02-02",.5099],["2024-02-05",.66],
+      ["2024-02-06",null],["2024-02-07",null],["2024-02-08",null],["2024-02-09",.70],
+      ["2025-07-30",1.2],["2026-02-02",1.8],["2026-06-30",2.555],["2026-11-20",1.2429]];
+    const segmented = {...first,rows:levels.map(([date,level])=>({date,
+      unit_nav:level??.72,return_index:level,return_issue:level==null?"unrecognized_event":null}))};
+    await page.locator("#detail-import").setInputFiles({name:"segmented-nav.json",mimeType:"application/json",
+      buffer:Buffer.from(JSON.stringify(segmented))});
+    await dataPanel.getByText("已载入 000001。",{exact:true}).waitFor();
+    await checkExtreme("nav-chart","2026-06-30","2.5550");
+    await page.getByRole("button",{name:"全部历史",exact:true}).click();
+    await checkExtreme("nav-chart","2026-06-30","2.5550");
+    await checkExtreme("nav-chart","2024-02-02","0.5099");
     await page.getByRole("link",{name:"返回基金列表"}).click();
     await page.getByRole("link",{name:second.name}).click();
     assert.equal(await page.locator("#benchmark-disclosure").innerText(),"业绩比较基准暂未核实");

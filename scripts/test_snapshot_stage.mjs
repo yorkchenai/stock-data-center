@@ -378,6 +378,15 @@ try {
       }
       const page=await browser.newPage();
       try {
+        if (sample) {
+          // Risk snapshot replay has no live intraday estimates.
+          await page.route(service+"/api/fund-valuation**",(route)=>{
+            const {searchParams} = new URL(route.request().url());
+            return route.fulfill({headers:{"Access-Control-Allow-Origin":origin},json:{
+              symbol:searchParams.get("symbol"),provider:searchParams.get("provider"),values:[],
+            }});
+          });
+        }
         const requestFailures=[];
         page.on("pageerror",(error)=>requestFailures.push(error.message));
         const url=isStock?"/index.html?symbol="+symbol:"/funds.html?fund="+symbol;
@@ -432,7 +441,10 @@ try {
       row.sector_status=snapshot.data.association?.status;
       row.special_index_diagnostics=snapshot.data.association?.special_index_diagnostics;
       row.rank_codes=snapshot.data.association?.sectors.map((sector)=>sector.code);
-    } catch (error) {row.error=error.message;}
+    } catch (error) {
+      row.error=error.message;
+      console.error(`${row.type} ${row.symbol}:`,error);
+    }
   }
   await wait(250);
   const after=(await traces()).filter((event)=>event.event==="snapshot_upstream").length;

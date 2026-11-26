@@ -74,7 +74,7 @@ try {
     assert.deepEqual(benchmark.match(/\d+%/g),weights);
     assert.equal(await page.locator("#tracking-index").isVisible(),code==="014194");
     assert.equal(await page.getByRole("heading",{name:"强关联板块指数分析"}).count(),0);
-    assert.equal(await page.locator("#core-metrics .metric").count(),6);
+    assert.equal(await page.locator("#core-metrics .metric").count(),5);
     assert.ok(await page.locator("#returns-chart canvas").count());
     assert.ok(await page.locator("#drawdown-chart canvas").count());
     await page.locator("#valuation-refresh:enabled").waitFor({timeout:27_000});

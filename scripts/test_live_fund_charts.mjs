@@ -176,7 +176,8 @@ try {
     assert.ok((await page.locator("#returns-source").textContent()).includes(latestFund.date));
     assert.ok((await page.locator("#returns-source").textContent()).includes(fund.source.name));
     const headings=await page.locator("#fund-detail h2").allTextContents();
-    assert.deepEqual(headings.slice(0,5),["盘中参考估值","基金历史净值","基金累计收益率","业绩比较基准","风险分析"]);
+    assert.deepEqual(headings.slice(0,5),["业绩比较基准","盘中参考估值","基金累计收益率","基金历史净值","风险分析"]);
+    assert.equal(headings.at(-1),"基金数据来源");
     const incoming=await page.locator("#nav-hover").textContent();
     assert.match(incoming,/^最新可见 \d{4}-\d{2}-\d{2} · \d+\.\d{4}$/);
     assert.match(await page.locator("#nav-basis").textContent(),/净值按每份显示/);

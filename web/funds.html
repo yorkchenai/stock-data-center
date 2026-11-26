@@ -48,10 +48,13 @@
             <button id="show-favorites" aria-pressed="false">自选基金</button>
           </div>
           <label>基金类型<select id="type-filter"><option value="">全部类型</option></select></label>
-          <details class="column-settings">
-            <summary>列设置</summary>
-            <div id="column-options"></div>
-          </details>
+          <div class="fund-controls">
+            <button id="refresh-fund-list" type="button" hidden>刷新数据</button>
+            <details class="column-settings">
+              <summary>列设置</summary>
+              <div id="column-options"></div>
+            </details>
+          </div>
         </div>
         <div class="fund-table-scroll" tabindex="0" aria-label="基金指标表，可横向滚动">
           <table id="fund-table">

@@ -344,6 +344,7 @@ try {
     body:file.replace("<html ",`<html data-analysis-origin="${service}" `)}));
   const requests = [];
   let failedHistoryCode = null;
+  let updatedHistoryCode = null;
   // Give the browser an explicit HTTP outage. An aborted CORS fetch triggers
   // the sandbox script fallback, whose requests can escape this test fixture.
   await context.route("https://fund.eastmoney.com/**",(route)=>route.fulfill({
@@ -356,6 +357,11 @@ try {
     requests.push([symbol,category]);
     if (symbol===failedHistoryCode) return route.fulfill({status:503,headers:{"Access-Control-Allow-Origin":"*"}});
     const fund = {...first,code:symbol,synthetic:false,valuation_frequency:null};
+    if (symbol===updatedHistoryCode) {
+      const last = fund.rows.at(-1);
+      fund.rows = [...fund.rows,{...last,date:"2026-11-23",unit_nav:last.unit_nav*1.01,return_index:last.return_index*1.01}];
+      fund.source = {...fund.source,retrieved_at:"2026-11-23T12:00:00Z"};
+    }
     const data = {snapshot_id:"11111111-1111-4111-8111-111111111111",asset_type:"fund",symbol,
       status:"partial",model_version:model,schema_version:1,data_as_of:fund.rows.at(-1).date,
       expires_at:new Date(Date.now()+60_000).toISOString()};
@@ -573,8 +579,24 @@ try {
   await failedRow.getByRole("button",{name:"载入 003095 的净值"}).click();
   await failedRow.locator('[data-column="nav"]').getByText(first.rows.at(-1).unit_nav.toFixed(4),{exact:true}).waitFor();
   assert.deepEqual(requests.slice(afterListLoads),[["003095",null],["003095","page"]]);
+  const updatedRow = table.locator('tr[data-fund-code="014194"]');
+  await updatedRow.getByRole("button",{name:"加入自选 014194"}).click();
+  await savedFund.getByRole("button",{name:"加入自选 018993"}).click();
+  await page.getByRole("button",{name:"自选基金",exact:true}).click();
+  assert.equal(await table.locator("tbody tr").count(),2);
+  const beforeRefresh = requests.length;
+  updatedHistoryCode = "014194";
+  failedHistoryCode = "018993";
+  await page.getByRole("button",{name:"刷新数据",exact:true}).click();
+  await page.getByText("净值查询完成，018993 更新失败，保留已有数据。",{exact:true}).waitFor();
+  assert.deepEqual(requests.slice(beforeRefresh).sort(),[["014194",null],["014194","page"],["018993",null]].sort());
+  assert.equal(await updatedRow.locator('[data-column="date"]').textContent(),"2026-11-23");
+  assert.equal(await updatedRow.locator('[data-column="latest-change"]').textContent(),"+1.00%");
+  assert.equal(await savedFund.locator('[data-column="date"]').textContent(),first.rows.at(-1).date);
+  assert.equal(await savedFund.locator('[data-column="latest-change"]').textContent(),"+0.21%");
+  assert.equal(await page.getByRole("button",{name:"刷新数据",exact:true}).isEnabled(),true);
   report.valuation = {fixedLabels:true,listColumns:true,automatic:true,background:true,manual:true,retainsLastQuote:true,
-    listReloadConfirmedNav:true,listNavRetry:true,historyLoadsDuringRefresh:0};
+    listReloadConfirmedNav:true,listNavRetry:true,listRefresh:true,historyLoadsDuringRefresh:0};
   await context.close();
 } finally {
   await browser.close();

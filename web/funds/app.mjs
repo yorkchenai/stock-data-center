@@ -32,6 +32,7 @@ const beingLoaded = new Map();
 const listNavRequests = new Set();
 const listNavErrors = new Map();
 const maxListNavRequests = 3;
+let listRefresh = null;
 const sharedSnapshots = new Map();
 const snapshotFallback = new Map();
 const valuationLabels = new Map([["fundgz","估值1"],["sina_ds2","估值2"],["sina_ds3","估值3"]]);
@@ -166,6 +167,9 @@ function loadFund(code,snapshotId=null) {
       const fund = normalizeFund(raw);
       if (fund.code !== code) throw new Error("查询结果的基金代码不一致。");
       if (!snapshotId && loaded.has(code) && loaded.get(code)!==before) return loaded.get(code);
+      if (!snapshotId && before?.mode==="reported" && fund.rows.at(-1).date<before.rows.at(-1).date) {
+        throw new Error("查询结果的净值日期早于已载入的数据。");
+      }
       fund.reviewedBenchmark = reviewed?.[code];
       if (snapshot) sharedSnapshots.set(code,snapshot);
       else sharedSnapshots.delete(code);
@@ -182,15 +186,39 @@ async function loadListFund(code) {
   catch (error) {listNavErrors.set(code,error.message);status("list-status",error.message,true);}
   renderList();
 }
+function visibleListRows() {
+  return state.list.filter((entry)=>(!state.favorites || entry.favorite) && (!state.type || state.type===entry.category));
+}
+function refreshList() {
+  if (selectedCode || listRefresh || !(local || online)) return;
+  const codes = visibleListRows().map(({code})=>code).filter((code)=>loaded.get(code)?.mode!=="synthetic");
+  if (!codes.length) return;
+  listRefresh = {pending:new Set(codes),failures:[],count:codes.length};
+  status("list-status",`正在查询 ${codes.length} 只基金的最新数据…`);
+  renderList();
+  void valuation.refresh();
+}
 function loadVisibleListFunds(rows) {
-  if (selectedCode || !(local || online)) return;
-  for (const {code} of rows) {
+  if (!(local || online) || (selectedCode && !listRefresh)) return;
+  const queue = listRefresh?.pending ?? rows.filter(({code})=>!loaded.has(code) && !listNavErrors.has(code)).map(({code})=>code);
+  for (const code of queue) {
     if (listNavRequests.size>=maxListNavRequests) break;
-    if (loaded.has(code) || listNavRequests.has(code) || listNavErrors.has(code)) continue;
+    if (listNavRequests.has(code)) continue;
     listNavRequests.add(code);
-    void loadFund(code).catch((error)=>listNavErrors.set(code,error.message)).finally(()=>{
+    void loadFund(code).then(()=>listNavErrors.delete(code),(error)=>listNavErrors.set(code,error.message)).finally(()=>{
       listNavRequests.delete(code);
+      if (listRefresh?.pending.delete(code)) {
+        if (listNavErrors.has(code)) listRefresh.failures.push(code);
+        if (!listRefresh.pending.size) {
+          const {failures,count} = listRefresh;
+          listRefresh = null;
+          status("list-status",failures.length
+            ? `净值查询完成，${failures.join("、")} 更新失败，保留已有数据。`
+            : `已查询 ${count} 只基金的确认净值。`,Boolean(failures.length));
+        }
+      }
       if (!selectedCode) renderList();
+      else if (listRefresh) loadVisibleListFunds([]);
     });
   }
 }
@@ -257,7 +285,11 @@ function renderList() {
     header.append(th);
   }
   $("fund-table").tHead.replaceChildren(header);
-  const rows = state.list.filter((entry)=>(!state.favorites || entry.favorite) && (!state.type || state.type===entry.category));
+  const rows = visibleListRows();
+  const refresh = $("refresh-fund-list");
+  refresh.hidden = !(local || online);
+  refresh.disabled = Boolean(listRefresh) || !rows.some(({code})=>loaded.get(code)?.mode!=="synthetic");
+  refresh.textContent = listRefresh ? "刷新中…" : "刷新数据";
   loadVisibleListFunds(rows);
   const items = rows.map((row)=>{
     const fund = loaded.get(row.code);
@@ -735,6 +767,7 @@ $("fund-search").addEventListener("submit",async (event)=>{
 });
 $("list-import").addEventListener("change",importFiles);
 $("detail-import").addEventListener("change",importFiles);
+$("refresh-fund-list").addEventListener("click",refreshList);
 $("back-to-funds").addEventListener("click",navigateLink);
 window.addEventListener("popstate",()=>void route());
 $("valuation-refresh").addEventListener("click",valuation.refresh);

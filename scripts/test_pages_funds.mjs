@@ -144,6 +144,11 @@ try {
     await page.getByRole("link",{name:first.name}).click();
     await page.locator("#returns-chart canvas").first().waitFor();
     await page.locator("#nav-chart canvas").first().waitFor();
+    assert.ok((await page.locator("#returns-title").boundingBox()).y < (await page.locator("#nav-chart-title").boundingBox()).y);
+    const extrema = ()=>page.locator(".chart-extremes span").allTextContents();
+    const oneYearExtrema = await extrema();
+    assert.equal(oneYearExtrema.length,6);
+    assert.ok(oneYearExtrema.every((label,index)=>new RegExp(`${index%2 ? "谷" : "峰"}值 \\d{4}-\\d{2}-\\d{2} ·`).test(label)));
     assert.equal(await page.locator("#nav-chart").evaluate((chart)=>
       [...chart.childNodes].some((node)=>node.nodeType===3&&node.textContent.trim())),false);
     assert.match(await page.locator("#returns-source").innerText(),/基金净值来源.*最新确认/);
@@ -176,9 +181,13 @@ try {
     const nav = await page.locator("#fund-nav").innerText();
     const value = page.locator("[data-metric='return'] strong");
     const initial = await value.innerText();
+    await page.getByRole("button",{name:"全部历史",exact:true}).click();
+    await page.getByText(`图表视窗 ${first.inception} 至 ${first.rows.at(-1).date}`,{exact:true}).waitFor();
     await page.getByRole("button",{name:"近3年",exact:true}).click();
     assert.notEqual(initial,await value.innerText());
     assert.equal(await page.locator("#fund-nav").innerText(),nav);
+    const threeYearExtrema = await extrema();
+    assert.notDeepEqual(threeYearExtrema,oneYearExtrema);
     const stats = await page.locator("#core-metrics").innerText();
     if (!mobile) {
       const bound=await page.locator("#returns-chart").boundingBox();
@@ -186,6 +195,7 @@ try {
       await page.mouse.wheel(0,-300);
       await page.mouse.move(bound.x+bound.width/2,bound.y+100);
       assert.equal(await page.locator("#core-metrics").innerText(),stats);
+      assert.deepEqual(await extrema(),threeYearExtrema);
     }
     assert.equal(await page.locator("#benchmark-disclosure").innerText(),"合成比较基准");
     assert.equal(await page.locator("#benchmark-source [data-date-kind=effective]").textContent(),first.inception);
@@ -205,8 +215,10 @@ try {
     await page.getByRole("button",{name:"应用区间"}).click();
     assert.match(await page.locator("#range-status").innerText(),/开始日期不能晚于结束日期/);
     assert.equal(await value.innerText(),"—");
+    assert.deepEqual(await extrema(),[]);
     await page.getByRole("button",{name:"近1年",exact:true}).click();
     assert.equal(await value.innerText(),initial);
+    assert.deepEqual(await extrema(),oneYearExtrema);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),true);
     await page.screenshot({path:path.join(output,`funds-detail-${width}.png`),fullPage:true});
     await page.locator("#detail-import").setInputFiles({name:"test-fund-bundle.json",mimeType:"application/json",

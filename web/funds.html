@@ -106,6 +106,14 @@
         <p id="range-status" class="fund-note" role="status"></p>
       </div>
       <section id="core-metrics" class="metrics-grid" aria-label="六个核心指标"></section>
+      <section class="fund-panel chart-panel" aria-labelledby="returns-title">
+        <div class="panel-heading"><h2 id="returns-title">基金累计收益率</h2><span id="fund-visible-range" class="fund-note"></span></div>
+        <div id="returns-chart" class="fund-chart" role="img" aria-label="以统计区间起点归零的基金累计收益率曲线"></div>
+        <p id="returns-extremes" class="fund-note chart-extremes" hidden></p>
+        <p id="hover-values" class="fund-note chart-description" aria-live="off"></p>
+        <p id="returns-source" class="fund-note" hidden></p>
+        <a class="fund-note" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">图表由 TradingView Lightweight Charts™ 提供</a>
+      </section>
       <section class="fund-panel" aria-labelledby="nav-chart-title">
         <div class="panel-heading">
           <h2 id="nav-chart-title">基金历史净值</h2>
@@ -115,21 +123,16 @@
           </div>
         </div>
         <div id="nav-chart" class="fund-chart" role="img" aria-label="基金历史净值折线图"></div>
+        <p id="nav-extremes" class="fund-note chart-extremes" hidden></p>
         <p id="nav-hover" class="fund-note chart-description"></p>
         <p id="nav-basis" class="fund-note"></p>
         <details id="nav-gaps" hidden><summary>复权数据缺口</summary><ul id="nav-gap-list" class="fund-note"></ul></details>
-      </section>
-      <section class="fund-panel chart-panel" aria-labelledby="returns-title">
-        <div class="panel-heading"><h2 id="returns-title">基金累计收益率</h2><span id="fund-visible-range" class="fund-note"></span></div>
-        <div id="returns-chart" class="fund-chart" role="img" aria-label="以统计区间起点归零的基金累计收益率曲线"></div>
-        <p id="hover-values" class="fund-note chart-description" aria-live="off"></p>
-        <p id="returns-source" class="fund-note" hidden></p>
-        <a class="fund-note" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">图表由 TradingView Lightweight Charts™ 提供</a>
       </section>
       <section class="fund-panel chart-panel" aria-labelledby="risk-title">
         <h2 id="risk-title">风险分析</h2>
         <div id="risk-metrics" class="risk-grid"></div>
         <div id="drawdown-chart" class="fund-chart drawdown-chart" role="img" aria-label="区间历史回撤曲线"></div>
+        <p id="drawdown-extremes" class="fund-note chart-extremes" hidden></p>
         <p id="drawdown-values" class="fund-note chart-description"></p>
         <p id="risk-assumptions" class="fund-note"></p>
       </section>

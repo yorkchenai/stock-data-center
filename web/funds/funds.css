@@ -99,6 +99,7 @@
 #benchmark-history-list li {overflow-wrap: anywhere;}
 #valuation-panel .risk-grid {margin-bottom: 0;}
 .chart-description {min-height: 20px;}
+.chart-extremes {display: flex; flex-wrap: wrap; gap: 3px 16px; margin: 6px 0 0; font-variant-numeric: tabular-nums;}
 .risk-grid {display: grid; grid-template-columns: repeat(auto-fit, minmax(145px,1fr)); gap: 8px; margin-bottom: 13px;}
 .risk-metric {padding: 9px; background: #f8fafb;}
 .risk-metric span, .risk-metric strong {display: block;}

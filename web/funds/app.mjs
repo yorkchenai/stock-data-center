@@ -47,7 +47,7 @@ const coreDefinitions = [
   ["excess","超额收益",pp,"基金区间收益减去同起止日的官方比较基准收益。"],
 ];
 const charts = createFundCharts();
-const navChart = createNavChart($("nav-chart"),$("nav-hover"));
+const navChart = createNavChart($("nav-chart"),$("nav-hover"),$("nav-extremes"));
 let navMode = "adjusted";
 let navRange = [];
 const loopback = ["127.0.0.1","localhost","[::1]"].includes(location.hostname);

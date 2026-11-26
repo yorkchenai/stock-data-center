@@ -93,12 +93,13 @@ const expectedDisclosures = {
 };
 const report = {mode:"explicitly labeled synthetic fund test",viewports:[]};
 try {
+  const file = await readFile(path.join(site,"funds.html"),"utf8");
   for (const [width,height,mobile] of [[1440,900,false],[390,844,true]]) {
     const context = await browser.newContext({viewport:{width,height},isMobile:mobile,hasTouch:mobile});
-    await context.route("https://fundcomapi.tiantianfunds.com/**",(route)=>route.abort());
-    await context.route("https://stock.finance.sina.com.cn/**",(route)=>route.abort());
-    await context.route("**/api/analysis**",(route)=>route.abort());
-    await context.route("https://fund.eastmoney.com/**",(route)=>route.abort());
+    // The import-only layout test keeps its synthetic fund names across reloads.
+    // The Pages-mode test below exercises automatic list loading separately.
+    await context.route(origin+"funds.html**",(route)=>route.fulfill({contentType:"text/html; charset=utf-8",
+      body:file.replace('data-mode="pages"','data-mode="offline"')}));
     await context.addInitScript(()=>{
       const charts = new Map();
       const labels = new Map();
@@ -303,6 +304,7 @@ try {
     assert.equal(await page.locator("[data-metric='excess']").count(),0);
     assert.match(await page.locator("#holdings-data").innerText(),/暂无/);
     await page.getByRole("link",{name:"返回基金列表"}).click();
+    await page.waitForURL(origin+"funds.html");
     await page.reload();
     await page.getByRole("link",{name:first.name}).waitFor();
     assert.equal(await page.getByRole("columnheader",{name:"来源"}).count(),0);
@@ -315,7 +317,6 @@ try {
   }
   const context = await browser.newContext({viewport:{width:390,height:844}});
   const service = "https://snapshot.test";
-  const file = await readFile(path.join(site,"funds.html"),"utf8");
   const {analysis_model_version:model} = JSON.parse(await readFile(path.join(site,"build-info.json"),"utf8"));
   await context.route(origin+"funds.html**",(route)=>route.fulfill({contentType:"text/html",
     body:file.replace("<html ",`<html data-analysis-origin="${service}" `)}));

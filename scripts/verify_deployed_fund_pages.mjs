@@ -110,6 +110,7 @@ try {
   assert.deepEqual(await fundAnalysis(),before);
 
   await page.locator("#back-to-funds").click();
+  await page.waitForURL(new URL("funds.html",base).href);
   await page.reload();
   const table = page.locator("#fund-table");
   const headings = await table.locator("th").allTextContents();

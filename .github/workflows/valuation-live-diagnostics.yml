@@ -17,53 +17,40 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: |
           CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)" node --input-type=module <<'JS'
+          import assert from "node:assert/strict";
           import { chromium } from "playwright-core";
-          const origin="https://yorkchenai.github.io";
-          const east="https://fundcomapi.tiantianfunds.com/mm/newCore/FundValuationLast";
-          const sina="https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic";
-          const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH,args:["--no-sandbox"]});
-          const time=new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Shanghai",dateStyle:"short",timeStyle:"medium"});
-          const root=origin+"/stock-data-center";
-          console.log("production",await fetch(root+"/build-info.json").then(r=>r.json()),time.format(new Date()));
-          function vendor(url){return url.startsWith(east) ? "east" : url.startsWith(sina) ? "sina" : null;}
-          async function payload(url) {
-            try {
-              const response=await fetch(url,{headers:{Origin:origin,"User-Agent":"Mozilla/5.0"},signal:AbortSignal.timeout(10_000)});
-              const text=await response.text();
-              const wrapped=text.indexOf("{");
-              let parsed=null;
-              try{parsed=JSON.parse(text.slice(wrapped,text.lastIndexOf("}")+1));}catch{}
-              const source=vendor(url);
-              const data=source==="east"?parsed?.data:parsed?.result?.data;
-              const rows=data?.networth;
-              const fields=source==="east"?{success:parsed?.success,rows:data}:
-                {status:parsed?.result?.status,symbol:data?.symbol,fundcode:data?.fundcode,series_type:typeof rows,
-                 point_count:rows?.length,first:rows?.[0],last:rows?.at?.(-1)};
-              console.log("direct",JSON.stringify({source,http:response.status,content_type:response.headers.get("content-type"),
-                cors:response.headers.get("access-control-allow-origin"),prefix:text.slice(0,wrapped>0?Math.min(100,wrapped):40),...fields}));
-            }catch(error){console.log("direct failure",vendor(url),error.message,error.cause?.code);}
-          }
+          const origin = "https://yorkchenai.github.io";
+          const worker = "https://stock-data-center-voice-probe.finalnoodle2.chatgpt.site";
+          const browser = await chromium.launch({executablePath:process.env.CHROMIUM_PATH,args:["--no-sandbox"]});
+          const now = new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Shanghai",dateStyle:"short",timeStyle:"medium"}).format(new Date());
+          const codes = ["019830","014194","018993","110022"];
           try {
-            for(const code of ["019830","014194","018993","110022"]){
-              console.log("fund",code,time.format(new Date()));
-              const page=await browser.newPage();
-              page.on("response",async r=>{if(vendor(r.url())) console.log("browser response",code,vendor(r.url()),r.status(),
-                r.headers()["access-control-allow-origin"],r.headers()["content-type"]);});
-              page.on("console",m=>{if(m.type()==="error")console.log("browser console",code,m.text().slice(0,250));});
-              page.on("requestfailed",r=>{if(vendor(r.url()))console.log("browser failure",code,vendor(r.url()),r.failure());});
-              await Promise.all([
-                (async()=>{
-                  const url=root+"/funds.html?fund="+code;
-                  await page.goto(url);
-                  await page.locator("#valuation-panel").waitFor({timeout:34_000});
-                  await page.locator("#valuation-refresh:enabled").waitFor({timeout:26_000});
-                  console.log("page",JSON.stringify({code,status:await page.locator("#valuation-status").textContent(),
-                    values:await page.locator("#valuation-quotes article").allInnerTexts()}));
-                })().catch(e=>console.log("page failure",code,e.message)),
-                payload(east+"?FCODES="+code+"&FIELDS=FCODE%2CGSZ%2CGSZZL%2CGZTIME"),
-                payload(sina+"?symbol="+code+"&callback=sdcFundValuation&_="+Date.now()),
-              ]);
-              await page.close();
+            const page = await browser.newPage();
+            await page.goto(origin+"/stock-data-center/build-info.json");
+            const result = await page.evaluate(async ({worker,codes})=>{
+              return Promise.all(codes.map(async (symbol)=>{
+                const sources = await Promise.all(["eastmoney","sina"].map(async (provider)=>{
+                  const start = performance.now();
+                  try {
+                    const url = new URL("/api/fund-valuation",worker);
+                    url.search = new URLSearchParams({symbol,provider});
+                    const response = await fetch(url,{credentials:"omit",signal:AbortSignal.timeout(10_000)});
+                    const body = await response.json();
+                    return {provider,http:response.status,ms:Math.round(performance.now()-start),status:body.status,
+                      returned_symbol:body.symbol,values:body.values?.map(({id,change,updatedAt})=>({id,change,updatedAt}))};
+                  } catch(error) {return {provider,error:String(error.message).slice(0,120)};}
+                }));
+                return {symbol,sources};
+              }));
+            },{worker,codes});
+            const mcp = await fetch(worker+"/mcp",{method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json, text/event-stream"},
+              body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/list"}),signal:AbortSignal.timeout(10_000)});
+            console.log(JSON.stringify({as_of:now,origin,anonymous_mcp:mcp.status,result},null,2));
+            assert.ok([401,403].includes(mcp.status));
+            for (const fund of result) {
+              const estimates = fund.sources.flatMap((source)=>source.values??[]);
+              assert.ok(estimates.length,fund.symbol+" has no current-day estimate through the Worker");
+              assert.ok(estimates.every(({updatedAt})=>updatedAt?.startsWith(now.slice(0,10))));
             }
           } finally {await browser.close();}
           JS

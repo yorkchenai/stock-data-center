@@ -210,6 +210,7 @@ for (const [index, panel] of PANELS.entries()) {
     checkbox.addEventListener("change", () => {
       series.applyOptions({ visible: checkbox.checked });
       toggle.classList.toggle("disabled", !checkbox.checked);
+      requestAnimationFrame(positionLegends);
     });
     const name = document.createElement("span");
     name.textContent = field === "-DI" ? "−DI" : field;
@@ -239,13 +240,45 @@ for (const level of [30, 50, 70]) {
   });
 }
 
+const closeMarkers = ["max", "min"].map((kind) => {
+  const marker = document.createElement("div");
+  marker.className = "close-extreme";
+  marker.dataset.extreme = kind;
+  marker.setAttribute("role", "img");
+  marker.hidden = true;
+  const value = document.createElement("span");
+  marker.append(value);
+  elements.legends.append(marker);
+  return { marker, value };
+});
+let closeExtremes = [];
+
+function positionCloseMarkers(top, height) {
+  const scale = chart.timeScale();
+  const width = scale.width();
+  const minTop = legendElements[0].offsetHeight + 9;
+  for (const [index, { marker, value }] of closeMarkers.entries()) {
+    const row = closeExtremes[index];
+    const x = row ? scale.timeToCoordinate(row.date) : null;
+    const y = row ? candles.priceToCoordinate(row.close) : null;
+    marker.hidden = x === null || y === null || x < 0 || x > width || y < 0 || y > height;
+    if (marker.hidden) continue;
+    marker.style.left = `${x}px`;
+    marker.style.top = `${top + y}px`;
+    const left = Math.max(4, Math.min(x - value.offsetWidth / 2, width - value.offsetWidth - 4));
+    const labelY = index ? y + 8 : y - value.offsetHeight - 8;
+    value.style.left = `${left - x}px`;
+    value.style.top = `${Math.max(minTop, Math.min(labelY, height - value.offsetHeight - 4)) - y}px`;
+  }
+}
+
 function positionLegends() {
   const parent = elements["chart-shell"].getBoundingClientRect();
   chart.panes().forEach((pane, index) => {
     const node = pane.getHTMLElement();
     if (node) {
-      legendElements[index].style.top =
-        `${node.getBoundingClientRect().top - parent.top + 5}px`;
+      const topOffset = node.getBoundingClientRect().top - parent.top;
+      legendElements[index].style.top = `${topOffset + 5}px`;
       const scale = chart.priceScale("right", index);
       const top = Math.min(
         0.65,
@@ -257,6 +290,7 @@ function positionLegends() {
       if (Math.abs(scale.options().scaleMargins.top - top) > 0.005) {
         scale.applyOptions({ scaleMargins: { top, bottom: 0.1 } });
       }
+      if (index === 0) positionCloseMarkers(topOffset, pane.getHeight());
     }
   });
 }
@@ -304,11 +338,27 @@ chart.subscribeClick((parameter) => {
   const date = dateKey(parameter.time);
   if (date) showRow(state.byDate.get(date));
 });
-chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-  if (!range || !state.rows.length) return;
-  const first = state.rows[Math.max(0, Math.ceil(range.from))];
-  const last =
-    state.rows[Math.min(state.rows.length - 1, Math.floor(range.to))];
+function renderVisibleRange(range) {
+  const from = range ? Math.max(0, Math.ceil(range.from)) : 0;
+  const to = range ? Math.min(state.rows.length - 1, Math.floor(range.to)) : -1;
+  const first = state.rows[from];
+  const last = state.rows[to];
+  let high, low;
+  for (let i = from; i <= to; i++) {
+    const row = state.rows[i];
+    if (!Number.isFinite(row.close)) continue;
+    if (!high || row.close > high.close) high = row;
+    if (!low || row.close < low.close) low = row;
+  }
+  closeExtremes = !high ? [] : high === low ? [high] : [high, low];
+  closeExtremes.forEach((row, index) => {
+    const { marker, value } = closeMarkers[index];
+    const kind = index ? "最低" : closeExtremes.length === 1 ? "最高及最低" : "最高";
+    value.textContent = formatValue(row.close);
+    marker.dataset.date = row.date;
+    marker.setAttribute("aria-label", `${kind}收盘价 ${row.date} ${value.textContent}`);
+  });
+  requestAnimationFrame(positionLegends);
   if (first && last) {
     elements["visible-range"].textContent = `显示 ${first.date} — ${last.date}`;
     // A redraw/range callback can arrive while the user edits either date.
@@ -318,7 +368,8 @@ chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       elements["display-end"].value = last.date;
     }
   }
-});
+}
+chart.timeScale().subscribeVisibleLogicalRangeChange(renderVisibleRange);
 
 function setRange(count) {
   state.displayRangeDraft = false;
@@ -388,7 +439,7 @@ function displayDataset(dataset) {
     : "演示使用仓库已保存的1551条科创50真实日线。指标由现有Python模块计算。";
   showRow(dataset.rows.at(-1));
   setRange("244");
-  requestAnimationFrame(positionLegends);
+  renderVisibleRange(chart.timeScale().getVisibleLogicalRange());
   setStatus(
     dataset.analysis_label
       ? dataset.analysis_label + "。调整显示区间只改变视窗。"

@@ -274,10 +274,10 @@ main {
   text-align: right;
 }
 #chart-shell {
+  --base-chart-height: clamp(770px, 100vh - 300px, 1100px);
   position: relative;
-  height: calc(100vh - 300px);
-  min-height: 770px;
-  max-height: 1100px;
+  /* Keep the price pane height while adding 50% to each indicator pane. */
+  height: calc(22px + (var(--base-chart-height) - 22px) * 1240 / 940);
 }
 #chart {
   width: 100%;
@@ -330,6 +330,32 @@ main {
 }
 .legend-field.disabled {
   opacity: 0.35;
+}
+.close-extreme {
+  position: absolute;
+  color: #a94344;
+  pointer-events: none;
+}
+.close-extreme[data-extreme="min"] {
+  color: #087e75;
+}
+.close-extreme::before {
+  position: absolute;
+  inset: -3px auto auto -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 1px white;
+  content: "";
+}
+.close-extreme span {
+  position: absolute;
+  padding: 1px 3px;
+  border-radius: 2px;
+  background: #ffffffef;
+  font: 600 11px/15px ui-monospace, SFMono-Regular, monospace;
+  white-space: nowrap;
 }
 .chart-footer {
   display: flex;
@@ -564,7 +590,7 @@ main {
     gap: 5px;
   }
   #chart-shell {
-    min-height: 790px;
+    --base-chart-height: clamp(790px, 100vh - 300px, 1100px);
   }
   .pane-legend {
     gap: 7px;

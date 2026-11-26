@@ -68,10 +68,11 @@ export function createFundCharts() {
     }
     const {chart,line,markers} = ready.get(name) ?? initialize(name,config);
     line.setData(points);
-    markers.setMarkers(renderChartExtremes(points,extremes,config.format));
+    const labels = renderChartExtremes(points,extremes,config.format);
+    markers.setMarkers(labels);
     if (name === "fund") chart.clearCrosshairPosition();
     document.getElementById(config.readout).textContent = "";
-    fitChartWithMarkers(chart,points.length);
+    fitChartWithMarkers(chart,points.length,labels);
   }
 
   return {display};

@@ -51,6 +51,8 @@ export function createNavChart(element, readout, extremes) {
       markers?.detach();
       chart.removeSeries(line);
     });
+    // Series markers resolve dates to logical indices. Install gap dates before attaching them.
+    axis.setData(visible.map(({time})=>({time})));
     const extrema = renderChartExtremes(visible,extremes,formatted);
     lines = groups.map((group)=>{
       const line = chart.addSeries(globalThis.LightweightCharts.LineSeries,{
@@ -62,10 +64,9 @@ export function createNavChart(element, readout, extremes) {
       const markers = inGroup.length ? globalThis.LightweightCharts.createSeriesMarkers(line,inGroup) : null;
       return {line,markers};
     });
-    axis.setData(visible.map(({time})=>({time})));
     points = new Map(visible.map(({time,value})=>[time,value]));
     latest = visible.findLast((point)=>point.value!=null);
-    fitChartWithMarkers(chart,visible.length);
+    fitChartWithMarkers(chart,visible.length,extrema);
     show();
     return {gaps:gaps.filter(({date})=>range({time:date})), anchors:groups.map((group)=>group.anchor)};
   }

@@ -1,0 +1,86 @@
+name: Read three public fund valuation samples
+on:
+  push:
+    branches: [ops/fund-valuation-sample-1126]
+    paths: [.github/workflows/fund-valuation-probe.yml]
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check provider fields and Shanghai timestamps
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+          from zoneinfo import ZoneInfo
+
+          codes = ("014194", "018993", "110022")
+          now = datetime.now(ZoneInfo("Asia/Shanghai"))
+          print(f"Shanghai observation time: {now.isoformat()}", flush=True)
+          origin = "https://yorkchenai.github.io"
+
+          def read(url, params, label):
+              request = Request(url + "?" + urlencode(params), headers={"Origin": origin, "User-Agent": "Mozilla/5.0"})
+              try:
+                  with urlopen(request, timeout=12) as response:
+                      body = response.read(350000).decode("utf-8-sig", errors="replace").strip()
+                      print(label, "HTTP", response.status, "content", response.headers.get("Content-Type"), "CORS", response.headers.get("Access-Control-Allow-Origin"), flush=True)
+              except (HTTPError, URLError, TimeoutError) as error:
+                  print(label, type(error).__name__, str(error), flush=True)
+                  return {}
+              if not body.startswith("{"):
+                  start, finish = body.find("{"), body.rfind("}")
+                  if start < 0 or finish < start:
+                      print(label, "non-JSON response", flush=True)
+                      return {}
+                  body = body[start:finish+1]
+              try:
+                  data = json.loads(body)
+                  return data if isinstance(data, dict) else {}
+              except ValueError:
+                  print(label, "invalid JSON payload", flush=True)
+                  return {}
+
+          def east():
+              label = "FundValuationLast"
+              data = read("https://fundcomapi.tiantianfunds.com/mm/newCore/FundValuationLast",
+                          {"FCODES": ",".join(codes), "FIELDS": "FCODE,SHORTNAME,GSZZL,GZTIME,GSZ,NAV,PDATE"}, label)
+              records = {str(row.get("FCODE")): row for row in (data.get("data") or []) if isinstance(row, dict)}
+              for code in codes:
+                  row = records.get(code, {})
+                  date = str(row.get("GZTIME") or "")
+                  fields = {field: row.get(field) for field in ("GSZ", "GSZZL", "GZTIME", "NAV", "PDATE")}
+                  print(json.dumps({"source": label, "symbol": code, "success": data.get("success"), "present": bool(row),
+                                    "same_day": date[:10] == now.date().isoformat(), **fields}), flush=True)
+
+          def sina(code):
+              label = f"Sina {code}"
+              data = read("https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic",
+                          {"symbol": code, "callback": "sdcValuationProbe"}, label)
+              result = data.get("result") or {}
+              values = (result.get("data") or {}).get("networth") or []
+              point = values[-1] if values and isinstance(values[-1], dict) else {}
+              date = point.get("pre_date")
+              same_day = str(date or "").replace("-", "") == now.strftime("%Y%m%d")
+              for ds, suffix in ((2,""),(3,"2")):
+                  nav, change = (point.get(f"{name}{suffix}") for name in ("pre_nav", "growthrate"))
+                  try:
+                      pct = float(change) * 100
+                  except (ValueError, TypeError):
+                      pct = None
+                  print(json.dumps({"source": f"sina_ds{ds}", "symbol": code, "points": len(values), "date": date,
+                                    "time": point.get("min_time"), "nav": nav, "pct": pct, "same_day": same_day,
+                                    "response_code": (result.get("status") or {}).get("code")}), flush=True)
+
+          with ThreadPoolExecutor(max_workers=2) as pool:
+              calls = [pool.submit(east)] + [pool.submit(sina, code) for code in codes]
+              for call in calls:
+                  call.result()
+          PY

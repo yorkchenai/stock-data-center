@@ -111,22 +111,35 @@ function readSinaValuation(url, signal) {
   });
 }
 
+async function fetchEastmoneyValuation(code, signal) {
+  const params = new URLSearchParams({FCODES:code,FIELDS:"FCODE,GSZ,GSZZL,GZTIME"});
+  const data = JSON.parse(await readFundText(eastmoney+"?"+params,{signal}));
+  return eastmoneyValuation(data,code,shanghaiTime.format(new Date()));
+}
+
+async function fetchSinaValuation(code, signal) {
+  const url = new URL(sina);
+  url.search = new URLSearchParams({symbol:code,callback:"sdcFundValuation"});
+  const read = ()=>{
+    url.searchParams.set("_",String(Date.now()));
+    return readSinaValuation(url.href,signal);
+  };
+  const data = await read().catch(()=>{
+    signal.throwIfAborted();
+    return read();
+  });
+  return sinaValuation(data,code,shanghaiTime.format(new Date()));
+}
+
 export async function fetchValuation(code, signal) {
   if (!FUND_CODE.test(code)) throw new Error("请输入六位基金代码");
-  let eastFailed = false;
-  const params = new URLSearchParams({FCODES:code,FIELDS:"FCODE,GSZ,GSZZL,GZTIME"});
-  try {
-    const data = JSON.parse(await readFundText(eastmoney+"?"+params,{signal}));
-    const values = eastmoneyValuation(data,code,shanghaiTime.format(new Date()));
-    if (values.length) return values;
-  } catch {
-    signal.throwIfAborted();
-    eastFailed = true;
-  }
-  const url = sina+"?"+new URLSearchParams({symbol:code,callback:"sdcFundValuation",_:String(Date.now())});
-  const values = sinaValuation(await readSinaValuation(url,signal),code,shanghaiTime.format(new Date()));
-  if (!values.length && eastFailed) throw new Error("估值来源暂不可用");
-  return values;
+  const results = await Promise.allSettled([fetchEastmoneyValuation(code,signal),fetchSinaValuation(code,signal)]);
+  signal.throwIfAborted();
+  const series = [["fundgz"],["sina_ds2","sina_ds3"]];
+  return {
+    values:results.flatMap((result)=>result.status==="fulfilled" ? result.value : []),
+    failed:results.flatMap((result,index)=>result.status==="rejected" ? series[index] : []),
+  };
 }
 
 export function watchValuation(render) {
@@ -148,10 +161,14 @@ export function watchValuation(render) {
     const previous = ()=> (cache.get(symbol) ?? []).filter(({updatedAt})=>updatedAt.startsWith(shanghaiToday()+" "));
     render(previous(),"正在更新估值…",true);
     try {
-      const values = await fetchValuation(symbol,request.signal);
+      const {values,failed} = await fetchValuation(symbol,request.signal);
       if (controller!==request) return;
-      cache.set(symbol,values);
-      render(previous(),"",false);
+      const retained = previous().filter(({id})=>failed.includes(id));
+      const mixed = [...values,...retained];
+      cache.set(symbol,Object.keys(sources).flatMap((id)=>mixed.filter((quote)=>quote.id===id)));
+      const failure = failed.length===Object.keys(sources).length ? "更新失败" : failed.length ? "部分估值来源更新失败" : "";
+      const message = retained.length ? failure+" · 保留上次成功估值" : failure;
+      render(previous(),message,false);
     } catch {
       if (controller!==request) return;
       const values = previous();

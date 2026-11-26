@@ -67,8 +67,11 @@ async function fundAnalysis() {
 }
 
 try {
-  await fund("014194");
-  const primary = await quotes("014194");
+  const estimates = {};
+  for (const code of ["019830","014194","018993"]) {
+    await fund(code);
+    estimates[code] = await quotes(code);
+  }
 
   await fund("003095");
   await page.getByText("历史基准披露",{exact:true}).click();
@@ -82,7 +85,7 @@ try {
 
   const code = "110022";
   await fund(code);
-  const fallback = await quotes(code);
+  estimates[code] = await quotes(code);
   const before = await fundAnalysis();
   const historyCount = historyRequests.length;
   const first = estimateRequests.filter((item)=>item.code===code).at(-1);
@@ -107,7 +110,7 @@ try {
   },body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/list"}),signal:AbortSignal.timeout(12_000)});
   assert.ok([401,403].includes(anonymous.status),`MCP 匿名请求返回 ${anonymous.status}`);
 
-  console.log(JSON.stringify({url:page.url(),estimates:{"014194":primary,"110022":fallback},
+  console.log(JSON.stringify({url:page.url(),estimates,
     benchmark:{code:"003095",disclosed_on:disclosure,effective_from:effective,historical:true},
     auto_refresh_ms:elapsed,manual_refresh:true,history_requests_during_refresh:0,anonymous_mcp:anonymous.status},null,2));
 } finally {

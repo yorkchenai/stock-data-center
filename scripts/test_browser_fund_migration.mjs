@@ -55,6 +55,12 @@ try {
   });
   await page.goto(origin+"funds.html");
   assert.equal(new URL(page.url()).origin,"https://yorkchenai.github.io");
+  await selectCode(page,"019830");
+  await page.locator("#valuation-refresh:enabled").waitFor({timeout:27_000});
+  summary.funds["019830"] = {
+    valuations:await page.locator("#valuation-quotes article").allInnerTexts(),
+    valuation_status:await page.locator("#valuation-status").textContent(),
+  };
   for (const [code,weights] of Object.entries(codes)) {
     await selectCode(page,code);
     const fund=await page.evaluate(async ({base,code})=>{

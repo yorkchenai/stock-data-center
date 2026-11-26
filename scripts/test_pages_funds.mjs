@@ -260,7 +260,7 @@ try {
     const price = code==="018993" ? 2.4485 : 2.9550;
     const payload = {result:{status:{code:0},data:{symbol:code,networth:[{
       pre_date:staleQuotes ? "2026-11-25" : "2026-11-26",min_time:"11:33:00",
-      pre_nav:price,growthrate:0.011762,pre_nav2:price+0.0198,growthrate2:0.01996,
+      pre_nav:price,growthrate:code==="110022" ? null : 0.011762,pre_nav2:price+0.0198,growthrate2:0.01996,
     }]}}};
     return response.writeHead(networkFailure ? 503 : 200,{"Content-Type":"application/json"}).end(JSON.stringify(payload));
   };
@@ -278,6 +278,11 @@ try {
     history.pushState(null,"",`?fund=${symbol}`);
     dispatchEvent(new PopStateEvent("popstate"));
   },code);
+  const expectedEstimates = {
+    "014194":[["fundgz","估值1","-1.06%"]],
+    "018993":[["sina_ds2","估值2","+1.18%"],["sina_ds3","估值3","+2.00%"]],
+    "110022":[["sina_ds3","估值3","+2.00%"]],
+  };
   for (const [code,[formula,since,source]] of Object.entries(expectedDisclosures)) {
     if (page.url()==="about:blank") await page.goto(origin+"funds.html?fund="+code);
     else await navigate(code);
@@ -295,9 +300,9 @@ try {
     await estimates.first().waitFor({timeout:18_000}).catch(async (error)=>{
       throw new Error(`${code} · ${await page.locator("#valuation-status").innerText()} · ${JSON.stringify(valuationRequests)}`,{cause:error});
     });
-    assert.deepEqual(await estimates.evaluateAll((items)=>items.map((item)=>item.dataset.valuationSource)),
-      code==="014194" ? ["fundgz"] : ["sina_ds2","sina_ds3"]);
-    assert.match(await estimates.first().innerText(),/2026-11-26.*北京时间/);
+    assert.deepEqual(await estimates.evaluateAll((items)=>items.map((item)=>[
+      item.dataset.valuationSource,...Array.from(item.children,(child)=>child.textContent),
+    ])),expectedEstimates[code]);
     assert.equal(await page.locator("#fund-nav").innerText(),first.rows.at(-1).unit_nav.toFixed(4));
   }
   assert.deepEqual(requests,Object.keys(expectedDisclosures).flatMap((code)=>[[code,null],[code,"page"]]));
@@ -341,7 +346,7 @@ try {
   assert.equal(await old.locator("[data-date-kind=published]").textContent(),"2026-10-27");
   assert.equal(await old.locator("[data-date-kind=effective]").textContent(),"2026-07-01");
   assert.equal(await old.locator("a").count(),1);
-  report.valuation = {sources:true,automatic:true,background:true,manual:true,retainsTimestamp:true,historyLoads:0};
+  report.valuation = {fixedLabels:true,automatic:true,background:true,manual:true,retainsLastQuote:true,historyLoads:0};
   await context.close();
 } finally {
   await browser.close();

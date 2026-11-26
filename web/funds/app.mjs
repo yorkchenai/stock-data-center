@@ -375,17 +375,16 @@ function renderBenchmark(fund, today) {
   tracking.hidden = !target?.name;
   tracking.textContent = target?.name ? "跟踪指数 · " + target.name : "";
 }
+const valuationLabels = {fundgz:"估值1",sina_ds2:"估值2",sina_ds3:"估值3"};
 const valuation = watchValuation((quotes,message,pending)=>{
   $("valuation-refresh").disabled = pending;
   const text = [message,quotes.length ? "" : "暂无当日估值"].filter(Boolean).join(" · ");
   $("valuation-status").textContent = text;
   $("valuation-status").hidden = !text;
-  $("valuation-quotes").replaceChildren(...quotes.map(({id,value,change,updatedAt,source,method})=>{
+  $("valuation-quotes").replaceChildren(...quotes.map(({id,change})=>{
     const item = tag("article",null,{class:"risk-metric","data-valuation-source":id});
     const signed = change>0 ? "+" : "";
-    item.append(tag("span",source+" · "+method),
-      tag("strong",`估算净值 ${nav(value)} · 涨跌幅 ${signed}${change.toFixed(2)}%`),
-      tag("small",`更新时间 ${updatedAt}（北京时间）`));
+    item.append(tag("span",valuationLabels[id]),tag("strong",`${signed}${change.toFixed(2)}%`));
     return item;
   }));
 });

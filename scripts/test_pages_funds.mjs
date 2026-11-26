@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { normalizeFund } from "../web/funds/data.mjs";
-import { analyzePerformance, FUND_RISK_REFERENCE, periodStart, selectWindow } from "../web/funds/performance.mjs";
+import { analyzePerformance, FUND_RISK_REFERENCE, PERIODS, periodReturn, periodStart, selectWindow } from "../web/funds/performance.mjs";
 
 const site = path.resolve(process.env.PAGES_SITE || "work/pages-site");
 const output = path.resolve(process.env.BROWSER_OUTPUT || "work/pages-browser");
@@ -97,6 +97,8 @@ try {
     const context = await browser.newContext({viewport:{width,height},isMobile:mobile,hasTouch:mobile});
     await context.route("https://fundcomapi.tiantianfunds.com/**",(route)=>route.abort());
     await context.route("https://stock.finance.sina.com.cn/**",(route)=>route.abort());
+    await context.route("**/api/analysis**",(route)=>route.abort());
+    await context.route("https://fund.eastmoney.com/**",(route)=>route.abort());
     await context.addInitScript(()=>{
       const charts = new Map();
       const labels = new Map();
@@ -318,11 +320,14 @@ try {
   await context.route(origin+"funds.html**",(route)=>route.fulfill({contentType:"text/html",
     body:file.replace("<html ",`<html data-analysis-origin="${service}" `)}));
   const requests = [];
+  let failedHistoryCode = null;
+  await context.route("https://fund.eastmoney.com/**",(route)=>route.abort());
   await context.route(service+"/api/analysis**",(route)=>{
     const {searchParams:query} = new URL(route.request().url());
     const symbol = query.get("symbol");
     const category = query.get("category");
     requests.push([symbol,category]);
+    if (symbol===failedHistoryCode) return route.fulfill({status:503,headers:{"Access-Control-Allow-Origin":"*"}});
     const fund = {...first,code:symbol,synthetic:false,valuation_frequency:null};
     const data = {snapshot_id:"11111111-1111-4111-8111-111111111111",asset_type:"fund",symbol,
       status:"partial",model_version:model,schema_version:1,data_as_of:fund.rows.at(-1).date,
@@ -330,7 +335,8 @@ try {
     if (category === "page") {
       const normalized = normalizeFund(fund);
       const range = selectWindow(normalized,periodStart(data.data_as_of,"1y"),data.data_as_of);
-      Object.assign(data,{detail_status:"available",data:{fund,risk:{reference:FUND_RISK_REFERENCE,windows:{"1y":{...range,
+      const returns = Object.fromEntries(PERIODS.map(([id])=>[id,periodReturn(normalized,id)]));
+      Object.assign(data,{detail_status:"available",data:{fund,risk:{reference:FUND_RISK_REFERENCE,returns,windows:{"1y":{...range,
         ...analyzePerformance(normalized,range)}}}}});
     }
     return route.fulfill({json:data,headers:{"Access-Control-Allow-Origin":"*"}});
@@ -496,7 +502,14 @@ try {
   assert.equal(await old.locator("a").count(),1);
 
   const listHistoryLoads = requests.length;
+  await page.evaluate(()=>{
+    const key = "stock-data-center.off-market-funds.v1";
+    const saved = JSON.parse(localStorage.getItem(key));
+    saved.list.push({code:"019830",name:"华夏数字产业混合C",category:"mixed"});
+    localStorage.setItem(key,JSON.stringify(saved));
+  });
   staleQuotes = false;
+  failedHistoryCode = "003095";
   await page.goto(origin+"funds.html");
   const table = page.locator("#fund-table");
   const savedFund = table.locator('tr[data-fund-code="018993"]');
@@ -505,14 +518,35 @@ try {
   const navColumn = headings.indexOf("最新单位净值");
   assert.deepEqual(headings.slice(navColumn-3,navColumn),["估值1","估值2","估值3"]);
   assert.deepEqual(await savedFund.locator("td[data-estimate]").allTextContents(),["—","+1.18%","+2.00%"]);
-  assert.equal(await savedFund.locator('[data-column="nav"]').textContent(),"—");
+  const checkedCodes = ["019830","014194","018993","110022"];
+  const normalized = normalizeFund(first);
+  for (const code of checkedCodes) {
+    const row = table.locator(`tr[data-fund-code="${code}"]`);
+    await row.locator('[data-column="nav"]').getByText(first.rows.at(-1).unit_nav.toFixed(4),{exact:true}).waitFor();
+    assert.equal(await row.locator('[data-column="date"]').textContent(),first.rows.at(-1).date);
+    for (const [id] of PERIODS) {
+      const {value} = periodReturn(normalized,id);
+      assert.equal(await row.locator(`[data-column="${id}"]`).textContent(),value==null ? "—" : (100*value).toFixed(2)+"%");
+    }
+  }
+  const failedRow = table.locator('tr[data-fund-code="003095"]');
+  await failedRow.locator('[data-column="nav"]').getByText("载入失败",{exact:true}).waitFor();
+  assert.deepEqual(requests.slice(listHistoryLoads).sort(),[
+    ...checkedCodes.flatMap((code)=>[[code,null],[code,"page"]]),["003095",null],
+  ].sort());
+  const afterListLoads = requests.length;
   await table.getByRole("button",{name:"估值1",exact:true}).click();
   assert.equal(await table.locator("tbody tr").first().getAttribute("data-fund-code"),"014194");
   staleQuotes = true;
   await page.clock.fastForward(60_000);
   await savedFund.locator('[data-estimate="sina_ds3"]').getByText("—",{exact:true}).waitFor();
-  assert.equal(requests.length,listHistoryLoads);
-  report.valuation = {fixedLabels:true,listColumns:true,automatic:true,background:true,manual:true,retainsLastQuote:true,historyLoads:0};
+  assert.equal(requests.length,afterListLoads);
+  failedHistoryCode = null;
+  await failedRow.getByRole("button",{name:"载入 003095 的净值"}).click();
+  await failedRow.locator('[data-column="nav"]').getByText(first.rows.at(-1).unit_nav.toFixed(4),{exact:true}).waitFor();
+  assert.deepEqual(requests.slice(afterListLoads),[["003095",null],["003095","page"]]);
+  report.valuation = {fixedLabels:true,listColumns:true,automatic:true,background:true,manual:true,retainsLastQuote:true,
+    listReloadConfirmedNav:true,listNavRetry:true,historyLoadsDuringRefresh:0};
   await context.close();
 } finally {
   await browser.close();

@@ -110,6 +110,7 @@ try {
   assert.deepEqual(await fundAnalysis(),before);
 
   await page.locator("#back-to-funds").click();
+  await page.reload();
   const table = page.locator("#fund-table");
   const headings = await table.locator("th").allTextContents();
   const navColumn = headings.indexOf("最新单位净值");
@@ -117,7 +118,17 @@ try {
   const row = table.locator('tr[data-fund-code="019830"]');
   await row.locator("td[data-estimate]").filter({hasText:/^[+-]?\d+\.\d{2}%$/}).first().waitFor({timeout:20_000});
   const listEstimates = await row.locator("td[data-estimate]").allTextContents();
-  assert.equal(historyRequests.length,historyCount);
+  const listNav = {};
+  for (const code of ["019830","014194","018993"]) {
+    const saved = table.locator(`tr[data-fund-code="${code}"]`);
+    const nav = saved.locator('[data-column="nav"]').getByText(/^\d+\.\d{4}$/);
+    await nav.waitFor({timeout:45_000});
+    const date = await saved.locator('[data-column="date"]').textContent();
+    const month = await saved.locator('[data-column="1m"]').textContent();
+    assert.match(date,/^\d{4}-\d{2}-\d{2}$/);
+    assert.match(month,/^-?\d+\.\d{2}%$/);
+    listNav[code] = {nav:await nav.textContent(),date,month};
+  }
   assert.deepEqual(pageErrors,[]);
 
   const anonymous = await fetch(new URL("/mcp",worker),{method:"POST",headers:{
@@ -127,7 +138,7 @@ try {
 
   console.log(JSON.stringify({url:page.url(),estimates,
     benchmark:{code:"003095",disclosed_on:disclosure,effective_from:effective,historical:true},
-    list_019830_estimates:listEstimates,
+    list_019830_estimates:listEstimates,list_confirmed_nav_after_reload:listNav,
     browser_direct_estimates_blocked:true,auto_refresh_ms:elapsed,manual_refresh:true,
     history_requests_during_refresh:0,anonymous_mcp:anonymous.status},null,2));
 } finally {

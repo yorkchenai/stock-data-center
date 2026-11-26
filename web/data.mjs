@@ -1,15 +1,21 @@
 // Presentation adapters only. Consume canonical values from either engine.
+const rise = "#cb4551";
+const fall = "#168575";
 export const COLORS = {
-  rise: "#cb4551",
-  fall: "#168575",
-  MA5: "#bd7d10",
-  MA10: "#4273bc",
-  MA20: "#9a5fbc",
-  MA60: "#168575",
-  VOL5: "#bd7d10",
-  VOL10: "#4273bc",
-  DIF: "#bd7d10",
-  DEA: "#4273bc",
+  rise,
+  fall,
+  candleRise: rise + "99",
+  candleFall: fall + "99",
+  histogramRise: "#d46673",
+  histogramFall: "#3e9e90",
+  MA5: "#854000",
+  MA10: "#194587",
+  MA20: "#622b83",
+  MA60: "#044b46",
+  VOL5: "#632b00",
+  VOL10: "#15356b",
+  DIF: "#632b00",
+  DEA: "#15356b",
   RSI6: "#bd7d10",
   RSI12: "#4273bc",
   RSI14: "#9a5fbc",
@@ -19,9 +25,9 @@ export const COLORS = {
   "-DI": "#168575",
 };
 export const PANELS = [
-  { title: "价格与均线", fields: ["MA5", "MA10", "MA20", "MA60"], height: 340 },
-  { title: "成交量 · 手", fields: ["VOL5", "VOL10"], height: 225 },
-  { title: "MACD · 两倍柱值", fields: ["DIF", "DEA"], height: 225 },
+  { title: "价格与均线", fields: ["MA5", "MA10", "MA20", "MA60"], height: 340, lineWidth: 2 },
+  { title: "成交量 · 手", fields: ["VOL5", "VOL10"], height: 225, lineWidth: 2 },
+  { title: "MACD · 两倍柱值", fields: ["DIF", "DEA"], height: 225, lineWidth: 2 },
   {
     title: "RSI · 相对强弱",
     fields: ["RSI6", "RSI12", "RSI14", "RSI24"],
@@ -55,14 +61,14 @@ export function seriesData(rows) {
     volume: rows.map((row) => ({
       time: row.date,
       value: row.volume_lots,
-      color: row.close >= row.open ? COLORS.rise : COLORS.fall,
+      color: row.close >= row.open ? COLORS.histogramRise : COLORS.histogramFall,
     })),
     macd: rows.map((row) =>
       Number.isFinite(row.MACD_hist)
         ? {
             time: row.date,
             value: row.MACD_hist,
-            color: row.MACD_hist >= 0 ? COLORS.rise : COLORS.fall,
+            color: row.MACD_hist >= 0 ? COLORS.histogramRise : COLORS.histogramFall,
           }
         : { time: row.date },
     ),

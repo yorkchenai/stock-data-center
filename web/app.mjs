@@ -156,9 +156,11 @@ const candles = chart.addSeries(
   LC.CandlestickSeries,
   {
     ...common,
-    upColor: COLORS.rise,
-    downColor: COLORS.fall,
-    borderVisible: false,
+    upColor: COLORS.candleRise,
+    downColor: COLORS.candleFall,
+    borderVisible: true,
+    borderUpColor: COLORS.rise,
+    borderDownColor: COLORS.fall,
     wickUpColor: COLORS.rise,
     wickDownColor: COLORS.fall,
   },
@@ -189,7 +191,7 @@ for (const [index, panel] of PANELS.entries()) {
       {
         ...common,
         color: COLORS[field],
-        lineWidth: 1,
+        lineWidth: panel.lineWidth ?? 1,
         priceFormat: {
           type: "price",
           precision: index === 1 ? 0 : 4,

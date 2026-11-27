@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
-  aggregatePeriods, marketClock, minuteFreshness, minuteURL, nextMinuteRefresh, parseMinutes,
+  aggregatePeriods, fetchMinutes, hasFullMinuteSession, marketClock, minuteFreshness, minuteURL, nextMinuteRefresh, parseMinutes,
 } from "../web/timeframes.mjs";
 import { calculateIndicators } from "../web/engine.mjs";
 
@@ -105,4 +105,57 @@ test("minutes require actual data and warmup, preserve average and reject stale 
   assert.equal(gap.missing, 4);
   assert.equal(gap.rows.at(-1).ADX14, null);
   assert.equal(gap.rows.at(-1).DIF, null);
+});
+
+const closedDate = "2026-11-26";
+const closingTrends = [[570, 690], [781, 900]].flatMap(([first, last]) =>
+  Array.from({ length: last - first + 1 }, (_, i) => {
+    const slot = first + i;
+    const label = `${String(Math.floor(slot / 60)).padStart(2, "0")}:${String(slot % 60).padStart(2, "0")}`;
+    return `${closedDate} ${label},1100,1101,1102,1099,10,200000,1100.1`;
+  }));
+const minuteResponse = (trends) => Response.json({ data: { code: instrument.code, market: 1, trends } });
+
+test("a failed first load retries with its own deadline and can render a full closed session", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: at(closedDate, "15:40") });
+  for (const fail of [() => new Response(null, { status: 503 }), () => { throw new DOMException("Fetch is aborted", "AbortError"); }]) {
+    const caller = new AbortController();
+    const signals = [];
+    const fetch = t.mock.method(globalThis, "fetch", async (_, options) => {
+      signals.push(options.signal);
+      return signals.length === 1 ? fail() : minuteResponse(closingTrends);
+    });
+    try {
+      const result = await fetchMinutes(instrument, closedDate, caller.signal, { completeSession: true });
+      assert.equal(signals.length, 2);
+      assert.notEqual(signals[0], signals[1]);
+      assert.equal(hasFullMinuteSession(result, closedDate), true);
+      assert.equal(result.rows.length, 241);
+    } finally {
+      fetch.mock.restore();
+    }
+  }
+});
+
+test("after close a missing final minute is retried without discarding valid partial data", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: at(closedDate, "15:40") });
+  const partial = closingTrends.slice(0, -1);
+  const caller = new AbortController();
+  const fetch = t.mock.method(globalThis, "fetch", async () =>
+    fetch.mock.callCount() === 0 ? minuteResponse(partial) : new Response(null, { status: 503 }));
+  const result = await fetchMinutes(instrument, closedDate, caller.signal, { completeSession: true });
+  assert.equal(fetch.mock.callCount(), 2);
+  assert.equal(hasFullMinuteSession(result, closedDate), false);
+  assert.equal(result.rows.at(-1).label, "14:59");
+  assert.equal(result.missing, 1);
+});
+
+test("switching charts cancels the minute retry", async (t) => {
+  const caller = new AbortController();
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    caller.abort();
+    throw caller.signal.reason;
+  });
+  await assert.rejects(fetchMinutes(instrument, closedDate, caller.signal), { name: "AbortError" });
+  assert.equal(fetch.mock.callCount(), 1);
 });

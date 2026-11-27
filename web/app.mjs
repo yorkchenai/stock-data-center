@@ -1,7 +1,7 @@
 import { COLORS, PANELS, chartTime, dateKey, formatValue, linePoints, seriesData } from "./data.mjs";
 import { fetchHistory } from "./providers.mjs";
 import { STOCK_ANALYSIS_START } from "./engine.mjs";
-import { aggregatePeriods, fetchMinutes, marketClock, minuteFreshness, nextMinuteRefresh } from "./timeframes.mjs";
+import { aggregatePeriods, fetchMinutes, hasFullMinuteSession, marketClock, minuteFreshness, nextMinuteRefresh } from "./timeframes.mjs";
 import { browserModelVersion, getPageSnapshot, snapshotNote, snapshotsEnabled } from "./snapshot-client.mjs";
 
 const isPages = document.documentElement?.dataset?.mode === "pages";
@@ -675,23 +675,33 @@ function updateMinuteStatus(clock) {
   showTimeframeStatus(status.join(" · "), Boolean(state.minuteError || result?.missing));
 }
 
+function needsClosingRead(previousClock, clock) {
+  return previousClock?.phase === "trading" && clock.phase === "closed" &&
+    previousClock.date === clock.date && !hasFullMinuteSession(state.minuteData, clock.dataDate);
+}
+
 async function refreshMinute() {
   if (state.period !== "minute" || state.minuteRequest) return;
   const generation = state.viewGeneration;
   const controller = new AbortController();
   state.minuteRequest = controller;
   elements["minute-refresh"].disabled = true;
+  let requestedClock;
   try {
     state.calendar ??= await loadCalendar();
     if (controller.signal.aborted || generation !== state.viewGeneration) return;
-    const clock = marketClock(state.calendar);
+    const clock = requestedClock = marketClock(state.calendar);
     if (!clock.dataDate) throw new Error("缺少有效交易日历，分时刷新已暂停");
     const previous = state.minuteData;
-    const result = await fetchMinutes(state.dataset.instrument, clock.dataDate, controller.signal);
+    const result = await fetchMinutes(state.dataset.instrument, clock.dataDate, controller.signal, {
+      completeSession: clock.phase !== "trading" && clock.phase !== "break",
+    });
     if (controller.signal.aborted || generation !== state.viewGeneration) return;
     const sameSession = previous?.rows[0].date === result.rows[0].date;
     if (sameSession && result.latest < previous.latest)
       throw new Error("来源返回的最新时间早于上次成功记录");
+    if (sameSession && result.latest === previous.latest && result.missing > previous.missing)
+      throw new Error("来源返回的分时记录有新增缺口");
     state.minuteData = result;
     state.minuteError = null;
     renderRows(result.rows, { keepRange: sameSession });
@@ -699,12 +709,16 @@ async function refreshMinute() {
     elements["loaded-range"].textContent = `分时日期 ${clock.dataDate}`;
   } catch (error) {
     if (controller.signal.aborted || generation !== state.viewGeneration) return;
-    state.minuteError = `分时更新失败：${error.name === "TimeoutError" ? "行情源超时" : error.message}`;
+    state.minuteError = `分时更新失败：${error.message}`;
   } finally {
     if (state.minuteRequest === controller) {
       state.minuteRequest = null;
       elements["minute-refresh"].disabled = false;
-      updateMinuteStatus(marketClock(state.calendar));
+      const clock = marketClock(state.calendar);
+      updateMinuteStatus(clock);
+      // If a manual or scheduled request was still running at 15:00, finish it
+      // before trying to collect the closing minute. The closed clock never polls.
+      if (needsClosingRead(requestedClock, clock)) void refreshMinute();
     }
   }
 }
@@ -718,7 +732,7 @@ function scheduleMinuteRefresh() {
   state.timer = setTimeout(() => {
     if (state.period !== "minute" || document.hidden) return;
     const next = marketClock(state.calendar);
-    if (next.phase === "trading") void refreshMinute();
+    if (next.phase === "trading" || needsClosingRead(clock, next)) void refreshMinute();
     else updateMinuteStatus(next);
     scheduleMinuteRefresh();
   }, delay);

@@ -217,11 +217,52 @@ export function minuteFreshness(result, clock, now = Date.now()) {
   return "实时等级未核实";
 }
 
-export async function fetchMinutes(instrument, date, signal) {
-  const response = await fetch(minuteURL(instrument), {
-    mode: "cors", credentials: "omit", cache: "no-store", redirect: "error",
-    signal: AbortSignal.any([AbortSignal.timeout(12_000), signal]),
-  });
-  if (!response.ok) throw new Error(`行情源 HTTP ${response.status}`);
-  return parseMinutes(await response.json(), instrument, date);
+async function readMinutePayload(instrument, signal) {
+  const timeout = AbortSignal.timeout(12_000);
+  let response;
+  try {
+    response = await fetch(minuteURL(instrument), {
+      mode: "cors", credentials: "omit", cache: "no-store", redirect: "error",
+      signal: AbortSignal.any([timeout, signal]),
+    });
+    if (response.ok) return await response.json();
+  } catch (cause) {
+    signal.throwIfAborted();
+    // Some browsers report a request timeout as AbortError instead of TimeoutError.
+    const timedOut = timeout.aborted || cause.name === "TimeoutError" || cause.name === "AbortError";
+    if (!timedOut && !(cause instanceof TypeError)) throw cause;
+    const error = new Error(timedOut ? "行情源超时" : "无法连接东方财富分时接口", { cause });
+    error.retryable = true;
+    throw error;
+  }
+  const error = new Error(`行情源 HTTP ${response.status}`);
+  error.retryable = response.status === 408 || response.status >= 500;
+  throw error;
+}
+
+export function hasFullMinuteSession(result, date) {
+  const last = result?.rows.at(-1);
+  return last?.date === date && last.label === "15:00" && result.missing === 0;
+}
+
+export async function fetchMinutes(instrument, date, signal, { completeSession = false } = {}) {
+  let best;
+  for (const retry of [false, true]) {
+    signal.throwIfAborted();
+    try {
+      const result = parseMinutes(await readMinutePayload(instrument, signal), instrument, date);
+      signal.throwIfAborted();
+      if (!completeSession || hasFullMinuteSession(result, date)) return result;
+      if (!best || result.latest > best.latest ||
+          (result.latest === best.latest && result.missing < best.missing)) best = result;
+    } catch (error) {
+      signal.throwIfAborted();
+      if (retry || !error.retryable) {
+        if (best) return best;
+        throw error;
+      }
+    }
+    if (!retry) await new Promise((resolve) => setTimeout(resolve, 800));
+  }
+  return best;
 }

@@ -3,49 +3,106 @@ import { hasFullMinuteSession, marketClock, minuteURL, readMinuteSeries } from "
 
 const reading = new Map();
 
-async function readStockMinutes(instrument, date) {
-  let best;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const response = await fetch(minuteURL(instrument), {
-        redirect: "error", cache: "no-store", signal: AbortSignal.timeout(5_500),
-      });
-      if (!response.ok || !response.body) {
-        void response.body?.cancel().catch(() => {});
-        if (response.status < 500 && response.status !== 408) break;
-        continue;
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder("utf-8", {fatal: true});
-      let text = "", bytes = 0;
-      try {
-        for (;;) {
-          const {done, value} = await reader.read();
-          if (done) break;
-          bytes += value.byteLength;
-          if (bytes > 65_536) throw new Error("Minute response exceeds size limit");
-          text += decoder.decode(value, {stream:true});
-        }
-      } finally {
-        void reader.cancel().catch(() => {});
-        reader.releaseLock();
-      }
-      const {data} = JSON.parse(text + decoder.decode());
-      const now = Date.now();
-      const series = readMinuteSeries({data}, instrument, date, now);
-      const payload = {data: {code:data.code, market:data.market, preClose:data.preClose,
-        time:data.time, trends:data.trends}};
-      const complete = hasFullMinuteSession(series, date);
-      if (complete || series.missing === 0) return {payload, complete, latest:series.latest};
-      if (!best || series.latest > best.latest ||
-          (series.latest === best.latest && series.missing < best.missing)) {
-        best = {payload, complete, latest:series.latest, missing:series.missing};
-      }
-    } catch {
-      // Retry transport errors and incomplete responses once without caching failures.
-    }
+async function readJSON(url) {
+  const response = await fetch(url, {
+    redirect: "error", cache: "no-store", signal: AbortSignal.timeout(4_500),
+  });
+  if (!response.ok || !response.body) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error(`HTTP ${response.status}`);
   }
-  return best;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", {fatal:true});
+  let text = "", bytes = 0;
+  try {
+    for (;;) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > 65_536) throw new Error("Minute response exceeds size limit");
+      text += decoder.decode(value, {stream:true});
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+  return JSON.parse(text + decoder.decode());
+}
+
+function minutesFromMidnight(stamp) {
+  return Number(stamp.slice(0,2))*60+Number(stamp.slice(2));
+}
+
+export function tencentMinutePayload(kline, quote, instrument, date) {
+  const symbol = instrument.market + instrument.code;
+  const key = date.replaceAll("-","");
+  const candles = kline?.data?.[symbol];
+  const ticks = quote?.data?.[symbol];
+  if (candles?.qt?.[symbol]?.[2] !== instrument.code || ticks?.qt?.[symbol]?.[2] !== instrument.code ||
+      ticks.data?.date !== key || !Array.isArray(ticks.data.data) || !Array.isArray(candles.m1)) {
+    throw new Error("Tencent returned a different symbol or session");
+  }
+  const lotsDivisor = /^sh68[89]/.test(symbol) ? 100 : 1;
+  let previous;
+  const totals = new Map();
+  for (const row of ticks.data.data) {
+    const [stamp, close, volume, amount] = row.split(" ");
+    if (!/^\d{4}$/.test(stamp) || !/^\d+(\.\d+)?$/.test(amount ?? "") || !/^\d+(\.\d+)?$/.test(volume ?? "")) continue;
+    const slot = minutesFromMidnight(stamp), cumulative = Number(amount);
+    if (!((slot >= 570 && slot <= 690) || (slot >= 780 && slot <= 900))) continue;
+    if (previous && slot <= previous.slot) throw new Error("Tencent minute times are not sequential");
+    // Tencent may report a 13:00 reference tick. When it is absent, the 11:30
+    // cumulative total is the baseline for the first afternoon minute.
+    const baseline = slot === 570 ? 0 : previous && (slot === previous.slot+1 ||
+      (previous.slot === 690 && (slot === 780 || slot === 781))) ? previous.cumulative : null;
+    previous = {slot, cumulative};
+    if (baseline !== null && cumulative >= baseline) totals.set(stamp, {
+      close: Number(close), turnover: cumulative-baseline,
+      average: instrument.kind === "stock" && Number(volume) > 0 ? cumulative/(Number(volume)*100/lotsDivisor) : "",
+    });
+  }
+  const trends = [];
+  for (const [stamp, open, close, high, low, volume] of candles.m1) {
+    if (!/^\d{12}$/.test(stamp) || !stamp.startsWith(key) || !/^\d+(\.\d+)?$/.test(volume ?? "")) continue;
+    const label = stamp.slice(8), tick = totals.get(label);
+    if (!tick || tick.close !== Number(close)) continue;
+    trends.push([date+" "+label.slice(0,2)+":"+label.slice(2), open, close, high, low,
+      Number(volume)/lotsDivisor, tick.turnover, tick.average].join(","));
+  }
+  return {provider:"tencent", data:{code:instrument.code, market:instrument.market === "sh" ? 1 : 0,
+    preClose:candles.prec, trends}};
+}
+
+function checkedPayload(payload, instrument, date) {
+  const series = readMinuteSeries(payload, instrument, date);
+  return {payload, complete:hasFullMinuteSession(series,date), latest:series.latest, missing:series.missing};
+}
+
+async function eastmoney(instrument, date) {
+  const {data} = await readJSON(minuteURL(instrument));
+  return checkedPayload({data:{code:data.code, market:data.market, preClose:data.preClose,
+    time:data.time, trends:data.trends}},instrument,date);
+}
+
+async function tencent(instrument, date) {
+  const symbol = instrument.market + instrument.code;
+  const base = "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/";
+  const [kline, quote] = await Promise.all([
+    readJSON(base + "kline/mkline?" + new URLSearchParams({param:symbol+",m1,,320"})),
+    readJSON(base + "minute/query?" + new URLSearchParams({code:symbol})),
+  ]);
+  return checkedPayload(tencentMinutePayload(kline,quote,instrument,date),instrument,date);
+}
+
+async function readStockMinutes(instrument, date) {
+  const primary = await eastmoney(instrument,date).catch(() => null);
+  if (primary?.missing === 0) return primary;
+  const [retry, backup] = await Promise.all([
+    eastmoney(instrument,date).catch(() => null),
+    tencent(instrument,date).catch(() => null),
+  ]);
+  return [retry, primary, backup].filter(Boolean)
+    .sort((a,b) => Number(b.complete)-Number(a.complete) || b.latest-a.latest || a.missing-b.missing)[0];
 }
 
 export async function fetchPublicStockMinutes(request, allowedOrigin, calendar, ctx) {

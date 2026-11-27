@@ -204,7 +204,8 @@ export function readMinuteSeries(payload, instrument, date, now = Date.now()) {
 
 export function parseMinutes(payload, instrument, date, now = Date.now()) {
   const series = readMinuteSeries(payload, instrument, date, now);
-  return {...series, rows: minuteIndicators(series.rows, exactNumber(payload.data.preClose))};
+  return {...series, provider: payload.provider === "tencent" ? "tencent" : "eastmoney",
+    rows: minuteIndicators(series.rows, exactNumber(payload.data.preClose))};
 }
 
 export function minuteFreshness(result, clock, now = Date.now()) {

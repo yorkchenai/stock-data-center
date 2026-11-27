@@ -170,7 +170,7 @@ test("stock minute relay validates the session, retries a 503 and rejects an unr
   const gateway = mountSnapshotSite({ calendar });
   const url = `https://test.example/api/stock-minutes?symbol=sh000688&date=${closedDate}`;
   let attempts = 0;
-  t.mock.method(globalThis, "fetch", async (upstream) => {
+  const fetch = t.mock.method(globalThis, "fetch", async (upstream) => {
     if (upstream !== minuteURL(instrument)) return new Response(null, {status:503});
     return ++attempts === 1 ? new Response(null, { status: 503 }) : minuteResponse(closingTrends);
   });
@@ -184,6 +184,7 @@ test("stock minute relay validates the session, retries a 503 and rejects an unr
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
   assert.deepEqual((await response.json()).data.trends, closingTrends);
   assert.equal(attempts, 2);
+  assert.ok(fetch.mock.calls.every(({arguments: [,options]}) => options.redirect === "manual"));
   assert.equal((await gateway.fetch(new Request("https://test.example/mcp", { method: "POST" }), env)).status, 403);
 });
 

@@ -5,9 +5,9 @@ const reading = new Map();
 
 async function readJSON(url) {
   const response = await fetch(url, {
-    redirect: "error", cache: "no-store", signal: AbortSignal.timeout(4_500),
+    redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(4_500),
   });
-  if (!response.ok || !response.body) {
+  if (response.redirected || !response.ok || !response.body) {
     void response.body?.cancel().catch(() => {});
     throw new Error(`HTTP ${response.status}`);
   }

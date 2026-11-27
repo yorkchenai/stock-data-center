@@ -1,0 +1,51 @@
+name: Production stock minute browser verification
+on:
+  push:
+    branches: [verify/stock-minute-worker-live]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      WORKER_URL: https://stock-data-center-voice-probe.finalnoodle2.chatgpt.site
+      PAGES_URL: https://yorkchenai.github.io/stock-data-center/
+      ORIGIN_URL: https://yorkchenai.github.io
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - run: npm ci --ignore-scripts
+      - name: Verify production relay with actual minute data
+        run: |
+          date=$(TZ=Asia/Shanghai date +%F)
+          for symbol in sh000688 sh600519 sz300078; do
+            passed=0
+            for i in $(seq 1 6); do
+              curl -sS --max-time 16 -D minute.headers -H "Origin: $ORIGIN_URL" -o minute.json -w "$symbol %{http_code} %{time_total} sec\n" "$WORKER_URL/api/stock-minutes?symbol=$symbol&date=$date" || continue
+              if tr -d '\r' < minute.headers | grep -iFx "access-control-allow-origin: $ORIGIN_URL" &&
+                 jq -e --arg date "$date" --arg symbol "${symbol:2}" '.data.code==$symbol and (.data.trends|length)>=240 and (.data.trends[-1]|startsWith($date+" 15:00,"))' minute.json; then
+                jq -r '[.data.code, (.data.trends|length), (.data.trends[0]|split(",")[0]), (.data.trends[-1]|split(",")[0])] | @tsv' minute.json
+                passed=1
+                break
+              fi
+              sleep 4
+            done
+            test "$passed" = 1 || exit 1
+          done
+          denied=$(curl -sS --max-time 16 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' "$WORKER_URL/mcp")
+          [[ "$denied" == 401 || "$denied" == 403 ]]
+      - name: Wait for the changed Pages asset
+        run: |
+          for i in $(seq 1 46); do
+            if curl -fsS --max-time 8 "${PAGES_URL}timeframes.mjs?minute-smoke=$GITHUB_RUN_ID-$i" -o timeframes-check.mjs &&
+               grep -Fq /api/stock-minutes timeframes-check.mjs; then
+              curl -fsS --max-time 8 "${PAGES_URL}build-info.json?minute-smoke=$GITHUB_RUN_ID-$i"
+              exit 0
+            fi
+            sleep 8
+          done
+          exit 1
+      - name: Open the production chart with the upstream browser path unavailable
+        run: CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)" node scripts/check_live_stock_minutes_once.mjs

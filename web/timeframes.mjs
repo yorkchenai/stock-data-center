@@ -153,7 +153,7 @@ function minuteIndicators(rows, previousClose) {
   return segments.flatMap((segment) => calculateMinuteSegment(segment, previousClose));
 }
 
-export function parseMinutes(payload, instrument, date, now = Date.now()) {
+export function readMinuteSeries(payload, instrument, date, now = Date.now()) {
   validDate(date);
   const data = payload?.data;
   if (data?.code !== instrument.code || data.market !== (instrument.market === "sh" ? 1 : 0))
@@ -195,11 +195,17 @@ export function parseMinutes(payload, instrument, date, now = Date.now()) {
   }, 0);
   const sourceTime = exactNumber(data.time) * 1000;
   return {
-    rows: minuteIndicators(rows, exactNumber(data.preClose)),
+    rows,
     received: now,
     sourceTime: Number.isFinite(sourceTime) && sourceTime > 0 && sourceTime <= now + minute ? sourceTime : null,
     latest, missing,
   };
+}
+
+export function parseMinutes(payload, instrument, date, now = Date.now()) {
+  const series = readMinuteSeries(payload, instrument, date, now);
+  return {...series, provider: payload.provider === "tencent" ? "tencent" : "eastmoney",
+    rows: minuteIndicators(series.rows, exactNumber(payload.data.preClose))};
 }
 
 export function minuteFreshness(result, clock, now = Date.now()) {
@@ -217,11 +223,11 @@ export function minuteFreshness(result, clock, now = Date.now()) {
   return "实时等级未核实";
 }
 
-async function readMinutePayload(instrument, signal) {
-  const timeout = AbortSignal.timeout(12_000);
+async function readMinutePayload(url, signal, timeoutMs) {
+  const timeout = AbortSignal.timeout(timeoutMs);
   let response;
   try {
-    response = await fetch(minuteURL(instrument), {
+    response = await fetch(url, {
       mode: "cors", credentials: "omit", cache: "no-store", redirect: "error",
       signal: AbortSignal.any([timeout, signal]),
     });
@@ -245,24 +251,29 @@ export function hasFullMinuteSession(result, date) {
   return last?.date === date && last.label === "15:00" && result.missing === 0;
 }
 
-export async function fetchMinutes(instrument, date, signal, { completeSession = false } = {}) {
+export async function fetchMinutes(instrument, date, signal, { completeSession = false, relayOrigin } = {}) {
+  const direct = minuteURL(instrument);
+  const relay = relayOrigin && new URL("/api/stock-minutes", relayOrigin);
+  if (relay) relay.search = new URLSearchParams({symbol: instrument.market + instrument.code, date});
   let best;
   for (const retry of [false, true]) {
     signal.throwIfAborted();
+    const useRelay = relay && !retry;
     try {
-      const result = parseMinutes(await readMinutePayload(instrument, signal), instrument, date);
+      const payload = await readMinutePayload(useRelay ? relay.href : direct, signal, useRelay ? 14_000 : 12_000);
+      const result = parseMinutes(payload, instrument, date);
       signal.throwIfAborted();
       if (!completeSession || hasFullMinuteSession(result, date)) return result;
       if (!best || result.latest > best.latest ||
           (result.latest === best.latest && result.missing < best.missing)) best = result;
     } catch (error) {
       signal.throwIfAborted();
-      if (retry || !error.retryable) {
+      if (retry || (!useRelay && !error.retryable)) {
         if (best) return best;
         throw error;
       }
     }
-    if (!retry) await new Promise((resolve) => setTimeout(resolve, 800));
+    if (!retry && !useRelay) await new Promise((resolve) => setTimeout(resolve, 800));
   }
   return best;
 }

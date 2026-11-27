@@ -619,7 +619,7 @@ async function selectTimeframe(period) {
   showTimeframeStatus(period === "minute" ? "正在读取分时行情…" : "正在聚合日线…");
   if (period === "minute") {
     setStatus("当前显示分时行情。上方日期仅用于加载历史日线。");
-    elements["source-label"].textContent = "分时来源 东方财富 · 不复权";
+    elements["source-label"].textContent = "分时行情 · 不复权";
     elements["history-label"].textContent = "分时记录 —";
     elements["loaded-range"].textContent = "分时日期 —";
     elements["data-timestamp"].textContent = "";
@@ -695,6 +695,7 @@ async function refreshMinute() {
     const previous = state.minuteData;
     const result = await fetchMinutes(state.dataset.instrument, clock.dataDate, controller.signal, {
       completeSession: clock.phase !== "trading" && clock.phase !== "break",
+      relayOrigin: document.documentElement.dataset.analysisOrigin,
     });
     if (controller.signal.aborted || generation !== state.viewGeneration) return;
     const sameSession = previous?.rows[0].date === result.rows[0].date;
@@ -704,6 +705,10 @@ async function refreshMinute() {
       throw new Error("来源返回的分时记录有新增缺口");
     state.minuteData = result;
     state.minuteError = null;
+    elements["source-label"].textContent = `分时来源 ${result.provider === "tencent" ? "腾讯行情" : "东方财富"} · 不复权`;
+    elements["validation-note"].textContent = (result.provider === "tencent"
+      ? (state.dataset.instrument.kind === "index" ? "腾讯指数未提供可核实的分时均价。" : "分时均价由腾讯累计成交额与成交股数计算。")
+      : "分时均价使用来源字段。") + " MACD、RSI、ADX 按分钟计算，预热不足显示 —。";
     renderRows(result.rows, { keepRange: sameSession });
     elements["history-label"].textContent = `已载入 ${result.rows.length} 条分钟记录`;
     elements["loaded-range"].textContent = `分时日期 ${clock.dataDate}`;

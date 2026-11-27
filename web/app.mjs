@@ -695,6 +695,7 @@ async function refreshMinute() {
     const previous = state.minuteData;
     const result = await fetchMinutes(state.dataset.instrument, clock.dataDate, controller.signal, {
       completeSession: clock.phase !== "trading" && clock.phase !== "break",
+      relayOrigin: document.documentElement.dataset.analysisOrigin,
     });
     if (controller.signal.aborted || generation !== state.viewGeneration) return;
     const sameSession = previous?.rows[0].date === result.rows[0].date;

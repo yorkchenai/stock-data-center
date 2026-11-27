@@ -1,8 +1,9 @@
 import { fetchPublicValuation } from "./valuation.mjs";
+import { fetchPublicStockMinutes } from "./stock-minutes.mjs";
 
 const headers = {"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"};
 
-export function mountSnapshotSite({analysis, legacy}) {
+export function mountSnapshotSite({analysis, legacy, calendar}) {
   return {
     async fetch(request, env={}, ctx) {
       const {pathname}=new URL(request.url);
@@ -12,6 +13,9 @@ export function mountSnapshotSite({analysis, legacy}) {
       }
       if (pathname==="/api/fund-valuation" && env.SNAPSHOT_PUBLIC_ENABLED==="1" && expected) {
         return fetchPublicValuation(request,env.SNAPSHOT_PUBLIC_ORIGIN,ctx);
+      }
+      if (pathname==="/api/stock-minutes" && env.SNAPSHOT_PUBLIC_ENABLED==="1" && expected) {
+        return fetchPublicStockMinutes(request,env.SNAPSHOT_PUBLIC_ORIGIN,calendar,ctx);
       }
       if (pathname==="/mcp" || pathname==="/") {
         // These identity headers must be supplied by the Sites dispatch gateway.

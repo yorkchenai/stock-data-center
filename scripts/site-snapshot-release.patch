@@ -4,7 +4,7 @@
 +import { mountSnapshotSite } from "./snapshot-runtime/worker/snapshots/site-gateway.mjs";
 @@ -32 +33 @@
 -  return {
-+  return mountSnapshotSite({analysis:snapshots,legacy:{
++  return mountSnapshotSite({analysis:snapshots,calendar,legacy:{
 @@ -55 +56 @@
 -  };
 +  }});

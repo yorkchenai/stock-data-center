@@ -5,6 +5,7 @@ import {
   aggregatePeriods, fetchMinutes, hasFullMinuteSession, marketClock, minuteFreshness, minuteURL, nextMinuteRefresh, parseMinutes,
 } from "../web/timeframes.mjs";
 import { calculateIndicators } from "../web/engine.mjs";
+import { mountSnapshotSite } from "../worker/snapshots/site-gateway.mjs";
 
 const instrument = { code: "000688", market: "sh", kind: "index" };
 const at = (date, hhmm) => Date.parse(`${date}T${hhmm}:00+08:00`);
@@ -158,4 +159,40 @@ test("switching charts cancels the minute retry", async (t) => {
   });
   await assert.rejects(fetchMinutes(instrument, closedDate, caller.signal), { name: "AbortError" });
   assert.equal(fetch.mock.callCount(), 1);
+});
+
+test("stock minute relay validates the session, retries a 503 and rejects an unrelated origin", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: at(closedDate, "16:00") });
+  const calendar = { start: "2026-11-25", end: "2026-11-28", sessions: ["2026-11-25", closedDate, date] };
+  const origin = "https://example.github.io";
+  const env = { SNAPSHOT_PUBLIC_ENABLED: "1", SNAPSHOT_MCP_OWNER_EMAIL: "owner@example.test", SNAPSHOT_PUBLIC_ORIGIN: origin };
+  const gateway = mountSnapshotSite({ calendar });
+  const url = `https://test.example/api/stock-minutes?symbol=sh000688&date=${closedDate}`;
+  let attempts = 0;
+  t.mock.method(globalThis, "fetch", async (upstream) => {
+    assert.equal(upstream, minuteURL(instrument));
+    return ++attempts === 1 ? new Response(null, { status: 503 }) : minuteResponse(closingTrends);
+  });
+  assert.equal((await gateway.fetch(new Request(url, { headers: { Origin: "https://other.example" } }), env)).status, 403);
+  assert.equal((await gateway.fetch(new Request(url.replace(closedDate,date)), env)).status, 409);
+  assert.equal((await gateway.fetch(new Request(url + "&url=https://other.example"), env)).status, 400);
+  assert.equal((await gateway.fetch(new Request(url), {...env, SNAPSHOT_PUBLIC_ENABLED: "0"})).status, 404);
+  assert.equal(attempts, 0);
+  const response = await gateway.fetch(new Request(url, { headers: { Origin: origin } }), env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.deepEqual((await response.json()).data.trends, closingTrends);
+  assert.equal(attempts, 2);
+  assert.equal((await gateway.fetch(new Request("https://test.example/mcp", { method: "POST" }), env)).status, 403);
+});
+
+test("the browser reads the minute relay before trying a direct connection", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: at(closedDate, "16:00") });
+  const fetch = t.mock.method(globalThis, "fetch", async () => minuteResponse(closingTrends));
+  const result = await fetchMinutes(instrument, closedDate, new AbortController().signal, {
+    relayOrigin: "https://test.example", completeSession: true,
+  });
+  assert.equal(fetch.mock.callCount(), 1);
+  assert.equal(fetch.mock.calls[0].arguments[0], `https://test.example/api/stock-minutes?symbol=sh000688&date=${closedDate}`);
+  assert.equal(hasFullMinuteSession(result, closedDate), true);
 });

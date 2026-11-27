@@ -1,0 +1,31 @@
+name: Verify the portfolio private staging boundary
+on:
+  push:
+    branches: [verify/personal-fund-portfolio]
+    paths: [.github/workflows/portfolio-private-stage-boundary.yml]
+permissions: {}
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check unauthenticated homepage and ledger access
+        env:
+          SITE: https://sdc-fund-portfolio-stage.finalnoodle2.chatgpt.site
+        run: |
+          for path in / /api/ledger; do
+            ok=0
+            for i in 1 2 3; do
+              code="$(curl -sS --max-time 12 -o /dev/null -D response.headers -w '%{http_code}' "${SITE}${path}")" || continue
+              case "$code" in
+                401|403) ok=1 ;;
+                301|302|303|307|308)
+                  if grep -iq '^location: .*signin-with-chatgpt' response.headers; then ok=1; fi
+                  ;;
+              esac
+              if [ "$ok" -eq 1 ]; then break; fi
+              sleep 4
+            done
+            printf '%s %s\n' "$path" "$code"
+            test "$ok" -eq 1
+          done

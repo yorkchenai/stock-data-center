@@ -110,6 +110,14 @@ test("history loading and local display adjustments use separate actions", async
       this.children.push(...children);
     }
     setAttribute() {}
+    toggleAttribute() {}
+    querySelectorAll(selector) {
+      return this.children.filter((child) => child.classList?.contains(selector.slice(1)));
+    }
+    querySelector(selector) {
+      return this.children.find((child) => selector === "h3" ? child.tagName === "h3"
+        : selector === "input" && child.tagName === "input") ?? null;
+    }
     addEventListener(type, callback) {
       this.listeners[type] = callback;
     }
@@ -155,6 +163,7 @@ test("history loading and local display adjustments use separate actions", async
   }));
   let displayedRange;
   const timeScale = {
+    applyOptions() {},
     subscribeVisibleLogicalRangeChange(callback) {
       this.onRangeChange = callback;
     },
@@ -206,6 +215,7 @@ test("history loading and local display adjustments use separate actions", async
     window: {
       LightweightCharts: {
         createChart: () => chart,
+        createSeriesMarkers: () => ({ setMarkers() {} }),
         ColorType: {},
         CrosshairMode: {},
         LineStyle: {},
@@ -213,11 +223,12 @@ test("history loading and local display adjustments use separate actions", async
     },
     document: {
       getElementById: element,
-      createElement: () => new Element(),
+      createElement: (tagName) => Object.assign(new Element(), { tagName }),
+      addEventListener() {},
       querySelectorAll: (selector) =>
         selector === "[data-range]"
           ? presets
-          : created.filter((node) => node.dataset.field),
+          : selector === "[data-field]" ? created.filter((node) => node.dataset.field) : [],
     },
     ResizeObserver: class {
       observe() {}

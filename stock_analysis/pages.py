@@ -1,5 +1,5 @@
 """Build a relative-path Pages site using the existing real-history demo engine."""
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from urllib.parse import urlsplit
@@ -10,9 +10,7 @@ import json
 import os
 import shutil
 
-import exchange_calendars as xcals
-import pandas as pd
-
+from .validation import frontend_calendar
 from .web import ROOT, export_demo, load_demo
 from . import funds
 from .sector_data import read_catalog
@@ -75,10 +73,6 @@ def build_pages(destination, calendar_end=None, fund_index_snapshot=None, snapsh
             raise ValueError("已部署 Worker 的结构版本与 Pages 不兼容。")
         calendar_end = snapshot_reference["calendar_end"]
         model_day = datetime.fromisoformat(snapshot_reference["generated_at_utc"]).astimezone(funds.SHANGHAI).date().isoformat()
-    # Calendar has an explicit validity window; it is never extrapolated in JS.
-    end = calendar_end or min(now.date() + timedelta(days=31), now.date().replace(month=12, day=31)).isoformat()
-    start = "2000-01-01"
-    calendar = xcals.get_calendar("XSHG", start=pd.Timestamp(start) - pd.Timedelta(days=14), end=end)
     dataset = load_demo()
     dataset.update(snapshot=True, generated_at_utc=now.isoformat())
     output = export_demo(destination, dataset)
@@ -90,13 +84,8 @@ def build_pages(destination, calendar_end=None, fund_index_snapshot=None, snapsh
                 or service.password or service.path not in ("", "/") or service.query or service.fragment):
             raise ValueError("快照服务必须是 HTTPS 来源，本地验收可使用回环 HTTP。")
         service_attribute = f' data-analysis-origin="{html.escape(snapshot_service, quote=True)}"'
-    payload = {
-        "schema_version": 1, "start": start, "end": end,
-        "calendar": "exchange_calendars:XSHG", "version": xcals.__version__,
-        "generated_at_utc": now.isoformat(),
-        "sessions": calendar.sessions[(calendar.sessions >= pd.Timestamp(start)) & (calendar.sessions <= pd.Timestamp(end))].strftime("%Y-%m-%d").tolist(),
-        "suspensions": json.loads((ROOT / "stock_analysis/suspensions.json").read_text(encoding="utf-8")),
-    }
+    payload = frontend_calendar(now, calendar_end)
+    end = payload["end"]
     (output / "calendar.json").write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False), encoding="utf-8")
     from .fund_benchmark_identification import benchmark_page_disclosures, reviewed_disclosures
 

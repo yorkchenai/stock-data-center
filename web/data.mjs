@@ -36,11 +36,13 @@ export const PANELS = [
   { title: "ADX · 独立补充", fields: ["ADX14", "+DI", "-DI"], height: 225 },
 ];
 
+export const chartTime = (row) => row.time ?? row.date;
+
 export function linePoints(rows, field) {
   return rows.map((row) =>
     Number.isFinite(row[field])
-      ? { time: row.date, value: row[field] }
-      : { time: row.date },
+      ? { time: chartTime(row), value: row[field] }
+      : { time: chartTime(row) },
   );
 }
 
@@ -51,33 +53,38 @@ export function seriesData(rows) {
   }
   return {
     candles: rows.map((row) => ({
-      time: row.date,
+      time: chartTime(row),
       open: row.open,
       high: row.high,
       low: row.low,
       close: row.close,
+      ...(row.period_state === "forming" || row.period_state === "incomplete" ? {
+        color: row.close >= row.open ? "#fbe5e7" : "#d9eee8",
+        borderColor: row.close >= row.open ? rise : fall,
+        wickColor: row.close >= row.open ? rise : fall,
+      } : {}),
     })),
     // volume_lots and VOL lines are already in lots. No conversion is applied here.
     volume: rows.map((row) => ({
-      time: row.date,
+      time: chartTime(row),
       value: row.volume_lots,
       color: row.close >= row.open ? COLORS.histogramRise : COLORS.histogramFall,
     })),
     macd: rows.map((row) =>
       Number.isFinite(row.MACD_hist)
         ? {
-            time: row.date,
+            time: chartTime(row),
             value: row.MACD_hist,
             color: row.MACD_hist >= 0 ? COLORS.histogramRise : COLORS.histogramFall,
           }
-        : { time: row.date },
+        : { time: chartTime(row) },
     ),
     lines,
   };
 }
 
 export function dateKey(time) {
-  if (typeof time === "string") return time;
+  if (typeof time === "string" || Number.isFinite(time)) return time;
   if (time && typeof time === "object") {
     return `${time.year}-${String(time.month).padStart(2, "0")}-${String(time.day).padStart(2, "0")}`;
   }

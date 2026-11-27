@@ -57,7 +57,7 @@
           <span id="instrument-code">sh000688 · 指数</span>
         </div>
         <div class="quote">
-          <span class="caption">所选交易日收盘</span
+          <span class="caption" id="quote-caption">所选交易日收盘</span
           ><strong id="quote-close">—</strong><span id="quote-change">—</span>
         </div>
         <div class="dataset-info">
@@ -76,6 +76,16 @@
       </ol>
       <div class="workspace">
         <section class="chart-card" aria-label="五面板同步技术图表">
+          <div class="timeframe-toolbar">
+            <div class="timeframe-buttons" role="group" aria-label="行情周期">
+              <button type="button" data-timeframe="minute" aria-pressed="false">1分钟分时</button>
+              <button type="button" data-timeframe="day" aria-pressed="true">日K</button>
+              <button type="button" data-timeframe="week" aria-pressed="false">周K</button>
+              <button type="button" data-timeframe="month" aria-pressed="false">月K</button>
+            </div>
+            <button id="minute-refresh" class="secondary" type="button" hidden>刷新分时</button>
+            <p id="timeframe-status" class="timeframe-status" aria-live="polite" hidden></p>
+          </div>
           <form
             id="range-form"
             class="display-range-form"
@@ -91,7 +101,7 @@
             <span>仅调整已载入数据的视窗</span>
           </form>
           <div class="chart-toolbar">
-            <div class="range-controls" aria-label="显示历史区间">
+            <div id="range-controls" class="range-controls" aria-label="显示历史区间">
               <button type="button" data-range="120">近半年</button
               ><button type="button" data-range="244">近一年</button
               ><button type="button" data-range="all">全部历史</button>
@@ -117,7 +127,7 @@
         </section>
         <aside class="daily-card" aria-label="交易日精确指标">
           <div class="daily-header">
-            <h2>交易日明细</h2>
+            <h2 id="detail-title">交易日明细</h2>
             <span id="selected-date">—</span>
           </div>
           <form id="locate-form" class="locate-form">

@@ -1,4 +1,5 @@
 """Strict OHLCV normalization and independent mainland session comparison."""
+from datetime import timedelta
 import json
 from pathlib import Path
 import numpy as np
@@ -17,6 +18,24 @@ def last_completed_session(now):
     if calendar.session_close(day) > now:
         day = calendar.previous_session(day)
     return day.date().isoformat()
+
+
+def frontend_calendar(now, end=None):
+    """Return the audited XSHG session reference shared by Pages and the local charts."""
+    import exchange_calendars as xcals
+
+    end = end or min(now.date() + timedelta(days=31), now.date().replace(month=12, day=31)).isoformat()
+    start = "2000-01-01"
+    calendar = xcals.get_calendar("XSHG", start=pd.Timestamp(start) - pd.Timedelta(days=14), end=end)
+    sessions = calendar.sessions[(calendar.sessions >= pd.Timestamp(start)) &
+                                 (calendar.sessions <= pd.Timestamp(end))]
+    return {
+        "schema_version": 1, "start": start, "end": end,
+        "calendar": "exchange_calendars:XSHG", "version": xcals.__version__,
+        "generated_at_utc": now.isoformat(),
+        "sessions": sessions.strftime("%Y-%m-%d").tolist(),
+        "suspensions": json.loads(Path(__file__).with_name("suspensions.json").read_text(encoding="utf-8")),
+    }
 
 
 def normalize_daily(frame):

@@ -704,3 +704,41 @@ main {
 .pane-legend h3 {
   white-space: nowrap;
 }
+
+.timeframe-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.timeframe-buttons { display: flex; flex-wrap: wrap; gap: 4px; }
+.timeframe-buttons button,
+#minute-refresh {
+  padding: 7px 10px;
+  font-size: 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+.timeframe-buttons button { background: transparent; color: #465d72; }
+.timeframe-buttons button:hover { background: #eff5f5; }
+.timeframe-buttons button[aria-pressed="true"] {
+  background: #e4f2ef;
+  border-color: #bcd8d4;
+  color: #106862;
+}
+.timeframe-status {
+  margin: 0;
+  flex-basis: 100%;
+  color: #4e667c;
+  line-height: 1.55;
+  font-size: 13px;
+}
+.timeframe-status[data-incomplete] { color: #8b531d; }
+#range-controls[hidden], #range-form[hidden] { display: none; }
+@media (max-width: 760px) {
+  .timeframe-toolbar { padding: 8px; gap: 6px; }
+  .timeframe-buttons button, #minute-refresh { padding: 6px 7px; font-size: 13px; }
+}
+.pane-legend .legend-field[hidden] { display: none; }

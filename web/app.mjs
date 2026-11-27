@@ -1,6 +1,7 @@
-import { COLORS, PANELS, dateKey, formatValue, seriesData } from "./data.mjs";
+import { COLORS, PANELS, chartTime, dateKey, formatValue, linePoints, seriesData } from "./data.mjs";
 import { fetchHistory } from "./providers.mjs";
 import { STOCK_ANALYSIS_START } from "./engine.mjs";
+import { aggregatePeriods, fetchMinutes, marketClock, minuteFreshness, nextMinuteRefresh } from "./timeframes.mjs";
 import { browserModelVersion, getPageSnapshot, snapshotNote, snapshotsEnabled } from "./snapshot-client.mjs";
 
 const isPages = document.documentElement?.dataset?.mode === "pages";
@@ -36,11 +37,16 @@ const elements = Object.fromEntries(
     "instrument-name",
     "instrument-code",
     "quote-close",
+    "quote-caption",
     "quote-change",
     "source-label",
     "history-label",
     "loaded-range",
     "visible-range",
+    "range-controls",
+    "timeframe-status",
+    "minute-refresh",
+    "detail-title",
     "chart",
     "chart-shell",
     "legends",
@@ -58,6 +64,15 @@ const state = {
   byDate: new Map(),
   busy: false,
   displayRangeDraft: false,
+  period: "day",
+  dailyViewport: null,
+  dailyStatus: null,
+  calendar: null,
+  minuteData: null,
+  minuteError: null,
+  minuteRequest: null,
+  timer: null,
+  viewGeneration: 0,
 };
 const detailGroups = [
   [
@@ -71,6 +86,7 @@ const detailGroups = [
       ["MA10", "MA10"],
       ["MA20", "MA20"],
       ["MA60", "MA60"],
+      ["average", "分时均价"],
     ],
   ],
   [
@@ -108,11 +124,13 @@ const detailGroups = [
     ],
   ],
 ];
+let priceDetailHeading;
 for (const [title, fields] of detailGroups) {
   const section = document.createElement("section");
   section.className = "detail-group";
   const heading = document.createElement("h3");
   heading.textContent = title;
+  if (title === detailGroups[0][0]) priceDetailHeading = heading;
   const values = document.createElement("dl");
   for (const [field, label] of fields) {
     const term = document.createElement("dt");
@@ -120,11 +138,25 @@ for (const [title, fields] of detailGroups) {
     const value = document.createElement("dd");
     value.dataset.field = field;
     value.textContent = "—";
+    if (field === "average") {
+      term.className = value.className = "minute-detail";
+      term.hidden = value.hidden = true;
+    } else if (/^MA|^(open|high|low)$/.test(field)) {
+      term.className = value.className = "historical-detail";
+    }
     values.append(term, value);
   }
   section.append(heading, values);
   elements["daily-values"].append(section);
 }
+
+const minuteTimeLabel = (seconds) => new Date(seconds * 1000 + 8 * 3_600_000).toISOString().slice(11, 16);
+const shanghaiTime = (ms) => new Date(ms + 8 * 3_600_000).toISOString().slice(0, 19).replace("T", " ");
+const rowLabel = (row) => row.label ?? row.date;
+const periodLabels = { minute: "分钟", day: "交易日", week: "周", month: "月" };
+const periodStates = {
+  forming: "未完成周期", incomplete: "日线数据不完整", unverified: "完整性未核实",
+};
 
 const chart = LC.createChart(elements.chart, {
   autoSize: true,
@@ -147,9 +179,13 @@ const chart = LC.createChart(elements.chart, {
     borderColor: "#e3e9ef",
     rightOffset: 2,
     timeVisible: false,
+    tickMarkFormatter: (time) => typeof time === "number" ? minuteTimeLabel(time) : null,
     minBarSpacing: 0.1,
   },
-  localization: { locale: "zh-CN", dateFormat: "yyyy-MM-dd" },
+  localization: {
+    locale: "zh-CN", dateFormat: "yyyy-MM-dd",
+    timeFormatter: (time) => typeof time === "number" ? minuteTimeLabel(time) : dateKey(time),
+  },
 });
 const common = { priceLineVisible: false, lastValueVisible: false };
 const candles = chart.addSeries(
@@ -226,6 +262,32 @@ for (const [index, panel] of PANELS.entries()) {
   elements.legends.append(legend);
   legendElements.push(legend);
 }
+const minutePrice = chart.addSeries(LC.LineSeries, {
+  ...common, color: "#23749d", lineWidth: 1.5, visible: false,
+}, 0);
+const minuteAverage = chart.addSeries(LC.LineSeries, {
+  ...common, color: "#976012", lineWidth: 1.5, visible: false,
+}, 0);
+const averageLegend = document.createElement("label");
+averageLegend.className = "legend-field";
+averageLegend.style.color = "#976012";
+averageLegend.style.setProperty("--series-color", "#976012");
+averageLegend.hidden = true;
+const averageCheckbox = document.createElement("input");
+averageCheckbox.type = "checkbox";
+averageCheckbox.checked = true;
+averageCheckbox.setAttribute("aria-label", "显示分时均价");
+averageCheckbox.addEventListener("change", () => {
+  minuteAverage.applyOptions({ visible: state.period === "minute" && averageCheckbox.checked });
+  averageLegend.classList.toggle("disabled", !averageCheckbox.checked);
+});
+const averageValue = document.createElement("span");
+averageValue.className = "legend-value";
+averageValue.dataset.field = "average";
+averageLegend.append(averageCheckbox, " 分时均价 ", averageValue);
+const historicalLegend = [...legendElements[0].querySelectorAll(".legend-field")];
+legendElements[0].append(averageLegend);
+const periodMarkers = LC.createSeriesMarkers(candles, [], { autoScale: false });
 for (const [index, pane] of chart.panes().entries()) {
   pane.setStretchFactor(PANELS[index].height);
   chart.priceScale("right", index).applyOptions({
@@ -260,7 +322,7 @@ function positionCloseMarkers(top, height) {
   const width = scale.width();
   const minTop = legendElements[0].offsetHeight + 9;
   for (const [index, { marker, value }] of closeMarkers.entries()) {
-    const row = closeExtremes[index];
+    const row = state.period === "minute" ? null : closeExtremes[index];
     const x = row ? scale.timeToCoordinate(row.date) : null;
     const y = row ? candles.priceToCoordinate(row.close) : null;
     marker.hidden = x === null || y === null || x < 0 || x > width || y < 0 || y > height;
@@ -306,9 +368,21 @@ function setStatus(message, kind = "") {
 }
 
 function showRow(row) {
-  if (!row) return;
-  elements["selected-date"].textContent = row.date;
-  elements["locate-date"].value = row.date;
+  if (!row) {
+    for (const id of ["selected-date", "quote-close", "quote-change"]) {
+      elements[id].textContent = "—";
+      elements[id].removeAttribute("title");
+    }
+    elements["locate-date"].value = "";
+    document.querySelectorAll("[data-field]").forEach((item) => {
+      item.textContent = "—";
+      item.removeAttribute("title");
+    });
+    return;
+  }
+  const periodState = periodStates[row.period_state];
+  elements["selected-date"].textContent = rowLabel(row) + (periodState ? ` · ${periodState}` : "");
+  elements["locate-date"].value = rowLabel(row);
   elements["quote-close"].textContent = formatValue(row.close);
   elements["quote-close"].title = `原始值 ${row.close}`;
   elements["quote-change"].title = Number.isFinite(row.change_pct)
@@ -362,10 +436,10 @@ function renderVisibleRange(range) {
   });
   requestAnimationFrame(positionLegends);
   if (first && last) {
-    elements["visible-range"].textContent = `显示 ${first.date} — ${last.date}`;
+    elements["visible-range"].textContent = `显示 ${rowLabel(first)} — ${rowLabel(last)}`;
     // A redraw/range callback can arrive while the user edits either date.
     // Keep that unsubmitted draft until Apply or an explicit chart action.
-    if (!state.displayRangeDraft) {
+    if (state.period !== "minute" && !state.displayRangeDraft) {
       elements["display-start"].value = first.date;
       elements["display-end"].value = last.date;
     }
@@ -377,25 +451,49 @@ function setRange(count) {
   state.displayRangeDraft = false;
   if (!state.rows.length) return;
   if (count === "all") chart.timeScale().fitContent();
-  else
+  else {
+    const bars = state.period === "week" ? (count === "120" ? 26 : 52)
+      : state.period === "month" ? (count === "120" ? 6 : 12) : Number(count);
     chart.timeScale().setVisibleLogicalRange({
-      from: Math.max(0, state.rows.length - Number(count)),
-      to: state.rows.length - 1,
+      from: Math.max(0, state.rows.length - bars), to: state.rows.length - 1,
     });
+  }
 }
 for (const button of document.querySelectorAll("[data-range]"))
   button.addEventListener("click", () => setRange(button.dataset.range));
 
-function displayDataset(dataset) {
-  if (!dataset.rows?.length) throw new Error("所选区间没有行情记录");
-  state.dataset = dataset;
-  state.rows = dataset.rows;
-  state.byDate = new Map(dataset.rows.map((row) => [row.date, row]));
-  const data = seriesData(dataset.rows);
-  candles.setData(data.candles);
+function renderRows(rows, { keepRange = false } = {}) {
+  const minute = state.period === "minute";
+  const range = keepRange && state.rows.length ? chart.timeScale().getVisibleLogicalRange() : null;
+  const selected = keepRange ? elements["locate-date"].value : null;
+  const followLatest = range && range.to >= state.rows.length - 2;
+  const shift = followLatest ? Math.max(0, rows.length - state.rows.length) : 0;
+  state.rows = rows;
+  state.byDate = new Map(rows.map((row) => [chartTime(row), row]));
+  const data = seriesData(rows);
+  candles.setData(minute ? [] : data.candles);
+  minutePrice.setData(minute ? linePoints(rows, "close") : []);
+  minuteAverage.setData(minute ? linePoints(rows, "average") : []);
   volume.setData(data.volume);
   macd.setData(data.macd);
   for (const [field, series] of lines) series.setData(data.lines[field]);
+  periodMarkers.setMarkers(rows.filter((row) => row.period_state === "forming").map((row) => ({
+    time: row.date, position: "aboveBar", shape: "circle", color: "#a26827", size: 1, text: "未完成",
+  })));
+  if (!rows.length) {
+    closeExtremes = [];
+    elements["visible-range"].textContent = "—";
+  }
+  showRow(rows.find((row) => rowLabel(row) === selected) ?? rows.at(-1));
+  if (rows.length && range) chart.timeScale().setVisibleLogicalRange({ from: range.from + shift, to: range.to + shift });
+  else setRange(minute ? "all" : "244");
+  renderVisibleRange(chart.timeScale().getVisibleLogicalRange());
+}
+
+function displayDataset(dataset) {
+  if (!dataset.rows?.length) throw new Error("所选区间没有行情记录");
+  state.dataset = dataset;
+  state.dailyViewport = null;
   const instrument = dataset.instrument;
   const symbol = instrument.market + instrument.code;
   const name =
@@ -439,9 +537,6 @@ function displayDataset(dataset) {
   elements["validation-note"].textContent = check
     ? `已确认停牌 ${check.confirmed_suspension_sessions?.length || 0} 日；未核实缺口 ${check.unverified_missing_sessions?.length ?? check.missing_sessions.length} 日；停牌数据冲突 ${check.suspension_data_conflicts?.length || 0} 日。未核实缺口包括上市前或范围边界，不能直接认定为源数据缺失。股票完整性仍需核实。`
     : "演示使用仓库已保存的1551条科创50真实日线。指标由现有Python模块计算。";
-  showRow(dataset.rows.at(-1));
-  setRange("244");
-  renderVisibleRange(chart.timeScale().getVisibleLogicalRange());
   setStatus(
     dataset.analysis_label
       ? dataset.analysis_label + "。调整显示区间只改变视窗。"
@@ -453,7 +548,200 @@ function displayDataset(dataset) {
         ? "已载入历史。上方可重新获取行情，下方可调整显示区间。"
         : "离线样本已载入，可在图表上方调整显示区间。获取其他行情请启动 Python 交互服务。",
   );
+  state.dailyStatus = elements.status.textContent;
+  state.dailySummary = Object.fromEntries(
+    ["source-label", "history-label", "loaded-range", "data-timestamp", "validation-note"].map(
+      (id) => [id, elements[id].textContent],
+    ),
+  );
+  void selectTimeframe(state.period);
 }
+
+function showTimeframeStatus(message, incomplete = false) {
+  const label = elements["timeframe-status"];
+  label.hidden = !message;
+  label.textContent = message;
+  label.toggleAttribute("data-incomplete", incomplete);
+}
+
+function syncTimeframeControls() {
+  const minute = state.period === "minute";
+  document.querySelectorAll("[data-timeframe]").forEach((button) =>
+    button.setAttribute("aria-pressed", String(button.dataset.timeframe === state.period)));
+  elements["range-form"].hidden = elements["range-controls"].hidden = minute;
+  elements["minute-refresh"].hidden = !minute;
+  elements["minute-refresh"].disabled = Boolean(state.minuteRequest);
+  elements["locate-date"].type = minute ? "time" : "date";
+  elements["locate-date"].setAttribute("aria-label", minute ? "定位分钟" : "定位交易日");
+  elements["detail-title"].textContent = periodLabels[state.period] + "明细";
+  priceDetailHeading.textContent = minute ? "分时价格与均价" : detailGroups[0][0];
+  elements["quote-caption"].textContent = minute ? "所选分钟价格"
+    : state.period === "day" ? "所选交易日收盘" : "所选" + periodLabels[state.period] + "K收盘";
+  elements.chart.setAttribute("aria-label", minute ? "分时价格、均价、成交量、MACD、RSI和ADX，共用时间轴"
+    : "K线、成交量、MACD、RSI和ADX，共用日期轴");
+  chart.timeScale().applyOptions({ timeVisible: minute });
+  candles.applyOptions({ visible: !minute });
+  minutePrice.applyOptions({ visible: minute });
+  minuteAverage.applyOptions({ visible: minute && averageCheckbox.checked });
+  averageLegend.hidden = !minute;
+  legendElements[0].querySelector("h3").textContent = minute ? "分时价格" : PANELS[0].title;
+  historicalLegend.forEach((node, i) => {
+    node.hidden = minute;
+    lines.get(PANELS[0].fields[i]).applyOptions({ visible: !minute && node.querySelector("input").checked });
+  });
+  document.querySelectorAll(".historical-detail").forEach((node) => { node.hidden = minute; });
+  document.querySelectorAll(".minute-detail").forEach((node) => { node.hidden = !minute; });
+}
+
+async function selectTimeframe(period) {
+  if (!state.dataset) return;
+  const generation = ++state.viewGeneration;
+  clearTimeout(state.timer);
+  state.minuteRequest?.abort();
+  state.minuteRequest = null;
+  state.minuteData = null;
+  state.minuteError = null;
+  state.period = period;
+  syncTimeframeControls();
+  for (const [id, value] of Object.entries(state.dailySummary)) elements[id].textContent = value;
+  setStatus(state.dailyStatus);
+  if (period === "day") {
+    showTimeframeStatus("");
+    for (const input of [elements["display-start"], elements["display-end"]]) {
+      input.min = state.dataset.rows[0].date;
+      input.max = state.dataset.rows.at(-1).date;
+    }
+    renderRows(state.dataset.rows);
+    if (state.dailyViewport) chart.timeScale().setVisibleLogicalRange(state.dailyViewport);
+    return;
+  }
+  renderRows([]);
+  showTimeframeStatus(period === "minute" ? "正在读取分时行情…" : "正在聚合日线…");
+  if (period === "minute") {
+    setStatus("当前显示分时行情。上方日期仅用于加载历史日线。");
+    elements["source-label"].textContent = "分时来源 东方财富 · 不复权";
+    elements["history-label"].textContent = "分时记录 —";
+    elements["loaded-range"].textContent = "分时日期 —";
+    elements["data-timestamp"].textContent = "";
+    elements["validation-note"].textContent = "分时均价使用来源字段。MACD、RSI、ADX 按分钟计算，预热不足显示 —。";
+    elements["minute-refresh"].disabled = true;
+  }
+  const calendar = await loadCalendar().catch(() => null);
+  if (generation !== state.viewGeneration) return;
+  state.calendar = calendar;
+  if (period === "minute") {
+    void refreshMinute();
+    scheduleMinuteRefresh();
+    return;
+  }
+  try {
+    const dataset = state.dataset;
+    const rows = aggregatePeriods(dataset.periodRows ?? dataset.rows, period, {
+      calendar, instrument: dataset.instrument,
+    }).filter((row) => row.date >= dataset.rows[0].date);
+    elements["history-label"].textContent = `已载入 ${rows.length.toLocaleString()} 根${periodLabels[period]}K`;
+    elements["loaded-range"].textContent = `载入范围 ${rows[0].period_start} — ${rows.at(-1).date}`;
+    for (const input of [elements["display-start"], elements["display-end"]]) {
+      input.min = rows[0].date;
+      input.max = rows.at(-1).date;
+    }
+    elements["validation-note"].textContent += " 周K、月K由已载入日线聚合，指标在同周期序列重算。";
+    const latest = rows.at(-1);
+    const issues = rows.filter((row) => row.period_state !== "complete").length;
+    const hint = [`由日线聚合 · 指标按${periodLabels[period]}K重算`];
+    if (periodStates[latest.period_state]) hint.push(`最后一根：${periodStates[latest.period_state]}`);
+    if (issues) hint.push(`${issues} 根未完成或完整性未核实`);
+    showTimeframeStatus(hint.join(" · "), Boolean(issues));
+    renderRows(rows);
+  } catch (error) {
+    showTimeframeStatus(error.message, true);
+  }
+}
+
+function updateMinuteStatus(clock) {
+  const result = state.minuteData;
+  const status = [];
+  if (state.minuteError) status.push(state.minuteError + (result ? "，保留上次成功的分时数据" : ""));
+  if (result) {
+    if (result.rows[0].date !== clock.date) status.push("最近载入交易日行情");
+    status.push(`最新行情 ${shanghaiTime(result.latest).slice(0, 16)}`);
+    if (result.sourceTime !== null) status.push(`源时间 ${shanghaiTime(result.sourceTime).slice(11)}`);
+    status.push(`页面更新时间 ${shanghaiTime(result.received).slice(11)}（北京时间）`);
+    status.push(minuteFreshness(result, clock));
+    if (result.missing) status.push(`缺少 ${result.missing} 个分钟记录`);
+    if (["DIF", "RSI14", "ADX14"].some((field) => !Number.isFinite(result.rows.at(-1)[field])))
+      status.push("分时数据不足，部分指标不可计算");
+  } else if (!state.minuteError) status.push("正在读取分时行情…");
+  showTimeframeStatus(status.join(" · "), Boolean(state.minuteError || result?.missing));
+}
+
+async function refreshMinute() {
+  if (state.period !== "minute" || state.minuteRequest) return;
+  const generation = state.viewGeneration;
+  const controller = new AbortController();
+  state.minuteRequest = controller;
+  elements["minute-refresh"].disabled = true;
+  try {
+    state.calendar ??= await loadCalendar();
+    if (controller.signal.aborted || generation !== state.viewGeneration) return;
+    const clock = marketClock(state.calendar);
+    if (!clock.dataDate) throw new Error("缺少有效交易日历，分时刷新已暂停");
+    const previous = state.minuteData;
+    const result = await fetchMinutes(state.dataset.instrument, clock.dataDate, controller.signal);
+    if (controller.signal.aborted || generation !== state.viewGeneration) return;
+    const sameSession = previous?.rows[0].date === result.rows[0].date;
+    if (sameSession && result.latest < previous.latest)
+      throw new Error("来源返回的最新时间早于上次成功记录");
+    state.minuteData = result;
+    state.minuteError = null;
+    renderRows(result.rows, { keepRange: sameSession });
+    elements["history-label"].textContent = `已载入 ${result.rows.length} 条分钟记录`;
+    elements["loaded-range"].textContent = `分时日期 ${clock.dataDate}`;
+  } catch (error) {
+    if (controller.signal.aborted || generation !== state.viewGeneration) return;
+    state.minuteError = `分时更新失败：${error.name === "TimeoutError" ? "行情源超时" : error.message}`;
+  } finally {
+    if (state.minuteRequest === controller) {
+      state.minuteRequest = null;
+      elements["minute-refresh"].disabled = false;
+      updateMinuteStatus(marketClock(state.calendar));
+    }
+  }
+}
+
+function scheduleMinuteRefresh() {
+  clearTimeout(state.timer);
+  if (state.period !== "minute" || document.hidden) return;
+  const now = Date.now(), clock = marketClock(state.calendar, now);
+  const delay = nextMinuteRefresh(clock, now);
+  if (delay === null) return;
+  state.timer = setTimeout(() => {
+    if (state.period !== "minute" || document.hidden) return;
+    const next = marketClock(state.calendar);
+    if (next.phase === "trading") void refreshMinute();
+    else updateMinuteStatus(next);
+    scheduleMinuteRefresh();
+  }, delay);
+}
+
+for (const button of document.querySelectorAll("[data-timeframe]")) {
+  button.addEventListener("click", () => {
+    const period = button.dataset.timeframe;
+    if (period === state.period || !state.dataset) return;
+    if (state.period === "day") state.dailyViewport = chart.timeScale().getVisibleLogicalRange();
+    void selectTimeframe(period);
+  });
+}
+elements["minute-refresh"].addEventListener("click", async () => {
+  await refreshMinute();
+  scheduleMinuteRefresh();
+});
+document.addEventListener("visibilitychange", () => {
+  if (state.period !== "minute") return;
+  if (!document.hidden && marketClock(state.calendar).phase === "trading" &&
+      Date.now() - (state.minuteData?.received ?? 0) >= 30_000) void refreshMinute();
+  scheduleMinuteRefresh();
+});
 
 async function loadDemo() {
   const response = await fetch("./api/demo", { cache: "no-store" });
@@ -466,7 +754,7 @@ function selectStockDisplay(dataset, {start,end}) {
   const rows=dataset.rows.filter((row)=>(!start||row.date>=start)&&(!end||row.date<=end));
   if (!rows.length) throw new Error("所选区间没有行情记录");
   return {...dataset,requested_start:start||dataset.requested_start,requested_end:end||dataset.requested_end,
-    rows};
+    periodRows: dataset.rows.filter((row) => !end || row.date <= end), rows};
 }
 
 async function loadPagesAnalysis(options, snapshotId) {
@@ -587,7 +875,10 @@ elements.demo.addEventListener("click", () =>
 );
 elements["locate-form"].addEventListener("submit", (event) => {
   event.preventDefault();
-  const row = state.byDate.get(elements["locate-date"].value);
+  const value = elements["locate-date"].value;
+  const row = state.period === "minute" ? state.rows.find((row) => row.label === value)
+    : state.byDate.get(value) ?? (state.period === "day" ? undefined
+      : state.rows.find((row) => value && value >= row.period_start && value <= row.period_end));
   if (!row) {
     setStatus(
       "该日期没有载入的交易记录，可能为休市、停牌或超出载入范围。",
@@ -604,10 +895,11 @@ elements["locate-form"].addEventListener("submit", (event) => {
     to: Math.min(state.rows.length - 1, index + width / 2),
   });
   requestAnimationFrame(() =>
-    chart.setCrosshairPosition(row.close, row.date, candles),
+    chart.setCrosshairPosition(row.close, chartTime(row), state.period === "minute" ? minutePrice : candles),
   );
   showRow(row);
-  setStatus(`已定位 ${row.date}，右侧显示该交易日原始指标数值。`);
+  setStatus(state.period === "day" ? `已定位 ${row.date}，右侧显示该交易日原始指标数值。`
+    : `已定位 ${rowLabel(row)}，查看对应周期指标。`);
 });
 if (isPages) elements.demo.textContent = "查看存档样本";
 const requestedPage=isPages?new URLSearchParams(location.search):null;

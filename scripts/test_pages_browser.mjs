@@ -191,6 +191,24 @@ try {
       await page.locator("#instrument-name").textContent(),
       "科创50",
     );
+    assert.equal(await page.locator('[data-timeframe="day"]').getAttribute("aria-pressed"), "true");
+    const candles = () => page.evaluate(() => window.stockChart.panes()[0].getSeries()[0].data());
+    const daily = await candles();
+    const historyRequests = () => requests.filter((url) =>
+      url.includes("eastmoney.com") || url.includes("finance.qq.com")).length;
+    const beforeSwitching = historyRequests();
+    for (const [period, label] of [["week", "根周K"], ["month", "根月K"]]) {
+      await page.locator(`[data-timeframe="${period}"]`).click();
+      await page.waitForFunction((text) => document.querySelector("#history-label").textContent.includes(text), label);
+      const bars = await candles();
+      assert.ok(bars.length > 0 && bars.length < daily.length);
+      assert.equal(bars.at(-1).time, daily.at(-1).time);
+      assert.equal(bars.at(-1).close, daily.at(-1).close);
+      assert.equal(await page.evaluate(() => window.stockChart.panes().length), 5);
+    }
+    await page.locator('[data-timeframe="day"]').click();
+    assert.deepEqual(await candles(), daily);
+    assert.equal(historyRequests(), beforeSwitching, "derived candles never request a second history");
     const controls = await checkChartControls(page, {
       firstDate: snapshot.rows[0].date,
       lastDate: snapshot.rows.at(-1).date,

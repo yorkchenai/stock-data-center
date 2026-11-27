@@ -1,0 +1,38 @@
+name: Verify the portfolio public NAV adapter
+on:
+  push:
+    branches: [verify/personal-fund-portfolio]
+permissions:
+  contents: read
+jobs:
+  public-nav:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: |
+          node --input-type=module - <<'NODE'
+          import assert from 'node:assert/strict';
+          import {portfolioMarket} from './worker/portfolio/market.mjs';
+          import {shanghaiDay} from './worker/portfolio/ledger.mjs';
+          const day=shanghaiDay();
+          const symbol='110022';
+          let result;
+          const external = [], original=globalThis.fetch;
+          globalThis.fetch = (input,options) => {
+            external.push(new URL(input).hostname);
+            return original(input,options);
+          };
+          for(let attempt=0;attempt<3;attempt++){
+            result=await portfolioMarket(symbol,new Request('https://test.example/api/summary'),null,day);
+            if(result?.rows.length)break;
+            await new Promise(resolve=>setTimeout(resolve,4000));
+          }
+          const last=result?.rows.at(-1);
+          assert.ok(result?.rows.length>100,'Public fund did not return verified NAV history');
+          assert.ok(last.date<=day && Number.isFinite(last.unit_nav) && last.unit_nav>0);
+          console.log(JSON.stringify({symbol,source:result.source,records:result.rows.length,latest_confirmed_nav:last,date:day,external},null,2));
+          NODE

@@ -25,11 +25,12 @@ jobs:
             for i in $(seq 1 6); do
               curl -sS --max-time 16 -D minute.headers -H "Origin: $ORIGIN_URL" -o minute.json -w "$symbol %{http_code} %{time_total} sec\n" "$WORKER_URL/api/stock-minutes?symbol=$symbol&date=$date" || continue
               if tr -d '\r' < minute.headers | grep -iFx "access-control-allow-origin: $ORIGIN_URL" &&
-                 jq -e --arg date "$date" --arg symbol "${symbol:2}" '.data.code==$symbol and (.data.trends|length)>=240 and (.data.trends[-1]|startsWith($date+" 15:00,"))' minute.json; then
+                 jq -e --arg date "$date" --arg symbol "${symbol:2}" '.data.code==$symbol and (.data.trends|length)>=240 and (.data.trends[-1]|startswith($date+" 15:00,"))' minute.json; then
                 jq -r '[.data.code, (.data.trends|length), (.data.trends[0]|split(",")[0]), (.data.trends[-1]|split(",")[0])] | @tsv' minute.json
                 passed=1
                 break
               fi
+              jq -r ".status // empty" minute.json 2>/dev/null || true
               sleep 4
             done
             test "$passed" = 1 || exit 1

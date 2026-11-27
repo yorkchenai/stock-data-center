@@ -18,6 +18,13 @@ const clock="2026-11-27T10:00:00.000Z";
 const testFund="123456";
 const bundle=await build({stdin:{resolveDir:root,contents:`
   import { createPortfolioWorker } from "./worker.mjs";
+  const deriveBits=crypto.subtle.deriveBits.bind(crypto.subtle);
+  crypto.subtle.deriveBits=(algorithm,...args)=>{
+    if(algorithm.name==="PBKDF2" && algorithm.iterations>100_000) {
+      throw new DOMException("Pbkdf2 failed: iteration counts above 100000 are not supported", "NotSupportedError");
+    }
+    return deriveBits(algorithm,...args);
+  };
   export default createPortfolioWorker({
     now:()=>new Date(${JSON.stringify(clock)}),
     market:async()=>({name:"Test fund",source:"test fixture",rows:[
@@ -173,7 +180,7 @@ try {
   assert.ok(Number(limited.response.headers.get("Retry-After"))>0);
   await target.db.prepare("UPDATE portfolio_sessions SET expires_at=0").run();
   await restored("summary",{expected:401});
-  console.log("PASS: Workerd session, origin and login limits; D1 CRUD and audit; undo-safe backup restore; 1440px and 390px browser flow");
+  console.log("PASS: Workerd login with a 100,000-round native PBKDF2 ceiling; sessions, origin and login limits; D1 CRUD and audit; backup restore; 1440px and 390px browser flow");
 } finally {
   await browser?.close();
   await target?.mf.dispose();

@@ -1,3 +1,6 @@
+import { pbkdf2Async } from "@noble/hashes/pbkdf2.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+
 const cookieName = "__Host-fund-portfolio";
 const iterations = 600_000;
 const lifetime = 8 * 60 * 60;
@@ -20,8 +23,19 @@ function equal(a,b) {
 }
 
 async function derive(password,salt) {
-  const key = await crypto.subtle.importKey("raw",encoder.encode(password),"PBKDF2",false,["deriveBits"]);
-  return toBase64(await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt,iterations},key,256));
+  const bytes = encoder.encode(password);
+  try {
+    const key = await crypto.subtle.importKey("raw",bytes,"PBKDF2",false,["deriveBits"]);
+    return toBase64(await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt,iterations},key,256));
+  } catch (error) {
+    // Hosted Workers can impose an iteration ceiling on Web Crypto. The
+    // algorithm, salt, iteration count and stored verifier all stay identical.
+    if (error?.name!=="NotSupportedError" || !/iteration/i.test(error.message??"")) throw error;
+    const derived=await pbkdf2Async(sha256,bytes,salt,{c:iterations,dkLen:32});
+    return toBase64(derived);
+  } finally {
+    bytes.fill(0);
+  }
 }
 
 export async function passwordVerifier(password) {

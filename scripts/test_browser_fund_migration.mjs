@@ -63,11 +63,12 @@ try {
   };
   for (const [code,weights] of Object.entries(codes)) {
     await selectCode(page,code);
-    const fund=await page.evaluate(async ({base,code})=>{
-      const {loaded}=await import(base+"funds/app.mjs");
+    const fund=await page.evaluate(async (code)=>{
+      const entry=document.querySelector('script[type="module"][src^="./funds/app.mjs"]');
+      const {loaded}=await import(entry.src);
       const {name,rows,source}=loaded.get(code);
       return {name,date:rows.at(-1).date,unit_nav:rows.at(-1).unit_nav,transport:source.transport};
-    },{base:origin,code});
+    },code);
     assert.ok(["isolated-script","browser-cors"].includes(fund.transport));
     await page.locator("#benchmark-source a").first().waitFor();
     const benchmark=await page.locator("#benchmark-disclosure").innerText();

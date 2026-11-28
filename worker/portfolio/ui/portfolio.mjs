@@ -356,7 +356,8 @@ function transactionInput(entry){
   } else if (entry.type==="redemption" && (changed("amount") || changed("received_on"))) {
     data.confirmed_amount=entry.amount;
     data.confirmed_amount_basis="net";
-    data.received_amount=entry.received_on || previous?.received_amount!=null ? entry.amount : null;
+    const hasActualAmount=automaticField!=="amount" && (entry.received_on || previous?.received_amount!=null);
+    data.received_amount=hasActualAmount ? entry.amount : null;
   } else if (["cash_dividend","reinvestment"].includes(entry.type) && changed("amount")) {
     data.confirmed_amount=entry.amount;
     if (previous?.received_amount!=null) data.received_amount=entry.amount;

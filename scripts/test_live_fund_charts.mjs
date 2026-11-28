@@ -32,12 +32,12 @@ async function open(page,code) {
         library={...original,createChart(element,options){
           const chart=original.createChart(element,options);
           if (element.id==="returns-chart") {
-            const series=[];
-            window.testReturns={chart,series};
+            let returnLine;
+            window.testReturns={chart,get returnLine(){return returnLine;}};
             const addSeries=chart.addSeries.bind(chart);
             chart.addSeries=(type,settings)=>{
               const line=addSeries(type,settings);
-              series.push(line);
+              if (settings.priceScaleId==="right") returnLine=line;
               return line;
             };
           }
@@ -47,13 +47,13 @@ async function open(page,code) {
     });
   });
   await page.goto(`${origin}/funds.html?fund=${code}`);
-  await page.locator("#nav-chart canvas").first().waitFor({timeout:30000});
+  await page.locator("#returns-chart canvas").first().waitFor({timeout:30000});
 }
 
 async function verifyLayout(page, width, height, mobile) {
   await page.evaluate(()=>new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const dimensions=await page.evaluate(()=>{
-    const ids=["nav-chart","returns-chart","drawdown-chart"];
+    const ids=["returns-chart","drawdown-chart"];
     const charts=ids.map((id)=>{
       const node=document.getElementById(id);
       const rect=node.getBoundingClientRect();
@@ -68,13 +68,14 @@ async function verifyLayout(page, width, height, mobile) {
     const targets=[...document.querySelectorAll("#fund-periods button")];
     const disclosure=document.getElementById("benchmark-disclosure");
     const axisWidth=window.testReturns.chart.priceScale("right").width();
+    const navAxisWidth=window.testReturns.chart.priceScale("left").width();
     const fontSize=(selector)=>parseFloat(getComputedStyle(document.querySelector(selector)).fontSize);
-    return {width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,charts,columns,axisWidth,
+    return {width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,charts,columns,axisWidth,navAxisWidth,
       titleSize:fontSize("#fund-title"),metricSize:fontSize(".metric strong"),
       riskSize:fontSize(".risk-metric strong"),
       disclosureFits:disclosure.scrollWidth<=disclosure.clientWidth,
       minimumTarget:Math.min(...targets.map((button)=>button.getBoundingClientRect().height)),
-      navTextNodes:[...document.getElementById("nav-chart").childNodes].some((node)=>node.nodeType===3&&node.textContent.trim())};
+      navTextNodes:[...document.getElementById("returns-chart").childNodes].some((node)=>node.nodeType===3&&node.textContent.trim())};
   });
   assert.equal(dimensions.width,width);
   assert.equal(dimensions.height,height);
@@ -85,6 +86,7 @@ async function verifyLayout(page, width, height, mobile) {
   assert.equal(dimensions.columns,mobile?2:3);
   assert.equal(dimensions.disclosureFits,true);
   assert.ok(dimensions.axisWidth>=57,JSON.stringify(dimensions));
+  assert.ok(dimensions.navAxisWidth>=50,JSON.stringify(dimensions));
   assert.ok(dimensions.minimumTarget>=(mobile?44:36));
   assert.deepEqual([dimensions.titleSize,dimensions.metricSize],mobile ? [20,20] : [27,25]);
   return {height,columns:dimensions.columns,
@@ -114,14 +116,13 @@ async function checkReturns(page, fund, checkHover=true) {
   const rows=fund.rows.filter((row)=>row.date>=start&&row.date<=end);
   assert.ok(rows.every((row)=>row.return_index>0));
   const rendered=await page.evaluate(()=>{
-    const {chart,series}=window.testReturns;
+    const {returnLine}=window.testReturns;
     const values=[.125,-.125,0];
-    return {points:series[0].data(),series:series.length,axis:values.map(chart.options().localization.priceFormatter),
-      labels:values.map((value)=>series[0].priceFormatter().format(value))};
+    return {points:returnLine.data(),axis:returnLine.options().priceScaleId,
+      labels:values.map((value)=>returnLine.priceFormatter().format(value))};
   });
-  assert.equal(rendered.series,1);
-  assert.deepEqual(rendered.axis,["+12.50%","-12.50%","0.00%"]);
-  assert.deepEqual(rendered.labels,rendered.axis);
+  assert.equal(rendered.axis,"right");
+  assert.deepEqual(rendered.labels,["+12.50%","-12.50%","0.00%"]);
   assert.equal(rendered.points.length,rows.length);
   for (const [i,point] of rendered.points.entries()) {
     assert.equal(point.time,rows[i].date);
@@ -145,8 +146,10 @@ async function checkReturns(page, fund, checkHover=true) {
     for (const [date,expected] of [[start,"0.00%"],[end,last]]) {
       const x=await page.evaluate((day)=>window.testReturns.chart.timeScale().timeToCoordinate(day),date);
       assert.ok(Number.isFinite(x));
-      await page.mouse.move(plot.x+x,plot.y+plot.height*.45);
+      const left=await page.evaluate(()=>window.testReturns.chart.priceScale("left").width());
+      await page.mouse.move(plot.x+left+x,plot.y+plot.height*.45);
       assert.equal(await page.locator("#hover-values").textContent(),`${date} · 累计收益率 ${expected}`);
+      assert.match(await page.locator("#nav-hover").textContent(),new RegExp("^"+date+" · "));
     }
     await page.mouse.move(0,0);
     assert.equal(await page.locator("#hover-values").textContent(),"");
@@ -176,19 +179,19 @@ try {
     assert.ok((await page.locator("#returns-source").textContent()).includes(latestFund.date));
     assert.ok((await page.locator("#returns-source").textContent()).includes(fund.source.name));
     const headings=await page.locator("#fund-detail h2").allTextContents();
-    assert.deepEqual(headings.slice(0,5),["业绩比较基准","盘中参考估值","基金累计收益率","基金历史净值","风险分析"]);
+    assert.deepEqual(headings.slice(0,4),["业绩比较基准","盘中参考估值","基金净值与累计收益率","风险分析"]);
     assert.equal(headings.at(-1),"基金数据来源");
     const incoming=await page.locator("#nav-hover").textContent();
     assert.match(incoming,/^最新可见 \d{4}-\d{2}-\d{2} · \d+\.\d{4}$/);
     assert.match(await page.locator("#nav-basis").textContent(),/净值按每份显示/);
     await page.locator("#nav-raw").click();
     assert.match(await page.locator("#nav-basis").textContent(),/原始单位净值/);
-    assert.ok(await page.locator("#nav-chart canvas").count()>0);
+    assert.ok(await page.locator("#returns-chart canvas").count()>0);
     const rawNav=(await page.locator("#nav-hover").textContent()).match(/(\d{4}-\d{2}-\d{2}) · (\d+\.\d+)/);
     assert.ok(rawNav);
     assert.equal(rawNav[1],latestFund.date);
     assert.equal(rawNav[2],latestFund.unit_nav.toFixed(4));
-    await hoverMiddle(page,"#nav-chart");
+    await hoverMiddle(page,"#returns-chart");
     const navHover=(await page.locator("#nav-hover").textContent()).match(/^(\d{4}-\d{2}-\d{2}) · (\d+\.\d{4})$/);
     assert.ok(navHover);
     assert.equal(navHover[2],fund.rows.find((row)=>row.date===navHover[1]).unit_nav.toFixed(4));
@@ -230,8 +233,8 @@ try {
       assert.equal(await page.locator("#nav-gaps").isVisible(),true);
       const gaps=await page.locator("#nav-gap-list li").allTextContents();
       assert.deepEqual(gaps.map((item)=>item.slice(0,10)),navGaps.map((row)=>row.date));
-      assert.equal(await page.locator("#returns-chart canvas").count(),0);
-      assert.match(await page.locator("#returns-chart").textContent(),/当前统计区间暂无可计算的曲线/);
+      assert.ok(await page.locator("#returns-chart canvas").count()>0);
+      assert.match(await page.locator("#returns-unavailable").textContent(),/当前统计区间暂无可计算的累计收益率/);
       await page.locator('#fund-periods [data-period="1y"]').click();
     }
     await page.mouse.move(0,0);

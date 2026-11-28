@@ -32,7 +32,7 @@ async function selectCode(page,code) {
   await page.locator("#search-term").fill(code);
   await page.locator("#fund-search button").click();
   await page.waitForFunction((code)=>location.search==="?fund="+code,code);
-  await page.waitForFunction(()=>document.querySelector("#nav-chart canvas")||document.querySelector("#detail-status").dataset.state==="error",
+  await page.waitForFunction(()=>document.querySelector("#returns-chart canvas")||document.querySelector("#detail-status").dataset.state==="error",
     null,{timeout:35_000});
   assert.notEqual(await page.locator("#detail-status").getAttribute("data-state"),"error",
     await page.locator("#detail-status").textContent());
@@ -116,7 +116,7 @@ try {
   const failure=await outage.newPage();
   await failure.goto(origin+"funds.html?fund=999999");
   await failure.locator('#detail-status[data-state="error"]').waitFor({timeout:35_000});
-  assert.equal(await failure.locator("#nav-chart canvas").count(),0);
+  assert.equal(await failure.locator("#returns-chart canvas").count(),0);
   summary.blocked_provider={status:"error",message:await failure.locator("#detail-status").textContent()};
   await outage.close();
 } finally {

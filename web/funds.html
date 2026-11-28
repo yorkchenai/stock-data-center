@@ -7,9 +7,9 @@
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="./sections.css">
-  <link rel="stylesheet" href="./funds/funds.css?v=fund-library-1">
+  <link rel="stylesheet" href="./funds/funds.css?v=dual-axis-1">
   <script src="./vendor/lightweight-charts-5.2.0.js" defer></script>
-  <script src="./funds/app.mjs?v=fund-library-1" type="module"></script>
+  <script src="./funds/app.mjs?v=dual-axis-1" type="module"></script>
 </head>
 <body>
   <header class="app-header section-header">
@@ -127,26 +127,30 @@
       <section id="core-metrics" class="metrics-grid" aria-label="核心收益与风险指标"></section>
       <p id="risk-reference-note" class="fund-note"></p>
       <section class="fund-panel chart-panel" aria-labelledby="returns-title">
-        <div class="panel-heading"><h2 id="returns-title">基金累计收益率</h2><span id="fund-visible-range" class="fund-note"></span></div>
-        <div id="returns-chart" class="fund-chart" role="img" aria-label="以统计区间起点归零的基金累计收益率曲线"></div>
-        <p id="returns-extremes" class="fund-note chart-extremes" hidden></p>
-        <p id="hover-values" class="fund-note chart-description" aria-live="off"></p>
-        <p id="returns-source" class="fund-note" hidden></p>
-        <a class="fund-note" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">图表由 TradingView Lightweight Charts™ 提供</a>
-      </section>
-      <section class="fund-panel" aria-labelledby="nav-chart-title">
         <div class="panel-heading">
-          <h2 id="nav-chart-title">基金历史净值</h2>
+          <h2 id="returns-title">基金净值与累计收益率</h2>
           <div class="fund-controls" role="group" aria-label="净值口径">
             <button type="button" id="nav-adjusted" aria-pressed="true">复权净值</button>
             <button type="button" id="nav-raw" aria-pressed="false">原始单位净值</button>
           </div>
         </div>
-        <div id="nav-chart" class="fund-chart" role="img" aria-label="基金历史净值折线图"></div>
+        <div class="fund-axis-legend fund-note">
+          <span id="nav-axis-label">左轴 · 复权净值</span>
+          <span id="fund-visible-range"></span>
+          <span class="return-axis-label">右轴 · 累计收益率</span>
+        </div>
+        <div id="returns-chart" class="fund-chart" role="img" aria-label="基金净值与累计收益率共用日期轴，累计收益率从统计区间起点归零"></div>
+        <div class="fund-chart-readout fund-note">
+          <span id="nav-hover"></span>
+          <span id="hover-values" aria-live="off"></span>
+        </div>
         <p id="nav-extremes" class="fund-note chart-extremes" hidden></p>
-        <p id="nav-hover" class="fund-note chart-description"></p>
+        <p id="returns-extremes" class="fund-note chart-extremes" hidden></p>
+        <p id="returns-unavailable" class="fund-note"></p>
         <p id="nav-basis" class="fund-note"></p>
         <details id="nav-gaps" hidden><summary>复权数据缺口</summary><ul id="nav-gap-list" class="fund-note"></ul></details>
+        <p id="returns-source" class="fund-note" hidden></p>
+        <a class="fund-note" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">图表由 TradingView Lightweight Charts™ 提供</a>
       </section>
       <section class="fund-panel chart-panel" aria-labelledby="risk-title">
         <h2 id="risk-title">风险分析</h2>

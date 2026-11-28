@@ -1,6 +1,6 @@
 import { authenticate, login, logout } from "./auth.mjs";
-import { calculatePortfolio, shanghaiDay } from "./ledger.mjs";
-import { portfolioMarket } from "./market.mjs";
+import { calculatePortfolio, decimal, fixed, shanghaiDay, validDay } from "./ledger.mjs";
+import { portfolioConfirmedNav, portfolioFundName, portfolioMarket } from "./market.mjs";
 import { auditFor, backupLedger, changeTransaction, createTransaction, readLedger, restoreLedger, saveSetting, uuid } from "./store.mjs";
 
 const security = {
@@ -54,7 +54,7 @@ async function userInput(action) {
 
 async function serveAssets(request,env,path) {
   if (!["GET","HEAD"].includes(request.method) ||
-      !["/","/index.html","/portfolio.css","/portfolio.mjs","/chart.mjs"].includes(path)) return fail("not_found",404);
+      !["/","/index.html","/portfolio.css","/portfolio.mjs","/chart.mjs","/amounts.mjs"].includes(path)) return fail("not_found",404);
   const response = await env.ASSETS.fetch(request);
   const headers = new Headers(response.headers);
   for (const [name,value] of Object.entries(security)) headers.set(name,value);
@@ -69,7 +69,8 @@ function knownCodes(ledger) {
     ? [row.fund_code,row.related_fund_code] : [row.fund_code]))];
 }
 
-export function createPortfolioWorker({market=portfolioMarket,now=()=>new Date()}={}) {
+export function createPortfolioWorker({market=portfolioMarket,fundName=portfolioFundName,
+  confirmedNav=portfolioConfirmedNav,now=()=>new Date()}={}) {
   return {
     async fetch(request,env,ctx) {
       const url=new URL(request.url);
@@ -91,6 +92,17 @@ export function createPortfolioWorker({market=portfolioMarket,now=()=>new Date()
         if (path==="/api/session" && method==="GET") return reply({authenticated:true});
         if (path==="/api/logout" && method==="POST") return reply({authenticated:false},200,{"Set-Cookie":await logout(session,db)});
         if (path==="/api/ledger" && method==="GET") return reply(await readLedger(db));
+        if (method==="GET" && /^\/api\/fund-entry\/\d{6}$/.test(path)) {
+          const code=path.slice(-6);
+          const date=url.searchParams.get("date");
+          if (date===null) return reply({code,name:await fundName(code)});
+          if (!validDay(date) || date>day) throw new InputError("请选择有效的申请日期。");
+          const dataset=await confirmedNav(code,request,ctx,day);
+          if (!dataset) return fail("service_unavailable",503);
+          const raw=dataset.rows.find((row)=>row.date===date)?.unit_nav;
+          const value=raw == null ? null : fixed(String(raw),6);
+          return reply({code,date,unit_nav:value>0n?decimal(value,6):null,source:dataset.source});
+        }
         if (path==="/api/transactions" && method==="POST") {
           const input=await readJSON(request);
           const transaction=await userInput(()=>createTransaction(db,input,timestamp));

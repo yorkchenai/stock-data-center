@@ -1,4 +1,5 @@
 import { drawCostChart } from "./chart.mjs";
+import { completeTrade, decimal, redemptionNet } from "./amounts.mjs";
 
 const $=(id)=>document.getElementById(id);
 const labels={subscription:"申购",redemption:"赎回",cash_dividend:"现金分红",reinvestment:"红利再投资",conversion:"基金转换"};
@@ -20,10 +21,15 @@ const detailFields=[["holding_cost","持仓成本"],["invested","累计投入资
   ["floating_pnl","持仓浮动盈亏"],["total_pnl","对组合累计收益的贡献"],["contribution_share","组合收益贡献占比"]];
 const monetaryFields={application_amount:"申请金额",paid_amount:"实际支付",confirmed_amount:"确认金额",fee:"手续费",received_amount:"实际到账",
   application_shares:"申请份额",confirmed_shares:"确认份额",confirmed_nav:"确认净值",confirmed_on:"确认日期",received_on:"到账日期",
-  confirmed_amount_basis:"确认金额口径",applied_at:"申请时间",fund_name:"基金名称",fund_code:"基金代码",type:"交易类型",
-  status:"交易状态",related_fund_code:"对方基金代码",notes:"备注"};
+  confirmed_amount_basis:"确认金额口径",applied_at:"申请日期",fund_name:"基金名称",fund_code:"基金代码",type:"交易类型",
+  status:"交易状态",related_fund_code:"转入基金代码",related_fund_name:"转入基金名称",
+  related_confirmed_nav:"转入确认净值",related_confirmed_shares:"转入确认份额",notes:"备注"};
 const editor=$("entry");
+const fields=editor.elements;
 const state={ledger:{records:[],settings:[]},summary:null,detail:null,selected:null,editing:null,auth:false,refresh:0};
+const calculationFields={amount:fields.amount,shares:fields.confirmed_shares,nav:fields.confirmed_nav};
+let editorVersion=0, initialEntry={}, automaticField=null, navOffer=null, navFromDate=false, lookupVersion=0;
+const simpleTrade=(type)=>type==="subscription" || type==="redemption";
 const fmt=(value,suffix="")=>{
   if (value == null) return "—";
   const [whole, fraction]=String(value).split(".");
@@ -116,15 +122,23 @@ function renderPositions(){
 function sorted(records){
   return [...records].sort((a,b)=>(b.applied_at??b.confirmed_on??b.created_at).localeCompare(a.applied_at??a.confirmed_on??a.created_at));
 }
+function entryAmount(txn){
+  if (txn.type==="subscription") return txn.paid_amount;
+  if (txn.type==="redemption") return decimal(redemptionNet(txn),2);
+  return txn.received_amount??txn.confirmed_amount;
+}
 function renderRecords(id,records){
   const body=$(id).tBodies[0]; body.replaceChildren();
   if(!records.length) emptyRow(body,"暂无交易。");
   for(const txn of sorted(records)){
     const row=body.insertRow();
-    addCell(row,txn.applied_at??"—",txn.confirmed_on??"未确认");
-    addCell(row,id==="records"?(txn.fund_name??txn.fund_code):labels[txn.type],id==="records"?labels[txn.type]+" · "+transactionStatus[txn.status]:transactionStatus[txn.status]);
+    addCell(row,txn.applied_at?.slice(0,10)??txn.confirmed_on??"—");
+    const description = txn.type==="conversion" && txn.related_fund_code
+      ? `转入 ${txn.related_fund_name??txn.related_fund_code}` : labels[txn.type];
+    const detail = txn.status==="confirmed" ? description : description+" · "+transactionStatus[txn.status];
+    addCell(row,id==="records"?(txn.fund_name??txn.fund_code):labels[txn.type],detail);
     addCell(row,fmt(txn.confirmed_shares));
-    addCell(row,fmt(txn.paid_amount??txn.confirmed_amount??txn.received_amount," 元"),
+    addCell(row,fmt(entryAmount(txn)," 元"),
       txn.fee===null?"":("手续费 "+fmt(txn.fee," 元")));
     const actions=row.insertCell();
     actions.append(button("查看 / 编辑",()=>openEditor(txn)),button("修改记录",()=>showAudit(txn)),button("删除",()=>deleteRecord(txn)));
@@ -202,30 +216,169 @@ async function refresh(){
   if(state.selected) await loadDetail(state.selected,false);
 }
 function syncEditor(){
-  const type=editor.elements.type.value;
-  for(const label of editor.querySelectorAll("[data-for]")){
-    const visible=label.dataset.for.split(" ").includes(type);
-    label.hidden=!visible;
-    label.firstElementChild.disabled=!visible;
+  const type=fields.type.value;
+  const conversion=type==="conversion", quantity=conversion || simpleTrade(type) || type==="reinvestment";
+  for(const group of editor.querySelectorAll("[data-for]")){
+    const visible=group.dataset.for.split(" ").includes(type);
+    group.hidden=!visible;
+    for(const control of group.querySelectorAll("input,button")) control.disabled=!visible;
   }
-  editor.elements.confirmed_on.required=editor.elements.status.value==="confirmed";
+  $("fund-code-label").textContent=conversion?"转出基金代码":"基金代码";
+  $("fund-name-label").textContent=conversion?"转出基金名称":"基金名称";
+  $("shares-label").textContent=conversion?"转出确认份额":"确认份额";
+  $("nav-label").textContent=conversion?"转出确认净值":"确认单位净值";
+  $("amount-label").textContent={
+    subscription:"申请金额（含费，元）",redemption:"赎回净额（扣费后，元）",
+    cash_dividend:"现金分红净额（元）",reinvestment:"红利转入金额（元）",
+  }[type]??"金额（元）";
+  fields.fee.setCustomValidity("");
+  fields.confirmed_shares.required=fields.confirmed_nav.required=quantity;
+  fields.fee.required=conversion || simpleTrade(type);
+  fields.amount.required=!conversion;
+  for(const key of ["confirmed_on","related_fund_code","related_confirmed_nav","related_confirmed_shares"])
+    fields[key].required=conversion;
   $("type-hint").textContent={
-    subscription:"实际支付填写平台扣款总额（含费）。确认份额、净值和手续费按平台原值录入。",
-    redemption:"实际到账优先。缺少实际到账时，请选择确认金额的扣费口径；口径未核实则暂不算赎回净额。",
-    cash_dividend:"确认金额填写净现金分红。若有实际到账，按实际到账核算。",
-    reinvestment:"确认金额填写本次转入持仓成本的红利金额。红利再投资不计入外部投入。",
-    conversion:"转换记录保留双方基金、平台确认资料和费用。V1 暂不自动结转转换份额、成本和收益。",
+    subscription:"金额＝份额 × 净值＋手续费。填手续费和另两项即可试算，平台有确认值时请填原值。",
+    redemption:"净额＝份额 × 净值－手续费。填手续费和另两项即可试算，平台有确认值时请填原值。",
+    cash_dividend:"填写现金分红净额。到账日期留空时按申请日记录现金流。",
+    reinvestment:"填写转为持仓成本的红利金额和平台确认份额。",
+    conversion:"按平台填写两边的确认净值和份额。转换目前仅记录，尚未计入持仓。",
   }[type];
 }
+function recalculate(edited){
+  if (!simpleTrade(fields.type.value)) return;
+  if (automaticField && edited!==automaticField) calculationFields[automaticField].value="";
+  automaticField=null;
+  const note=$("calculation-status");
+  note.hidden=true;
+  fields.fee.setCustomValidity("");
+  try {
+    const values=Object.fromEntries(Object.entries(calculationFields).map(([key,input])=>[key,input.value.trim()]));
+    const result=completeTrade(fields.type.value,{...values,fee:fields.fee.value.trim()});
+    if (result) {
+      automaticField=result.field;
+      calculationFields[result.field].value=result.value;
+      note.textContent=`已试算${{amount:"金额",shares:"份额",nav:"净值"}[result.field]}，保存前可按平台原值调整。`;
+      note.hidden=false;
+    }
+  } catch(error) {
+    fields.fee.setCustomValidity(error.message);
+    note.textContent=error.message;
+    note.hidden=false;
+  }
+}
+function resetNavLookup(clearValue=false){
+  lookupVersion++;
+  navOffer=null;
+  $("lookup-nav").textContent="查申请日净值";
+  $("lookup-nav").disabled=!simpleTrade(fields.type.value);
+  $("nav-lookup-status").textContent="";
+  if (clearValue && navFromDate) {
+    fields.confirmed_nav.value="";
+    navFromDate=false;
+    recalculate();
+  }
+}
+async function lookupNav(){
+  if (navOffer) {
+    fields.confirmed_nav.value=navOffer.unit_nav;
+    navFromDate=true;
+    $("nav-lookup-status").textContent=`已带入 ${navOffer.date} 净值。请核对平台的成交净值。`;
+    $("lookup-nav").textContent="查申请日净值";
+    navOffer=null;
+    recalculate("nav");
+    return;
+  }
+  if (fields.confirmed_nav.value && automaticField!=="nav") {
+    $("nav-lookup-status").textContent="已有手填净值。如需查询，请先清空该项。";
+    return;
+  }
+  const code=fields.fund_code.value,date=fields.applied_at.value;
+  if (!/^\d{6}$/.test(code) || !date) {
+    $("nav-lookup-status").textContent="请先填写基金代码和申请日期。";
+    return;
+  }
+  const attempt=++lookupVersion;
+  const lookup=$("lookup-nav");
+  lookup.disabled=true;
+  $("nav-lookup-status").textContent="正在查询确认净值…";
+  try {
+    const quote=await api(`fund-entry/${code}?date=${date}`);
+    if (attempt!==lookupVersion || !$("editor").open) return;
+    if (quote.unit_nav) {
+      navOffer=quote;
+      lookup.textContent="带入此净值";
+      $("nav-lookup-status").textContent=`${quote.date} · ${quote.unit_nav} · ${quote.source}。以平台确认净值为准。`;
+    } else $("nav-lookup-status").textContent="该日暂无确认净值，请填写平台上的净值。";
+  } catch(error) {
+    if (attempt===lookupVersion) $("nav-lookup-status").textContent="暂未查到净值，可手动填写。";
+  } finally {
+    if (attempt===lookupVersion) lookup.disabled=false;
+  }
+}
+async function lookupName(codeField,nameField){
+  const input=fields[codeField],name=fields[nameField],code=input.value,version=editorVersion;
+  name.value="";
+  if (!/^\d{6}$/.test(code)) return;
+  const found=state.ledger.records.findLast((txn)=>txn.fund_code===code && txn.fund_name);
+  if (found) {
+    name.value=found.fund_name;
+    return;
+  }
+  name.placeholder="正在查询…";
+  const isCurrent=()=>version===editorVersion && $("editor").open && input.value===code;
+  try {
+    const result=await api("fund-entry/"+code);
+    if (isCurrent() && !name.value) name.value=result.name??"";
+  } catch { /* The user can enter a name when the directory is unavailable. */ }
+  finally { if (isCurrent()) name.placeholder=name.value?"":"未查到，可手动填写"; }
+}
+function formValues(){
+  return Object.fromEntries(new FormData(editor));
+}
+function transactionInput(entry){
+  const previous=state.editing?.type===entry.type?state.editing:null;
+  const changed=(field)=>!previous || entry[field]!==initialEntry[field];
+  const data={...previous,fund_code:entry.fund_code,fund_name:entry.fund_name,type:entry.type,
+    status:state.editing?.status??"confirmed",notes:entry.notes};
+  if (changed("applied_at")) {
+    data.applied_at=entry.applied_at;
+    if (!previous?.confirmed_on || previous.confirmed_on===previous.applied_at?.slice(0,10))
+      data.confirmed_on=entry.applied_at;
+  }
+  for (const key of ["confirmed_shares","confirmed_nav","fee","received_on","confirmed_on","related_fund_code",
+    "related_fund_name","related_confirmed_nav","related_confirmed_shares"]) {
+    if (key in entry && changed(key)) data[key]=entry[key];
+  }
+  if (entry.type==="subscription" && changed("amount")) {
+    data.application_amount=entry.amount;
+    data.paid_amount=entry.amount;
+  } else if (entry.type==="redemption" && (changed("amount") || changed("received_on"))) {
+    data.confirmed_amount=entry.amount;
+    data.confirmed_amount_basis="net";
+    data.received_amount=entry.received_on || previous?.received_amount!=null ? entry.amount : null;
+  } else if (["cash_dividend","reinvestment"].includes(entry.type) && changed("amount")) {
+    data.confirmed_amount=entry.amount;
+    if (previous?.received_amount!=null) data.received_amount=entry.amount;
+  }
+  return data;
+}
 function openEditor(txn){
-  editor.reset();state.editing=txn??null;
+  editorVersion++;
+  editor.reset();state.editing=txn??null;automaticField=null;navFromDate=false;
+  $("calculation-status").hidden=true;
   $("editor-title").textContent=txn?"查看 / 编辑交易":"录入交易";
   $("editor-status").textContent="";
   if(txn) for(const control of editor.elements){
     const value=txn[control.name];
-    if(value!=null) control.value=control.name==="applied_at"?value.replace(" ","T"):value;
+    if(value!=null) control.value=control.name==="applied_at"?value.slice(0,10):value;
   }
-  syncEditor();$("editor").showModal();
+  fields.amount.value=txn?entryAmount(txn)??"":"";
+  fields.applied_at.value ||= txn?.confirmed_on??(!txn?state.summary?.as_of??"":"");
+  fields.fund_name.placeholder=fields.related_fund_name.placeholder="输入代码后自动查询";
+  syncEditor();resetNavLookup();
+  initialEntry=formValues();
+  $("editor").showModal();
 }
 async function deleteRecord(txn){
   if(!confirm("删除这笔"+labels[txn.type]+"记录？修改记录会保留。")) return;
@@ -285,12 +438,34 @@ $("close-audit").addEventListener("click",()=>$("audit").close());
 $("filter-fund").addEventListener("change",renderLedger);
 $("chart-range").addEventListener("change",redraw);
 new ResizeObserver(redraw).observe($("cost-chart"));
-editor.elements.type.addEventListener("change",syncEditor);
-editor.elements.status.addEventListener("change",syncEditor);
+fields.type.addEventListener("change",()=>{
+  if (automaticField) calculationFields[automaticField].value="";
+  automaticField=null;
+  fields.amount.value="";
+  syncEditor();resetNavLookup(true);
+  $("calculation-status").hidden=true;
+});
+fields.fund_code.addEventListener("input",()=>{
+  resetNavLookup(true);
+  void lookupName("fund_code","fund_name");
+});
+fields.related_fund_code.addEventListener("input",()=>void lookupName("related_fund_code","related_fund_name"));
+fields.applied_at.addEventListener("change",()=>resetNavLookup(true));
+fields.fee.addEventListener("input",()=>recalculate("fee"));
+for (const [key,control] of Object.entries(calculationFields)) {
+  control.addEventListener("input",()=>{
+    if (key==="nav") {
+      navFromDate=false;
+      resetNavLookup();
+    }
+    recalculate(key);
+  });
+}
+$("lookup-nav").addEventListener("click",lookupNav);
 editor.addEventListener("submit",async(event)=>{
   event.preventDefault();
   const submit=editor.querySelector("[type=submit]"), editing=state.editing;
-  const transaction=Object.fromEntries(new FormData(editor));
+  const transaction=transactionInput(formValues());
   submit.disabled=true;$("editor-status").textContent="";
   try{
     if(editing) await api("transactions/"+editing.id,{method:"PUT",body:{transaction,revision:editing.revision}});

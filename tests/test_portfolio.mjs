@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { calculatePortfolio, normalizeTransaction } from "../worker/portfolio/ledger.mjs";
 import { portfolioMarket } from "../worker/portfolio/market.mjs";
+import { completeTrade } from "../worker/portfolio/ui/amounts.mjs";
 
 const settings = [{fund_code:"123456",history_complete:true}];
 const market = new Map([["123456",{source:"fixture",rows:[{date:"2026-10-11",unit_nav:"12.00"}]}]]);
@@ -17,6 +18,32 @@ const sale = transaction("redemption","2026-10-03",{
 const dividend = transaction("cash_dividend","2026-10-04",{received_amount:"12",received_on:"2026-10-04"});
 const reinvestment = transaction("reinvestment","2026-10-05",{confirmed_amount:"25",confirmed_shares:"2",confirmed_nav:"12.5"});
 const snapshot = (rows,marks=settings,quotes=market,day="2026-10-11")=>calculatePortfolio(rows,marks,quotes,day);
+
+test("entry calculates a missing trade field with exact amounts and preserves platform values", ()=>{
+  assert.deepEqual(completeTrade("subscription",{shares:"8",nav:"2.50",fee:"0.44"}),{field:"amount",value:"20.44"});
+  assert.deepEqual(completeTrade("subscription",{amount:"20.44",nav:"2.50",fee:"0.44"}),{field:"shares",value:"8.000000"});
+  assert.deepEqual(completeTrade("subscription",{amount:"20.44",shares:"8",fee:"0.44"}),{field:"nav",value:"2.500000"});
+  assert.deepEqual(completeTrade("redemption",{shares:"8",nav:"2.50",fee:"0.44"}),{field:"amount",value:"19.56"});
+  assert.deepEqual(completeTrade("redemption",{shares:"8",amount:"19.56",fee:"0.44"}),{field:"nav",value:"2.500000"});
+  assert.deepEqual(completeTrade("redemption",{nav:"2.50",amount:"19.56",fee:"0.44"}),{field:"shares",value:"8.000000"});
+  assert.deepEqual(completeTrade("redemption",{shares:"1",nav:"1.235",fee:"0"}),{field:"amount",value:"1.24"});
+  assert.equal(completeTrade("subscription",{amount:"20.43",shares:"8",nav:"2.50",fee:"0.44"}),null);
+  assert.equal(completeTrade("subscription",{amount:"20.43",fee:"0"}),null);
+  assert.throws(()=>completeTrade("redemption",{shares:"1",nav:"1",fee:"1.01"}),/手续费/);
+});
+
+test("date-only entries and both confirmed conversion legs round trip without changing legacy timestamps", ()=>{
+  const row=transaction("conversion","2026-10-03",{applied_at:"2026-10-01",related_fund_code:"654321",
+    related_fund_name:"合成测试基金",confirmed_shares:"20",confirmed_nav:"1.25",
+    related_confirmed_nav:"2.51",related_confirmed_shares:"9.95",fee:"0"});
+  assert.equal(row.applied_at,"2026-10-01");
+  assert.equal(row.confirmed_shares,"20.000000");
+  assert.equal(row.related_confirmed_nav,"2.510000");
+  assert.equal(row.related_confirmed_shares,"9.950000");
+  assert.equal(snapshot([row]).funds[1].name,"合成测试基金");
+  assert.equal(transaction("subscription","2026-10-03",{applied_at:"2026-10-01T08:30:15"}).applied_at,"2026-10-01 08:30:15");
+  assert.throws(()=>normalizeTransaction({...row,related_fund_code:null}),/转入基金代码/);
+});
 
 test("cost, fees, cash and reinvested distributions remain separate even when transactions are backfilled", ()=>{
   const result=snapshot([sale,buys[1],dividend,reinvestment,buys[0]]);

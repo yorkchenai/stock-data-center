@@ -44,12 +44,12 @@
         <p id="chart-note" class="note"></p>
         <section aria-label="基金交易流水">
           <h3>基金交易流水</h3>
-          <div class="table-scroll"><table id="fund-records" aria-label="基金交易流水"><thead><tr><th>申请 / 确认日期</th><th>交易</th><th>确认份额</th><th>支付 / 确认金额</th><th>操作</th></tr></thead><tbody></tbody></table></div>
+          <div class="table-scroll"><table id="fund-records" aria-label="基金交易流水"><thead><tr><th>交易日期</th><th>交易</th><th>份额</th><th>金额</th><th>操作</th></tr></thead><tbody></tbody></table></div>
         </section>
       </section>
       <section class="panel" id="flow" aria-labelledby="flow-heading">
         <div class="section-heading"><h2 id="flow-heading">全部交易流水</h2><label class="inline">基金筛选<select id="filter-fund"><option value="">全部基金</option></select></label></div>
-        <div class="table-scroll"><table id="records" aria-label="全部交易流水"><thead><tr><th>申请 / 确认日期</th><th>基金 / 交易</th><th>确认份额</th><th>支付 / 确认金额</th><th>操作</th></tr></thead><tbody></tbody></table></div>
+        <div class="table-scroll"><table id="records" aria-label="全部交易流水"><thead><tr><th>交易日期</th><th>基金 / 交易</th><th>份额</th><th>金额</th><th>操作</th></tr></thead><tbody></tbody></table></div>
       </section>
       <details class="panel"><summary>从备份恢复</summary>
         <p class="note">恢复仅适用于空账本，会恢复交易、完整性设置和修改记录。备份包含个人交易，请保存在安全的位置。</p>
@@ -61,28 +61,27 @@
         <div class="section-heading"><h2 id="editor-title">录入交易</h2><button type="button" id="close-editor" class="quiet">取消</button></div>
         <p id="editor-status" role="status"></p>
         <div class="fields">
-          <label>基金代码<input name="fund_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label>
-          <label>基金名称<input name="fund_name" maxlength="100"></label>
+          <label><span id="fund-code-label">基金代码</span><input name="fund_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label>
+          <label><span id="fund-name-label">基金名称</span><input name="fund_name" maxlength="100" placeholder="输入代码后自动查询"></label>
           <label>交易类型<select name="type"><option value="subscription">申购</option><option value="redemption">赎回</option><option value="cash_dividend">现金分红</option><option value="reinvestment">红利再投资</option><option value="conversion">基金转换</option></select></label>
-          <label>交易状态<select name="status"><option value="pending">待确认</option><option value="confirmed">已确认</option><option value="cancelled">已取消</option></select></label>
-        </div>
-        <fieldset><legend>申请信息（北京时间）</legend><div class="fields">
-          <label>申请时间<input name="applied_at" type="datetime-local" step="1"></label>
-          <label data-for="subscription conversion">申请金额（元）<input name="application_amount" inputmode="decimal"></label>
-          <label data-for="redemption conversion">申请赎回份额<input name="application_shares" inputmode="decimal"></label>
-          <label data-for="subscription">实际支付金额（含费）<input name="paid_amount" inputmode="decimal"></label>
-        </div></fieldset>
-        <fieldset><legend>平台确认信息</legend><div class="fields">
-          <label>确认日期<input name="confirmed_on" type="date"></label>
-          <label data-for="subscription redemption reinvestment conversion">确认单位净值<input name="confirmed_nav" inputmode="decimal"></label>
-          <label data-for="subscription redemption reinvestment conversion">确认份额<input name="confirmed_shares" inputmode="decimal"></label>
-          <label>平台确认金额（元）<input name="confirmed_amount" inputmode="decimal"></label>
-          <label data-for="redemption">赎回确认金额口径<select name="confirmed_amount_basis"><option value="unknown">未核实</option><option value="gross">扣费前总额</option><option value="net">扣费后净额</option></select></label>
+          <label>申请日期（北京时间）<input name="applied_at" type="date" required></label>
+          <label data-for="subscription redemption cash_dividend reinvestment"><span id="amount-label">申请金额（含费，元）</span><input name="amount" inputmode="decimal"></label>
+          <label data-for="subscription redemption reinvestment conversion"><span id="shares-label">确认份额</span><input name="confirmed_shares" inputmode="decimal"></label>
+          <label data-for="subscription redemption reinvestment conversion"><span id="nav-label">确认单位净值</span><input name="confirmed_nav" inputmode="decimal"></label>
           <label data-for="subscription redemption reinvestment conversion">手续费（元）<input name="fee" inputmode="decimal"></label>
-          <label data-for="redemption cash_dividend">实际到账金额（元）<input name="received_amount" inputmode="decimal"></label>
-          <label data-for="redemption cash_dividend">到账日期<input name="received_on" type="date"></label>
-          <label data-for="conversion">转换对方基金代码<input name="related_fund_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"></label>
-        </div><p class="note" id="type-hint"></p></fieldset>
+          <label data-for="redemption cash_dividend">到账日期（选填）<input name="received_on" type="date"></label>
+          <label data-for="conversion">转换确认日期<input name="confirmed_on" type="date"></label>
+          <label data-for="conversion">转入基金代码<input name="related_fund_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"></label>
+          <label data-for="conversion">转入基金名称<input name="related_fund_name" maxlength="100" placeholder="输入代码后自动查询"></label>
+          <label data-for="conversion">转入确认份额<input name="related_confirmed_shares" inputmode="decimal"></label>
+          <label data-for="conversion">转入确认净值<input name="related_confirmed_nav" inputmode="decimal"></label>
+        </div>
+        <div class="nav-lookup" data-for="subscription redemption">
+          <button id="lookup-nav" type="button" class="quiet">查申请日净值</button>
+          <span class="note" id="nav-lookup-status" role="status"></span>
+        </div>
+        <p class="note" id="type-hint"></p>
+        <p class="note" id="calculation-status" aria-live="polite" hidden></p>
         <label>备注<textarea name="notes" rows="2" maxlength="500"></textarea></label>
         <div class="actions footer"><button type="submit" class="primary">保存交易</button></div>
       </form>

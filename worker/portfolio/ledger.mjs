@@ -1,5 +1,6 @@
-const moneyScale = 100n;
-const unitScale = 1_000_000n;
+import { decimal, fixed, moneyScale, redemptionNet, rounded, sharesValue, unitScale } from "./ui/amounts.mjs";
+export { decimal, fixed };
+
 const dayMillis = 86_400_000;
 const dateFormat = new Intl.DateTimeFormat("sv-SE", {timeZone:"Asia/Shanghai"});
 
@@ -18,32 +19,11 @@ export function validDay(value) {
     Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0,10) === value;
 }
 
-export function fixed(value, places) {
-  if (typeof value !== "string" || !new RegExp(`^\\d{1,10}(?:\\.\\d{1,${places}})?$`).test(value))
-    throw new Error(`请输入非负十进制金额或份额，最多 ${places} 位小数。`);
-  const [whole, fraction = ""] = value.split(".");
-  return BigInt(whole + fraction.padEnd(places, "0"));
-}
-
-export function decimal(value, places) {
-  if (value === null) return null;
-  const scale = 10n ** BigInt(places);
-  const sign = value < 0n ? "-" : "";
-  const magnitude = value < 0n ? -value : value;
-  return `${sign}${magnitude / scale}.${String(magnitude % scale).padStart(places,"0")}`;
-}
-
-function rounded(numerator, denominator) {
-  const sign = numerator < 0n ? -1n : 1n;
-  return sign * ((numerator * sign + denominator / 2n) / denominator);
-}
-
 const cents = (value) => value == null ? null : fixed(value,2);
 const units = (value) => value == null ? null : fixed(value,6);
 const asMoney = (value) => decimal(value,2);
 const asUnits = (value) => decimal(value,6);
 const percentage = (n,d) => n === null || d <= 0n ? null : decimal(rounded(n * 1_000_000n,d),4);
-const sharesValue = (shares, nav) => rounded(shares * nav * moneyScale, unitScale * unitScale);
 const isCode = (value) => typeof value === "string" && /^\d{6}$/.test(value);
 
 function nullableText(value, max) {
@@ -60,8 +40,8 @@ export function normalizeTransaction(input) {
     type:input.type, status:input.status, notes:nullableText(input.notes,500)};
   const applied = nullableText(input.applied_at,19)?.replace("T"," ") ?? null;
   if (applied !== null && (!validDay(applied.slice(0,10)) ||
-      !/^ (?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(applied.slice(10))))
-    throw new Error("申请时间格式无效。");
+      (applied.length!==10 && !/^ (?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(applied.slice(10)))))
+    throw new Error("申请日期格式无效。");
   result.applied_at = applied && (applied.length === 16 ? applied + ":00" : applied);
   for (const key of ["confirmed_on","received_on"]) {
     const value = input[key] || null;
@@ -80,16 +60,17 @@ export function normalizeTransaction(input) {
   result.related_fund_code = input.related_fund_code || null;
   if (result.related_fund_code !== null && (result.type !== "conversion" || !isCode(result.related_fund_code) ||
       result.related_fund_code === result.fund_code)) throw new Error("转换对方基金代码无效。");
+  const targetName = nullableText(input.related_fund_name,100);
+  if (targetName) result.related_fund_name=targetName;
+  for (const key of ["related_confirmed_nav","related_confirmed_shares"]) {
+    if (input[key] == null || input[key] === "") continue;
+    const value=units(input[key]);
+    if (value<=0n) throw new Error("转换净值和份额应大于零。");
+    result[key]=asUnits(value);
+  }
+  if ((targetName || result.related_confirmed_nav || result.related_confirmed_shares) && !result.related_fund_code)
+    throw new Error("请填写转入基金代码。");
   return result;
-}
-
-function redemptionNet(transaction) {
-  const actual = cents(transaction.received_amount);
-  const stated = cents(transaction.confirmed_amount), fee = cents(transaction.fee);
-  if (actual !== null) return actual;
-  if (stated !== null && transaction.confirmed_amount_basis === "net") return stated;
-  if (stated !== null && fee !== null && stated >= fee && transaction.confirmed_amount_basis === "gross") return stated - fee;
-  return null;
 }
 
 function recordOrder(a,b) {
@@ -272,7 +253,7 @@ export function calculatePortfolio(records, settings, markets, asOf = shanghaiDa
     groups.get(txn.fund_code).push(txn);
     if (txn.type === "conversion" && txn.related_fund_code && txn.status === "confirmed") {
       if (!groups.has(txn.related_fund_code)) groups.set(txn.related_fund_code,[]);
-      groups.get(txn.related_fund_code).push({...txn,fund_code:txn.related_fund_code,fund_name:null});
+      groups.get(txn.related_fund_code).push({...txn,fund_code:txn.related_fund_code,fund_name:txn.related_fund_name??null});
     }
   }
   const known = new Map(settings.map((row)=>[row.fund_code, row.history_complete]));

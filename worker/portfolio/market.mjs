@@ -1,5 +1,5 @@
 import { marketTransport } from "../snapshots/providers.mjs";
-import { fundFromAssignments, readNavAssignments } from "../../web/funds/nav-source.mjs";
+import { assignment, fundFromAssignments, parseDirectory, readNavAssignments } from "../../web/funds/nav-source.mjs";
 import { navURL } from "../../web/funds/providers.mjs";
 import { fetchPublicValuation } from "../snapshots/valuation.mjs";
 import { fixed, decimal, validDay } from "./ledger.mjs";
@@ -7,6 +7,18 @@ import { fixed, decimal, validDay } from "./ledger.mjs";
 const transport = marketTransport((...args)=>fetch(...args));
 const estimateOrigin = "https://yorkchenai.github.io";
 const snapshots = "https://stock-data-center-voice-probe.finalnoodle2.chatgpt.site/api/analysis";
+let fundDirectory;
+let directoryExpires = 0;
+
+export async function portfolioFundName(code) {
+  if (!fundDirectory || Date.now()>=directoryExpires) {
+    directoryExpires=Date.now()+86_400_000;
+    fundDirectory=transport("https://fund.eastmoney.com/js/fundcode_search.js").then((text)=>
+      parseDirectory(assignment(text,"r"))).catch((error)=>{fundDirectory=null;throw error;});
+  }
+  const names=await fundDirectory;
+  return names.get(code)?.name??null;
+}
 
 function checkedEstimate(quote, latest, day) {
   if (!quote || !latest || latest.date >= day || quote.updatedAt.slice(0,10)!==day) return null;
@@ -67,7 +79,7 @@ async function snapshotQuotes(code,day) {
     rows:rows.map(({date,unit_nav,split_factor})=>({date,unit_nav,split_factor}))};
 }
 
-export async function portfolioMarket(code,request,ctx,day) {
+export async function portfolioConfirmedNav(code,request,ctx,day) {
   const cache = globalThis.caches?.default;
   const key = new Request(new URL(`/_portfolio_public_nav/${code}/${day}`,request.url));
   const cached = await cache?.match(key).catch(()=>null);
@@ -77,6 +89,11 @@ export async function portfolioMarket(code,request,ctx,day) {
     if (nav && cache && ctx?.waitUntil)
       ctx.waitUntil(cache.put(key,Response.json(nav,{headers:{"Cache-Control":"public, max-age=300"}})).catch(()=>{}));
   }
+  return nav;
+}
+
+export async function portfolioMarket(code,request,ctx,day) {
+  const nav = await portfolioConfirmedNav(code,request,ctx,day);
   const latest = nav?.rows.at(-1);
   if (!latest || latest.date >= day) return nav;
   const url = new URL("/api/fund-valuation",request.url);

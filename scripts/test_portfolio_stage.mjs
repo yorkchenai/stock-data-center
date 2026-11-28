@@ -27,6 +27,8 @@ const bundle=await build({stdin:{resolveDir:root,contents:`
   };
   export default createPortfolioWorker({
     now:()=>new Date(${JSON.stringify(clock)}),
+    fundName:async(code)=>code==="654321"?"转入测试基金":null,
+    confirmedNav:async()=>({source:"隔离测试净值",rows:[{date:"2026-10-10",unit_nav:14}]}),
     market:async()=>({name:"Test fund",source:"test fixture",rows:[
       {date:"2026-09-29",unit_nav:10},{date:"2026-10-11",unit_nav:12}
     ]})
@@ -75,7 +77,7 @@ const start=await open();
 let target,browser;
 try {
   const call=client(start);
-  for(const path of ["session","ledger","summary","funds/123456","backup"]) await call(path,{expected:401});
+  for(const path of ["session","ledger","summary","funds/123456","fund-entry/654321","backup"]) await call(path,{expected:401});
   await call("transactions",{method:"POST",data:{},expected:401});
   await call("register",{method:"POST",data:{},expected:401});
   await call("login",{method:"POST",data:{username,password:passphrase},origin:"https://example.test",expected:403});
@@ -83,6 +85,10 @@ try {
   await call("login",{method:"POST",data:{username,password:passphrase}});
   assert.equal((await start.db.prepare("SELECT COUNT(*) AS count FROM portfolio_sessions").first()).count,1);
   assert.equal((await call("ledger")).result.records.length,0);
+  assert.equal((await call("fund-entry/654321")).result.name,"转入测试基金");
+  assert.equal((await call("fund-entry/654321?date=2026-10-09")).result.unit_nav,null);
+  assert.equal((await call("fund-entry/654321?date=2026-10-10")).result.unit_nav,"14.000000");
+  await call("fund-entry/654321?date=2027-01-01",{expected:400});
 
   const {result:first}=await call("transactions",{method:"POST",expected:201,data:{
     fund_code:testFund,fund_name:"测试基金",type:"subscription",status:"confirmed",applied_at:"2026-09-30 10:05",
@@ -155,17 +161,43 @@ try {
     assert.ok(await page.locator("#cost-chart").evaluate((canvas)=>canvas.width>100));
     await page.locator("#add").click();
     await page.locator("#editor").waitFor();
+    await page.locator("[name=fund_code]").fill("654321");
+    await page.waitForFunction(()=>document.querySelector("[name=fund_name]").value==="转入测试基金");
     await page.locator("[name=fund_code]").fill(testFund);
     await page.locator("[name=type]").selectOption("redemption");
-    assert.equal(await page.locator("[name=paid_amount]").isVisible(),false);
-    assert.equal(await page.locator("[name=confirmed_amount_basis]").isVisible(),true);
-    await page.locator("[name=status]").selectOption("confirmed");
-    await page.locator("[name=confirmed_on]").fill("2026-10-10");
+    assert.equal(await page.locator("#editor [name=paid_amount], #editor [name=status]").count(),0);
+    assert.equal(await page.locator("[name=confirmed_on]").isVisible(),false);
+    await page.locator("[name=applied_at]").fill("2026-10-10");
     await page.locator("[name=confirmed_shares]").fill("1");
-    await page.locator("[name=confirmed_amount]").fill("13");
-    await page.locator("[name=confirmed_amount_basis]").selectOption("net");
+    await page.locator("[name=fee]").fill("1");
+    await page.getByRole("button",{name:"查申请日净值"}).click();
+    await page.getByRole("button",{name:"带入此净值"}).click();
+    assert.equal(await page.locator("[name=amount]").inputValue(),"13.00");
+    await page.locator("[name=amount]").fill("12.99");
     await page.getByRole("button",{name:"保存交易"}).click();
     await page.locator("#editor").waitFor({state:"hidden"});
+    await page.waitForFunction(()=>document.querySelector("#records").textContent.includes("12.99 元"));
+    if(width===390){
+      await page.locator("#add").click();
+      await page.locator("[name=type]").selectOption("conversion");
+      await page.locator("[name=fund_code]").fill(testFund);
+      await page.locator("[name=related_fund_code]").fill("654321");
+      await page.waitForFunction(()=>document.querySelector("[name=related_fund_name]").value==="转入测试基金");
+      await page.locator("[name=applied_at]").fill("2026-10-12");
+      await page.locator("[name=confirmed_on]").fill("2026-10-13");
+      await page.locator("[name=confirmed_shares]").fill("2");
+      await page.locator("[name=confirmed_nav]").fill("4.25");
+      await page.locator("[name=related_confirmed_shares]").fill("1.39");
+      await page.locator("[name=related_confirmed_nav]").fill("6.11");
+      await page.locator("[name=fee]").fill("0");
+      await page.getByRole("button",{name:"保存交易"}).click();
+      await page.locator("#editor").waitFor({state:"hidden"});
+      await page.waitForFunction(()=>document.querySelector("#records").textContent.includes("转入 转入测试基金"));
+      await page.locator("#records tr").filter({hasText:"转入 转入测试基金"}).getByRole("button",{name:"查看 / 编辑"}).click();
+      assert.equal(await page.locator("[name=related_confirmed_shares]").inputValue(),"1.390000");
+      assert.equal(await page.locator("[name=related_confirmed_nav]").inputValue(),"6.110000");
+      await page.locator("#close-editor").click();
+    }
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
     assert.deepEqual(errors,[]);
     await page.locator("#logout").click();

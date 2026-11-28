@@ -198,6 +198,9 @@ try {
     if(width===390){
       await page.locator("#add").click();
       await page.locator("[name=type]").selectOption("conversion");
+      assert.deepEqual(await page.locator("#entry .fields :is(input, select):visible").evaluateAll(
+        (nodes)=>nodes.slice(0,6).map((node)=>node.name)),
+      ["fund_code","fund_name","related_fund_code","related_fund_name","type","applied_at"]);
       await page.locator("[name=fund_code]").fill(testFund);
       await page.locator("[name=related_fund_code]").fill("654321");
       await page.waitForFunction(()=>document.querySelector("[name=related_fund_name]").value==="转入测试基金");

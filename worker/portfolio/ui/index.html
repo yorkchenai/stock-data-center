@@ -63,16 +63,16 @@
         <div class="fields">
           <label><span id="fund-code-label">基金代码</span><input name="fund_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label>
           <label><span id="fund-name-label">基金名称</span><input name="fund_name" maxlength="100" placeholder="输入代码后自动查询"></label>
+          <label data-for="conversion">转入基金代码<input name="related_fund_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"></label>
+          <label data-for="conversion">转入基金名称<input name="related_fund_name" maxlength="100" placeholder="输入代码后自动查询"></label>
           <label>交易类型<select name="type"><option value="subscription">申购</option><option value="redemption">赎回</option><option value="cash_dividend">现金分红</option><option value="reinvestment">红利再投资</option><option value="conversion">基金转换</option></select></label>
           <label>申请日期（北京时间）<input name="applied_at" type="date" required></label>
           <label data-for="subscription redemption cash_dividend reinvestment"><span id="amount-label">申请金额（含费，元）</span><input name="amount" inputmode="decimal"></label>
           <label data-for="subscription redemption reinvestment conversion"><span id="shares-label">确认份额</span><input name="confirmed_shares" inputmode="decimal"></label>
           <label data-for="subscription redemption reinvestment conversion"><span id="nav-label">确认单位净值</span><input name="confirmed_nav" inputmode="decimal"></label>
-          <label data-for="subscription redemption reinvestment conversion">手续费（元）<input name="fee" inputmode="decimal"></label>
-          <label data-for="conversion">转入基金代码<input name="related_fund_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"></label>
-          <label data-for="conversion">转入基金名称<input name="related_fund_name" maxlength="100" placeholder="输入代码后自动查询"></label>
           <label data-for="conversion">转入确认份额<input name="related_confirmed_shares" inputmode="decimal"></label>
           <label data-for="conversion">转入确认净值<input name="related_confirmed_nav" inputmode="decimal"></label>
+          <label data-for="subscription redemption reinvestment conversion">手续费（元）<input name="fee" inputmode="decimal"></label>
         </div>
         <div class="nav-lookup" data-for="subscription redemption reinvestment conversion" hidden>
           <button id="lookup-nav" type="button" class="quiet" hidden>带入此净值</button>

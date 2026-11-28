@@ -69,16 +69,18 @@
           <label data-for="subscription redemption reinvestment conversion"><span id="shares-label">确认份额</span><input name="confirmed_shares" inputmode="decimal"></label>
           <label data-for="subscription redemption reinvestment conversion"><span id="nav-label">确认单位净值</span><input name="confirmed_nav" inputmode="decimal"></label>
           <label data-for="subscription redemption reinvestment conversion">手续费（元）<input name="fee" inputmode="decimal"></label>
-          <label data-for="redemption cash_dividend">到账日期（选填）<input name="received_on" type="date"></label>
-          <label data-for="conversion">转换确认日期<input name="confirmed_on" type="date"></label>
           <label data-for="conversion">转入基金代码<input name="related_fund_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"></label>
           <label data-for="conversion">转入基金名称<input name="related_fund_name" maxlength="100" placeholder="输入代码后自动查询"></label>
           <label data-for="conversion">转入确认份额<input name="related_confirmed_shares" inputmode="decimal"></label>
           <label data-for="conversion">转入确认净值<input name="related_confirmed_nav" inputmode="decimal"></label>
         </div>
-        <div class="nav-lookup" data-for="subscription redemption">
-          <button id="lookup-nav" type="button" class="quiet">查申请日净值</button>
+        <div class="nav-lookup" data-for="subscription redemption reinvestment conversion" hidden>
+          <button id="lookup-nav" type="button" class="quiet" hidden>带入此净值</button>
           <span class="note" id="nav-lookup-status" role="status"></span>
+        </div>
+        <div class="nav-lookup" data-for="conversion" hidden>
+          <button id="lookup-related-nav" type="button" class="quiet" hidden>带入转入净值</button>
+          <span class="note" id="related-nav-lookup-status" role="status"></span>
         </div>
         <p class="note" id="type-hint"></p>
         <p class="note" id="calculation-status" aria-live="polite" hidden></p>

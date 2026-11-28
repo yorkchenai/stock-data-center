@@ -28,7 +28,7 @@ const bundle=await build({stdin:{resolveDir:root,contents:`
   export default createPortfolioWorker({
     now:()=>new Date(${JSON.stringify(clock)}),
     fundName:async(code)=>code==="654321"?"转入测试基金":null,
-    confirmedNav:async()=>({source:"隔离测试净值",rows:[{date:"2026-10-10",unit_nav:14}]}),
+    confirmedNav:async(code)=>({source:"隔离测试净值",rows:[{date:"2026-10-10",unit_nav:code==="654321"?12:14}]}),
     market:async()=>({name:"Test fund",source:"test fixture",rows:[
       {date:"2026-09-29",unit_nav:10},{date:"2026-10-11",unit_nav:12}
     ]})
@@ -87,7 +87,7 @@ try {
   assert.equal((await call("ledger")).result.records.length,0);
   assert.equal((await call("fund-entry/654321")).result.name,"转入测试基金");
   assert.equal((await call("fund-entry/654321?date=2026-10-09")).result.unit_nav,null);
-  assert.equal((await call("fund-entry/654321?date=2026-10-10")).result.unit_nav,"14.000000");
+  assert.equal((await call("fund-entry/654321?date=2026-10-10")).result.unit_nav,"12.000000");
   await call("fund-entry/654321?date=2027-01-01",{expected:400});
 
   const {result:first}=await call("transactions",{method:"POST",expected:201,data:{
@@ -140,6 +140,10 @@ try {
   assert.deepEqual(copy.audit.slice(0,-1),backup.audit);
   assert.equal(copy.audit.at(-1).action,"restore");
   await restored("restore",{method:"POST",data:backup,expected:409});
+  const {result:legacyRedemption}=await call("transactions",{method:"POST",expected:201,data:{
+    fund_code:testFund,type:"redemption",status:"confirmed",applied_at:"2026-10-06 14:00",
+    confirmed_on:"2026-10-07",received_on:"2026-10-08",confirmed_nav:"12",confirmed_shares:"1",received_amount:"12",fee:"0",
+  }});
   await call("logout",{method:"POST"});
   await call("summary",{expected:401});
 
@@ -159,6 +163,18 @@ try {
     await page.locator("#detail").waitFor();
     assert.equal(await page.locator("#fund-title").innerText(),"测试基金 · 123456");
     assert.ok(await page.locator("#cost-chart").evaluate((canvas)=>canvas.width>100));
+    if(width===1440){
+      await page.locator("#records tbody tr").filter({hasText:"2026-10-06"}).getByRole("button",{name:"查看 / 编辑"}).click();
+      assert.equal(await page.locator("[name=applied_at]").inputValue(),"2026-10-06");
+      await page.locator("[name=notes]").fill("旧流水补充说明");
+      await page.getByRole("button",{name:"保存交易"}).click();
+      await page.locator("#editor").waitFor({state:"hidden"});
+      const records=await page.evaluate(async()=>(await (await fetch("/api/ledger")).json()).records);
+      const edited=records.find((record)=>record.id===legacyRedemption.id);
+      assert.equal(edited.notes,"旧流水补充说明");
+      assert.equal(edited.confirmed_on,"2026-10-07");
+      assert.equal(edited.received_on,"2026-10-08");
+    }
     await page.locator("#add").click();
     await page.locator("#editor").waitFor();
     await page.locator("[name=fund_code]").fill("654321");
@@ -166,11 +182,13 @@ try {
     await page.locator("[name=fund_code]").fill(testFund);
     await page.locator("[name=type]").selectOption("redemption");
     assert.equal(await page.locator("#editor [name=paid_amount], #editor [name=status]").count(),0);
-    assert.equal(await page.locator("[name=confirmed_on]").isVisible(),false);
+    assert.deepEqual(await page.locator("#entry input[type=date]").evaluateAll((nodes)=>nodes.map((node)=>node.name)),["applied_at"]);
+    await page.locator("[name=applied_at]").fill("2026-10-09");
+    await page.getByText("申请日暂无净值，请填写平台原值。").waitFor();
+    assert.equal(await page.locator("[name=confirmed_nav]").inputValue(),"");
     await page.locator("[name=applied_at]").fill("2026-10-10");
     await page.locator("[name=confirmed_shares]").fill("1");
     await page.locator("[name=fee]").fill("1");
-    await page.getByRole("button",{name:"查申请日净值"}).click();
     await page.getByRole("button",{name:"带入此净值"}).click();
     assert.equal(await page.locator("[name=amount]").inputValue(),"13.00");
     await page.locator("[name=amount]").fill("12.99");
@@ -183,8 +201,11 @@ try {
       await page.locator("[name=fund_code]").fill(testFund);
       await page.locator("[name=related_fund_code]").fill("654321");
       await page.waitForFunction(()=>document.querySelector("[name=related_fund_name]").value==="转入测试基金");
-      await page.locator("[name=applied_at]").fill("2026-10-12");
-      await page.locator("[name=confirmed_on]").fill("2026-10-13");
+      await page.locator("[name=applied_at]").fill("2026-10-10");
+      await page.getByRole("button",{name:"带入此净值"}).click();
+      await page.getByRole("button",{name:"带入转入净值"}).click();
+      assert.equal(await page.locator("[name=confirmed_nav]").inputValue(),"14.000000");
+      assert.equal(await page.locator("[name=related_confirmed_nav]").inputValue(),"12.000000");
       await page.locator("[name=confirmed_shares]").fill("2");
       await page.locator("[name=confirmed_nav]").fill("4.25");
       await page.locator("[name=related_confirmed_shares]").fill("1.39");
@@ -197,6 +218,12 @@ try {
       assert.equal(await page.locator("[name=related_confirmed_shares]").inputValue(),"1.390000");
       assert.equal(await page.locator("[name=related_confirmed_nav]").inputValue(),"6.110000");
       await page.locator("#close-editor").click();
+      const records=await page.evaluate(async()=>(await (await fetch("/api/ledger")).json()).records);
+      const conversion=records.find((record)=>record.type==="conversion");
+      assert.equal(conversion.confirmed_on,"2026-10-10");
+      const original=records.find((record)=>record.type==="subscription");
+      assert.equal(original.confirmed_on,"2026-10-01");
+      assert.equal(original.applied_at,"2026-09-30 10:05:00");
     }
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
     assert.deepEqual(errors,[]);

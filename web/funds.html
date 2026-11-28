@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="./sections.css">
   <link rel="stylesheet" href="./funds/funds.css">
   <script src="./vendor/lightweight-charts-5.2.0.js" defer></script>
-  <script src="./funds/app.mjs" type="module"></script>
+  <script src="./funds/app.mjs?v=watchlist-return-1" type="module"></script>
 </head>
 <body>
   <header class="app-header section-header">
@@ -46,7 +46,8 @@
           <div class="fund-controls" role="group" aria-label="基金列表范围">
             <button id="show-all" aria-pressed="true">全部基金</button>
             <button id="show-favorites" aria-pressed="false">自选基金</button>
-            <a class="file-control" href="https://sdc-fund-portfolio.finalnoodle2.chatgpt.site/watchlist/" rel="noreferrer">同步自选</a>
+            <a id="sync-watchlist" class="file-control" href="https://sdc-fund-portfolio.finalnoodle2.chatgpt.site/watchlist/" rel="noreferrer">同步自选</a>
+            <a id="manage-watchlist" class="file-control" href="https://sdc-fund-portfolio.finalnoodle2.chatgpt.site/watchlist/" rel="noreferrer" hidden>管理自选</a>
           </div>
           <label>基金类型<select id="type-filter"><option value="">全部类型</option></select></label>
           <div class="fund-controls">

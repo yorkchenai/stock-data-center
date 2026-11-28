@@ -7,7 +7,7 @@ import { createNavChart } from "./nav-chart.mjs";
 import { fetchFund, fetchFundDirectory, readPageData } from "./providers.mjs";
 import { watchValuation } from "./valuation.mjs";
 import { browserModelVersion, getPageSnapshot, snapshotNote, snapshotsEnabled } from "../snapshot-client.mjs";
-import { consumeWatchlistSync, startWatchlistSync, watchlistSyncPending } from "./watchlist-sync.mjs";
+import { consumeWatchlistSync, startWatchlistSync, watchlistSyncPending } from "./watchlist-sync.mjs?v=library-1";
 
 const $ = (id) => document.getElementById(id);
 function tag(name, text, attrs = {}) {
@@ -101,6 +101,7 @@ function restore() {
       hidden:Array.isArray(raw.hidden) ? raw.hidden : [],
       favorites:raw.favorites===true,
       syncedWatchlist:raw.syncedWatchlist===true,
+      libraryLinked:raw.libraryLinked===true,
       type:Object.hasOwn(FUND_CATEGORIES,raw.type) ? raw.type : "",
       sort:columns.some(([id])=>id===raw.sort && id!=="actions") ? raw.sort : "name",
       descending:raw.descending===true,
@@ -118,22 +119,37 @@ function save() {
 
 const syncLink=$("sync-watchlist");
 const syncResult=consumeWatchlistSync();
-const syncedCodes=Array.isArray(syncResult)?syncResult:null;
-if (syncedCodes!==null) {
-  state.favorites=state.syncedWatchlist=true;
-  state.type="";
-  save();
-}
+const cloudEntries=syncResult?.entries??null;
+const hasCloudLink=()=>online && (state.libraryLinked || state.syncedWatchlist);
 const entryUrl=new URL(location.href);
 const returningFromWatchlist=entryUrl.searchParams.get("sync")==="watchlist";
 if (returningFromWatchlist) {
   entryUrl.searchParams.delete("sync");
   history.replaceState(history.state,"",entryUrl);
 }
-function syncWatchlist(replace=false) {
-  if (syncLink && startWatchlistSync(syncLink.href,replace)) return true;
-  status("list-status","当前浏览器无法在本页同步自选，请打开同步自选页面。",true);
+function syncWatchlist(replace=false,action) {
+  const edit=action?{token:syncResult?.token,action}:undefined;
+  if (syncLink && startWatchlistSync(syncLink.href,replace,edit)) return true;
+  status("list-status","暂时无法连接云端清单，请重试。",true);
   return false;
+}
+function acceptCloudList() {
+  state.libraryLinked=true;
+  save();
+  renderList();
+}
+const conflictDialog=$("fund-list-conflict");
+const localEntries=()=>[...new Map(state.list.map(({code,favorite})=>[code,{code,favorite:Boolean(favorite)}])).values()];
+function showCloudList() {
+  const cloud=new Map(cloudEntries.map(({code,favorite})=>[code,favorite]));
+  const merged=syncResult.action==="merge" && !syncResult.error;
+  const hasConflict=!merged && !state.libraryLinked && localEntries().some(({code,favorite})=>cloud.get(code)!==favorite);
+  if (hasConflict) {
+    $("fund-list-conflict-status").textContent=syncResult.error??"";
+    conflictDialog.showModal();
+  }
+  else acceptCloudList();
+  if (syncResult.error) status("list-status",syncResult.error,true);
 }
 
 function recordFund(fund) {
@@ -209,10 +225,10 @@ async function loadListFund(code) {
   renderList();
 }
 function visibleListRows() {
-  const rows=state.favorites && syncedCodes!==null
-    ? syncedCodes.map((code)=>catalog.get(code)??{code,category:"unknown"})
-    : state.list.filter((entry)=>!state.favorites || entry.favorite);
-  return rows.filter((entry)=>!state.type || state.type===entry.category);
+  const rows=cloudEntries===null ? state.list : cloudEntries.map(({code,favorite})=>({
+    category:"unknown",...catalog.get(code),code,favorite,
+  }));
+  return rows.filter((entry)=>(!state.favorites || entry.favorite) && (!state.type || state.type===entry.category));
 }
 function refreshList() {
   if (selectedCode || listRefresh || !(local || online)) return;
@@ -287,9 +303,7 @@ function tableValue(id, row, fund, estimates) {
 function visibleColumns() { return columns.filter(([id])=>!state.hidden.includes(id) || ["name","actions"].includes(id)); }
 function renderList() {
   const active = visibleColumns();
-  const showingSynced=state.favorites && syncedCodes!==null;
-  const manage=$("manage-watchlist");
-  if (manage) manage.hidden=!showingSynced;
+  if (syncLink) syncLink.hidden=!online || cloudEntries!==null;
   $("show-all").setAttribute("aria-pressed",String(!state.favorites));
   $("show-favorites").setAttribute("aria-pressed",String(state.favorites));
   const header = tag("tr");
@@ -316,7 +330,7 @@ function renderList() {
   const rows = visibleListRows();
   const refresh = $("refresh-fund-list");
   refresh.hidden = !(local || online);
-  refresh.disabled = Boolean(listRefresh) || !rows.some(({code})=>loaded.get(code)?.mode!=="synthetic");
+  refresh.disabled = Boolean(listRefresh) || (!hasCloudLink() && !rows.some(({code})=>loaded.get(code)?.mode!=="synthetic"));
   refresh.textContent = listRefresh ? "刷新中…" : "刷新数据";
   loadVisibleListFunds(rows);
   const items = rows.map((row)=>{
@@ -336,8 +350,9 @@ function renderList() {
   const estimateCodes = !selectedCode && (local || online) && active.some(([id])=>valuationLabels.has(id))
     ? items.filter(({fund})=>fund?.mode!=="synthetic").map(({row})=>row.code) : [];
   if (!items.length) {
-    const message = showingSynced && !syncedCodes.length ? "同步名单为空，可点「管理自选」添加基金。" :
-      (state.list.length || showingSynced) ? "当前筛选下没有基金。" : "搜索并添加基金，或导入确认净值 JSON。";
+    const hasFunds=(cloudEntries??state.list).length>0;
+    const message = hasFunds && state.favorites && !state.type ? "在「全部基金」点 ☆，可加入自选。" :
+      hasFunds ? "当前筛选下没有基金。" : "搜索并添加基金，或导入确认净值 JSON。";
     target.replaceChildren(tag("tr"));
     target.firstChild.append(tag("td",message,{colspan:active.length,class:"empty-cell"}));
     if (!selectedCode) valuation.select(estimateCodes);
@@ -352,15 +367,26 @@ function renderList() {
       if (id==="name") {
         const link = tag("a",row.name ?? row.code,{href:url(row.code),title:row.name ?? row.code});
         link.addEventListener("click",navigateLink);
-        td.append(link,tag("small",row.code + (fund?.mode==="synthetic" ? " · 测试数据" : "")));
+        const star = tag("button",row.favorite ? "★" : "☆",{class:"fund-star",
+          "aria-label":`${row.favorite ? "取消自选" : "加入自选"} ${row.code}`,"aria-pressed":String(Boolean(row.favorite))});
+        star.addEventListener("click",()=>{
+          if (cloudEntries!==null) {syncWatchlist(true,{kind:"favorite",code:row.code,favorite:!row.favorite});return;}
+          if (hasCloudLink()) {syncWatchlist(true);return;}
+          row.favorite=!row.favorite;save();renderList();
+        });
+        const identity=tag("div");
+        identity.append(link,tag("small",row.code + (fund?.mode==="synthetic" ? " · 测试数据" : "")));
+        const cell=tag("div",null,{class:"fund-name-cell"});
+        cell.append(star,identity);
+        td.append(cell);
       } else if (id==="actions") {
-        if (!showingSynced) {
-          const star = tag("button",row.favorite ? "★" : "☆",{"aria-label":`${row.favorite ? "取消自选" : "加入自选"} ${row.code}`,"aria-pressed":String(Boolean(row.favorite))});
-          star.addEventListener("click",()=>{row.favorite=!row.favorite;save();renderList();});
-          const remove = tag("button","移除",{"aria-label":`移除 ${row.code}`});
-          remove.addEventListener("click",()=>{state.list=state.list.filter((entry)=>entry.code!==row.code);save();renderList();});
-          td.append(star," ",remove);
-        }
+        const remove = tag("button","移除",{"aria-label":`移除 ${row.code}`});
+        remove.addEventListener("click",()=>{
+          if (cloudEntries!==null) {syncWatchlist(true,{kind:"remove",code:row.code});return;}
+          if (hasCloudLink()) {syncWatchlist(true);return;}
+          state.list=state.list.filter((entry)=>entry.code!==row.code);save();renderList();
+        });
+        td.append(remove);
         if (local || online) {
           const refresh = tag("button",fund ? "刷新" : "载入",{"aria-label":`载入 ${row.code} 的净值`});
           refresh.disabled = listNavRequests.has(row.code);
@@ -391,9 +417,16 @@ function renderSearch(results, term) {
   for (const entry of results) {
     const row = tag("li");
     const add = tag("button","添加",{type:"button"});
-    add.disabled = state.list.some(({code})=>code===entry.code);
+    add.disabled = (cloudEntries??state.list).some(({code})=>code===entry.code);
     if (add.disabled) add.textContent="已添加";
     add.addEventListener("click",async ()=>{
+      if (hasCloudLink()) {
+        if (cloudEntries!==null) {
+          state.favorites=false;state.type="";$("type-filter").value="";save();
+          syncWatchlist(true,{kind:"add",code:entry.code});
+        } else syncWatchlist(true);
+        return;
+      }
       addFund(entry);
       add.disabled=true;
       add.textContent="已添加";
@@ -403,7 +436,9 @@ function renderSearch(results, term) {
       } else if (!loaded.has(entry.code)) status("list-status",`已添加 ${entry.code}。请导入该基金确认净值 JSON。`);
       else status("list-status",`已添加 ${entry.code}。`);
     });
-    row.append(tag("span",`${entry.name ?? "待核实名称"} · ${entry.code} · ${describe(entry.category)}`),add);
+    const name=tag("a",`${entry.name ?? "查看基金"} · ${entry.code} · ${describe(entry.category)}`,{href:url(entry.code)});
+    name.addEventListener("click",navigateLink);
+    row.append(name,add);
     list.append(row);
   }
   $("search-result").replaceChildren(list);
@@ -695,6 +730,8 @@ async function route({scrollToTop=true}={}) {
   navChart.clear();
   navMode="adjusted";
   if (!selectedCode) {
+    if (cloudEntries===null && hasCloudLink() && !watchlistSyncPending() && syncResult===undefined)
+      syncWatchlist(true);
     if (code) status("list-status","基金详情需要六位场外基金代码。",true);
     renderList();
     return;
@@ -718,7 +755,7 @@ async function route({scrollToTop=true}={}) {
     try {
       const fund = await loadFund(current,pinned);
       if (version!==routeNumber) return;
-      if (online) addFund(catalog.get(current));
+      if (online && !hasCloudLink()) addFund(catalog.get(current));
       status("detail-status","");
       syncButtons();
       renderIdentity(current,fund);
@@ -758,10 +795,10 @@ for (const [id,label] of Object.entries(FUND_CATEGORIES)) $("type-filter").appen
 $("type-filter").value=state.type;
 $("type-filter").addEventListener("change",()=>{state.type=$("type-filter").value;save();renderList();});
 $("show-all").addEventListener("click",()=>{state.favorites=false;save();renderList();});
-$("show-favorites").addEventListener("click",()=>{
-  state.favorites=true;save();
-  if (!state.syncedWatchlist || syncedCodes!==null || !syncWatchlist()) renderList();
-});
+$("show-favorites").addEventListener("click",()=>{state.favorites=true;save();renderList();});
+conflictDialog.addEventListener("cancel",(event)=>event.preventDefault());
+$("use-cloud-list").addEventListener("click",()=>{conflictDialog.close();acceptCloudList();});
+$("merge-fund-lists").addEventListener("click",()=>syncWatchlist(true,{kind:"merge",entries:localEntries()}));
 syncLink?.addEventListener("click",(event)=>{
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   if (syncWatchlist()) event.preventDefault();
@@ -782,7 +819,7 @@ $("fund-search").addEventListener("submit",async (event)=>{
   event.preventDefault();
   const number = ++searchNumber;
   const term = $("search-term").value.trim();
-  if (online && FUND_CODE.test(term)) {
+  if (online && FUND_CODE.test(term) && !hasCloudLink()) {
     history.pushState(null,"",url(term));
     await route();
     return;
@@ -806,7 +843,7 @@ $("fund-search").addEventListener("submit",async (event)=>{
 $("list-import").addEventListener("change",importFiles);
 $("detail-import").addEventListener("change",importFiles);
 $("refresh-fund-list").addEventListener("click",()=>{
-  if (!state.favorites || syncedCodes===null || !syncWatchlist()) refreshList();
+  if (!hasCloudLink() || !syncWatchlist(true)) refreshList();
 });
 $("back-to-funds").addEventListener("click",navigateLink);
 window.addEventListener("popstate",()=>void route());
@@ -828,10 +865,13 @@ if (loopback && !online) {
   try {local=(await readApi("/status")).local===true;}
   catch {local=false;}
 }
-$("data-mode").textContent = online ? "输入六位基金代码直接查询。名称可搜索并添加至列表。" :
+$("data-mode").textContent = online ? "按名称或六位代码搜索基金。" :
   local ? "本地模式可自动加载基金净值，也可导入数据包。" : "静态页面支持导入净值 JSON 或基金图表包。";
-if (syncResult===undefined && !entryUrl.searchParams.has("fund") &&
-    (returningFromWatchlist || (state.favorites && state.syncedWatchlist && !watchlistSyncPending())))
+if (syncResult===undefined && returningFromWatchlist && !entryUrl.searchParams.has("fund"))
   syncWatchlist(true);
 await route();
-if (syncResult===null) status("list-status","同步已失效，请重新点「同步自选」。",true);
+if (syncResult===null) status("list-status","同步已失效，请重新点「连接云端清单」。",true);
+if (cloudEntries!==null) {
+  showCloudList();
+  if (Number.isFinite(syncResult.scrollY)) window.scrollTo(0,syncResult.scrollY);
+}

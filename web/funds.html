@@ -7,9 +7,9 @@
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="./sections.css">
-  <link rel="stylesheet" href="./funds/funds.css">
+  <link rel="stylesheet" href="./funds/funds.css?v=fund-library-1">
   <script src="./vendor/lightweight-charts-5.2.0.js" defer></script>
-  <script src="./funds/app.mjs?v=watchlist-return-1" type="module"></script>
+  <script src="./funds/app.mjs?v=fund-library-1" type="module"></script>
 </head>
 <body>
   <header class="app-header section-header">
@@ -46,8 +46,7 @@
           <div class="fund-controls" role="group" aria-label="基金列表范围">
             <button id="show-all" aria-pressed="true">全部基金</button>
             <button id="show-favorites" aria-pressed="false">自选基金</button>
-            <a id="sync-watchlist" class="file-control" href="https://sdc-fund-portfolio.finalnoodle2.chatgpt.site/watchlist/" rel="noreferrer">同步自选</a>
-            <a id="manage-watchlist" class="file-control" href="https://sdc-fund-portfolio.finalnoodle2.chatgpt.site/watchlist/" rel="noreferrer" hidden>管理自选</a>
+            <a id="sync-watchlist" class="file-control" href="https://sdc-fund-portfolio.finalnoodle2.chatgpt.site/watchlist/" rel="noreferrer">连接云端清单</a>
           </div>
           <label>基金类型<select id="type-filter"><option value="">全部类型</option></select></label>
           <div class="fund-controls">
@@ -66,6 +65,15 @@
           </table>
         </div>
       </section>
+      <dialog id="fund-list-conflict" aria-labelledby="fund-list-conflict-title">
+        <h2 id="fund-list-conflict-title">本机和云端的基金清单有差异</h2>
+        <p>使用云端清单，或合并两份清单并保留两边的自选。</p>
+        <p id="fund-list-conflict-status" role="status"></p>
+        <div class="fund-controls">
+          <button type="button" id="use-cloud-list">使用云端</button>
+          <button type="button" id="merge-fund-lists" class="primary">合并清单</button>
+        </div>
+      </dialog>
       <p class="fund-note">估值为当日参考涨跌幅。最新涨幅按相邻两笔确认净值对应的复权总回报计算。收益周期截至各基金最后一笔确认净值。周按自然日、月和年按公历回推，取目标日期当日或之前最近一笔有效记录作为基准。数据不足显示 —。</p>
     </section>
     <section id="fund-detail" aria-labelledby="fund-title" hidden>

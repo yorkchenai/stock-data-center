@@ -436,8 +436,9 @@ function renderSearch(results, term) {
       } else if (!loaded.has(entry.code)) status("list-status",`已添加 ${entry.code}。请导入该基金确认净值 JSON。`);
       else status("list-status",`已添加 ${entry.code}。`);
     });
-    const name=tag("a",`${entry.name ?? "查看基金"} · ${entry.code} · ${describe(entry.category)}`,{href:url(entry.code)});
-    name.addEventListener("click",navigateLink);
+    const label=`${entry.name ?? "待核实名称"} · ${entry.code} · ${describe(entry.category)}`;
+    const name=hasCloudLink()?tag("a",label,{href:url(entry.code)}):tag("span",label);
+    if (hasCloudLink()) name.addEventListener("click",navigateLink);
     row.append(name,add);
     list.append(row);
   }

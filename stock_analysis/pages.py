@@ -57,7 +57,16 @@ def export_snapshot_runtime(destination, pages):
 
 
 def build_pages(destination, calendar_end=None, fund_index_snapshot=None, snapshot_service=None,
-                snapshot_runtime_output=None, snapshot_reference=None):
+                snapshot_runtime_output=None, snapshot_reference=None, portfolio_url=None):
+    portfolio_link = ""
+    if portfolio_url:
+        parsed = urlsplit(portfolio_url)
+        loopback = parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1")
+        if ((parsed.scheme != "https" and not loopback) or not parsed.hostname or parsed.username
+                or parsed.password or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
+            raise ValueError("个人持仓入口必须是独立 HTTPS 站点来源，本地验收可使用回环 HTTP。")
+        url = html.escape(f"{parsed.scheme}://{parsed.netloc}/", quote=True)
+        portfolio_link = f'<a class="file-control" href="{url}" rel="noreferrer">我的基金持仓</a>'
     if snapshot_runtime_output:
         runtime = Path(snapshot_runtime_output).resolve()
         pages = Path(destination).resolve()
@@ -124,7 +133,8 @@ def build_pages(destination, calendar_end=None, fund_index_snapshot=None, snapsh
     for filename in ("index.html", "funds.html"):
         page = output / filename
         page.write_text(page.read_text(encoding="utf-8").replace(
-            '<html lang="zh-CN">', f'<html lang="zh-CN" {attributes}>'), encoding="utf-8")
+            '<html lang="zh-CN">', f'<html lang="zh-CN" {attributes}>').replace(
+                '<!-- portfolio-entry -->', portfolio_link), encoding="utf-8")
     (output / "build-info.json").write_text(json.dumps({
         "schema_version": 1, "commit_sha": os.getenv("GITHUB_SHA", "local-unversioned"),
         "generated_at_utc": now.isoformat(), "calendar_end": end,
@@ -144,11 +154,13 @@ def main():
     parser.add_argument("--snapshot-service")
     parser.add_argument("--snapshot-runtime-output", type=Path)
     parser.add_argument("--snapshot-reference", type=Path, help="Build metadata exported with the deployed Worker")
+    parser.add_argument("--portfolio-url", default=os.getenv("PORTFOLIO_URL"))
     args = parser.parse_args()
     reference = json.loads(args.snapshot_reference.read_text(encoding="utf-8")) if args.snapshot_reference else None
     print(build_pages(args.output, fund_index_snapshot=args.fund_index_snapshot,
                       snapshot_service=args.snapshot_service,
-                      snapshot_runtime_output=args.snapshot_runtime_output, snapshot_reference=reference))
+                      snapshot_runtime_output=args.snapshot_runtime_output, snapshot_reference=reference,
+                      portfolio_url=args.portfolio_url))
 
 
 if __name__ == "__main__":

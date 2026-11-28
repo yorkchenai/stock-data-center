@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>我的基金持仓 · 行情研究室</title>
+  <link rel="stylesheet" href="/portfolio.css">
+  <link rel="icon" href="data:,">
+  <script type="module" src="/portfolio.mjs"></script>
+</head>
+<body>
+  <header><div class="shell masthead"><a href="https://yorkchenai.github.io/stock-data-center/funds.html">行情研究室 <span>场外基金</span></a>
+    <button id="logout" type="button" class="quiet" hidden>退出登录</button></div></header>
+  <main class="shell">
+    <div class="heading"><div><h1>我的基金持仓</h1><p id="as-of"></p></div>
+      <div class="actions" id="toolbar" hidden><a class="button quiet" href="/api/backup" download>导出备份</a><button id="add" class="primary" type="button">录入交易</button></div>
+    </div>
+    <p id="notice" role="status" aria-live="polite"></p>
+    <section class="panel login" id="login-panel" aria-labelledby="login-heading" hidden>
+      <h2 id="login-heading">管理员登录</h2>
+      <form id="login" method="post" action="/api/login">
+        <label>账号<input name="username" autocomplete="username" maxlength="100" required></label>
+        <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="primary">登录</button>
+      </form>
+    </section>
+    <div id="account" hidden>
+      <section aria-label="组合总览" id="metrics"></section>
+      <section class="panel" aria-labelledby="holdings-heading">
+        <div class="section-heading"><h2 id="holdings-heading">基金持仓</h2><button type="button" class="quiet" id="reload">更新行情</button></div>
+        <div id="holdings-info" aria-live="polite"></div>
+        <div class="table-scroll"><table id="holdings"><thead><tr><th>基金</th><th>持有份额</th><th>市值 / 占比</th><th>持仓成本</th><th>持仓浮盈亏</th><th>单位净值 / 日期</th></tr></thead><tbody></tbody></table></div>
+      </section>
+      <section class="panel" id="detail" aria-labelledby="fund-title" hidden>
+        <div class="section-heading"><h2 id="fund-title">基金详情</h2><button type="button" id="close-detail" class="quiet">关闭详情</button></div>
+        <p id="fund-issues" class="note"></p>
+        <div id="detail-metrics" class="mini-metrics"></div>
+        <div id="quote" class="note"></div>
+        <div class="section-heading"><h3>历史单位净值与个人份额成本</h3>
+          <label class="inline">显示区间<select id="chart-range"><option value="365">近一年</option><option value="90">近三月</option><option value="0">全部历史</option></select></label>
+        </div>
+        <p class="legend"><span>确认净值</span><span>每份持仓成本</span></p>
+        <canvas id="cost-chart" height="240" role="img" aria-label="历史单位净值与每份持仓成本"></canvas>
+        <p id="chart-note" class="note"></p>
+        <section aria-label="基金交易流水">
+          <h3>基金交易流水</h3>
+          <div class="table-scroll"><table id="fund-records" aria-label="基金交易流水"><thead><tr><th>交易日期</th><th>交易</th><th>份额</th><th>金额</th><th>操作</th></tr></thead><tbody></tbody></table></div>
+        </section>
+      </section>
+      <section class="panel" id="flow" aria-labelledby="flow-heading">
+        <div class="section-heading"><h2 id="flow-heading">全部交易流水</h2><label class="inline">基金筛选<select id="filter-fund"><option value="">全部基金</option></select></label></div>
+        <div class="table-scroll"><table id="records" aria-label="全部交易流水"><thead><tr><th>交易日期</th><th>基金 / 交易</th><th>份额</th><th>金额</th><th>操作</th></tr></thead><tbody></tbody></table></div>
+      </section>
+      <details class="panel"><summary>从备份恢复</summary>
+        <p class="note">恢复仅适用于空账本，会恢复交易、完整性设置和修改记录。备份包含个人交易，请保存在安全的位置。</p>
+        <form id="restore"><label>选择 JSON 备份<input type="file" accept=".json,application/json" id="backup-file" required></label><button class="quiet">恢复账本</button></form>
+      </details>
+    </div>
+    <dialog id="editor" aria-labelledby="editor-title">
+      <form id="entry">
+        <div class="section-heading"><h2 id="editor-title">录入交易</h2><button type="button" id="close-editor" class="quiet">取消</button></div>
+        <p id="editor-status" role="status"></p>
+        <div class="fields">
+          <label><span id="fund-code-label">基金代码</span><input name="fund_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label>
+          <label><span id="fund-name-label">基金名称</span><input name="fund_name" maxlength="100" placeholder="输入代码后自动查询"></label>
+          <label data-for="conversion">转入基金代码<input name="related_fund_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"></label>
+          <label data-for="conversion">转入基金名称<input name="related_fund_name" maxlength="100" placeholder="输入代码后自动查询"></label>
+          <label>交易类型<select name="type"><option value="subscription">申购</option><option value="redemption">赎回</option><option value="cash_dividend">现金分红</option><option value="reinvestment">红利再投资</option><option value="conversion">基金转换</option></select></label>
+          <label>申请日期（北京时间）<input name="applied_at" type="date" required></label>
+          <label data-for="subscription redemption cash_dividend reinvestment"><span id="amount-label">申请金额（含费，元）</span><input name="amount" inputmode="decimal"></label>
+          <label data-for="subscription redemption reinvestment conversion"><span id="shares-label">确认份额</span><input name="confirmed_shares" inputmode="decimal"></label>
+          <label data-for="subscription redemption reinvestment conversion"><span id="nav-label">确认单位净值</span><input name="confirmed_nav" inputmode="decimal"></label>
+          <label data-for="conversion">转入确认份额<input name="related_confirmed_shares" inputmode="decimal"></label>
+          <label data-for="conversion">转入确认净值<input name="related_confirmed_nav" inputmode="decimal"></label>
+          <label data-for="subscription redemption reinvestment conversion">手续费（元）<input name="fee" inputmode="decimal"></label>
+        </div>
+        <div class="nav-lookup" data-for="subscription redemption reinvestment conversion" hidden>
+          <button id="lookup-nav" type="button" class="quiet" hidden>带入此净值</button>
+          <span class="note" id="nav-lookup-status" role="status"></span>
+        </div>
+        <div class="nav-lookup" data-for="conversion" hidden>
+          <button id="lookup-related-nav" type="button" class="quiet" hidden>带入转入净值</button>
+          <span class="note" id="related-nav-lookup-status" role="status"></span>
+        </div>
+        <p class="note" id="type-hint"></p>
+        <p class="note" id="calculation-status" aria-live="polite" hidden></p>
+        <label>备注<textarea name="notes" rows="2" maxlength="500"></textarea></label>
+        <div class="actions footer"><button type="submit" class="primary">保存交易</button></div>
+      </form>
+    </dialog>
+    <dialog id="audit" aria-labelledby="audit-title">
+      <div class="section-heading"><h2 id="audit-title">修改记录</h2><button class="quiet" type="button" id="close-audit">关闭</button></div>
+      <div id="audit-records"></div>
+    </dialog>
+  </main>
+</body>
+</html>

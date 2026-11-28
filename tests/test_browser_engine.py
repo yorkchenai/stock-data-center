@@ -83,10 +83,14 @@ class PagesBuildTests(TestCase):
             runtime = root / "runtime"
             with self.assertRaises(ValueError):
                 build_pages(root / "site", snapshot_runtime_output=root / "site" / "runtime")
-            output = build_pages(root / "site", calendar_end="2026-11-30", snapshot_runtime_output=runtime)
+            output = build_pages(root / "site", calendar_end="2026-11-30", snapshot_runtime_output=runtime,
+                                 portfolio_url="https://portfolio.example.test/")
             html = (output / "index.html").read_text()
             self.assertIn('data-mode="pages"', html)
             self.assertIn('src="./app.mjs"', html)
+            self.assertIn('href="https://portfolio.example.test/" rel="noreferrer">我的基金持仓',
+                          (output / "funds.html").read_text())
+            self.assertNotIn("portfolio.example.test", html)
             self.assertTrue((output / "providers.mjs").exists())
             self.assertTrue((output / ".nojekyll").exists())
             self.assertEqual(json.loads((output / "build-info.json").read_text())['calendar_end'], "2026-11-30")

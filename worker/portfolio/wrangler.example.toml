@@ -1,0 +1,18 @@
+name = "sdc-fund-portfolio-stage"
+main = "worker.mjs"
+compatibility_date = "2026-07-30"
+workers_dev = true
+
+[assets]
+directory = "./ui"
+binding = "ASSETS"
+run_worker_first = true
+
+[observability]
+enabled = false
+
+[[d1_databases]]
+binding = "PORTFOLIO_DB"
+database_name = "sdc-fund-portfolio-stage"
+database_id = "<standalone-staging-database-id>"
+migrations_dir = "migrations"

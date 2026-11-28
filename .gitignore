@@ -3,6 +3,9 @@ __pycache__/
 .venv/
 work/
 node_modules/
+.wrangler/
+worker/portfolio/.dev.vars*
+worker/portfolio/wrangler.local.toml
 # New runs are reproducible artifacts, retained locally, never overwrite legacy data.
 results/sh*_stock/
 results/sz*_stock/

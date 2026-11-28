@@ -7,6 +7,7 @@ import { createNavChart } from "./nav-chart.mjs";
 import { fetchFund, fetchFundDirectory, readPageData } from "./providers.mjs";
 import { watchValuation } from "./valuation.mjs";
 import { browserModelVersion, getPageSnapshot, snapshotNote, snapshotsEnabled } from "../snapshot-client.mjs";
+import { consumeWatchlistSync, startWatchlistSync, watchlistSyncPending } from "./watchlist-sync.mjs";
 
 const $ = (id) => document.getElementById(id);
 function tag(name, text, attrs = {}) {
@@ -99,6 +100,7 @@ function restore() {
       list:Array.isArray(raw.list) ? raw.list.filter((v)=>typeof v?.code==="string" && FUND_CODE.test(v.code)) : [],
       hidden:Array.isArray(raw.hidden) ? raw.hidden : [],
       favorites:raw.favorites===true,
+      syncedWatchlist:raw.syncedWatchlist===true,
       type:Object.hasOwn(FUND_CATEGORIES,raw.type) ? raw.type : "",
       sort:columns.some(([id])=>id===raw.sort && id!=="actions") ? raw.sort : "name",
       descending:raw.descending===true,
@@ -112,6 +114,26 @@ for (const row of state.list) catalog.set(row.code,row);
 function save() {
   try { localStorage.setItem(key,JSON.stringify(state)); }
   catch { status("list-status","当前浏览器无法保存列表设置，本次会话仍可使用。",true); }
+}
+
+const syncLink=$("sync-watchlist");
+const syncResult=consumeWatchlistSync();
+const syncedCodes=Array.isArray(syncResult)?syncResult:null;
+if (syncedCodes!==null) {
+  state.favorites=state.syncedWatchlist=true;
+  state.type="";
+  save();
+}
+const entryUrl=new URL(location.href);
+const returningFromWatchlist=entryUrl.searchParams.get("sync")==="watchlist";
+if (returningFromWatchlist) {
+  entryUrl.searchParams.delete("sync");
+  history.replaceState(history.state,"",entryUrl);
+}
+function syncWatchlist(replace=false) {
+  if (syncLink && startWatchlistSync(syncLink.href,replace)) return true;
+  status("list-status","当前浏览器无法在本页同步自选，请打开同步自选页面。",true);
+  return false;
 }
 
 function recordFund(fund) {
@@ -187,7 +209,10 @@ async function loadListFund(code) {
   renderList();
 }
 function visibleListRows() {
-  return state.list.filter((entry)=>(!state.favorites || entry.favorite) && (!state.type || state.type===entry.category));
+  const rows=state.favorites && syncedCodes!==null
+    ? syncedCodes.map((code)=>catalog.get(code)??{code,category:"unknown"})
+    : state.list.filter((entry)=>!state.favorites || entry.favorite);
+  return rows.filter((entry)=>!state.type || state.type===entry.category);
 }
 function refreshList() {
   if (selectedCode || listRefresh || !(local || online)) return;
@@ -262,6 +287,9 @@ function tableValue(id, row, fund, estimates) {
 function visibleColumns() { return columns.filter(([id])=>!state.hidden.includes(id) || ["name","actions"].includes(id)); }
 function renderList() {
   const active = visibleColumns();
+  const showingSynced=state.favorites && syncedCodes!==null;
+  const manage=$("manage-watchlist");
+  if (manage) manage.hidden=!showingSynced;
   $("show-all").setAttribute("aria-pressed",String(!state.favorites));
   $("show-favorites").setAttribute("aria-pressed",String(state.favorites));
   const header = tag("tr");
@@ -308,7 +336,8 @@ function renderList() {
   const estimateCodes = !selectedCode && (local || online) && active.some(([id])=>valuationLabels.has(id))
     ? items.filter(({fund})=>fund?.mode!=="synthetic").map(({row})=>row.code) : [];
   if (!items.length) {
-    const message = state.list.length ? "当前筛选下没有基金。" : "搜索并添加基金，或导入确认净值 JSON。";
+    const message = showingSynced && !syncedCodes.length ? "同步名单为空，可点「管理自选」添加基金。" :
+      (state.list.length || showingSynced) ? "当前筛选下没有基金。" : "搜索并添加基金，或导入确认净值 JSON。";
     target.replaceChildren(tag("tr"));
     target.firstChild.append(tag("td",message,{colspan:active.length,class:"empty-cell"}));
     if (!selectedCode) valuation.select(estimateCodes);
@@ -325,11 +354,13 @@ function renderList() {
         link.addEventListener("click",navigateLink);
         td.append(link,tag("small",row.code + (fund?.mode==="synthetic" ? " · 测试数据" : "")));
       } else if (id==="actions") {
-        const star = tag("button",row.favorite ? "★" : "☆",{"aria-label":`${row.favorite ? "取消自选" : "加入自选"} ${row.code}`,"aria-pressed":String(Boolean(row.favorite))});
-        star.addEventListener("click",()=>{row.favorite=!row.favorite;save();renderList();});
-        const remove = tag("button","移除",{"aria-label":`移除 ${row.code}`});
-        remove.addEventListener("click",()=>{state.list=state.list.filter((entry)=>entry.code!==row.code);save();renderList();});
-        td.append(star," ",remove);
+        if (!showingSynced) {
+          const star = tag("button",row.favorite ? "★" : "☆",{"aria-label":`${row.favorite ? "取消自选" : "加入自选"} ${row.code}`,"aria-pressed":String(Boolean(row.favorite))});
+          star.addEventListener("click",()=>{row.favorite=!row.favorite;save();renderList();});
+          const remove = tag("button","移除",{"aria-label":`移除 ${row.code}`});
+          remove.addEventListener("click",()=>{state.list=state.list.filter((entry)=>entry.code!==row.code);save();renderList();});
+          td.append(star," ",remove);
+        }
         if (local || online) {
           const refresh = tag("button",fund ? "刷新" : "载入",{"aria-label":`载入 ${row.code} 的净值`});
           refresh.disabled = listNavRequests.has(row.code);
@@ -727,7 +758,14 @@ for (const [id,label] of Object.entries(FUND_CATEGORIES)) $("type-filter").appen
 $("type-filter").value=state.type;
 $("type-filter").addEventListener("change",()=>{state.type=$("type-filter").value;save();renderList();});
 $("show-all").addEventListener("click",()=>{state.favorites=false;save();renderList();});
-$("show-favorites").addEventListener("click",()=>{state.favorites=true;save();renderList();});
+$("show-favorites").addEventListener("click",()=>{
+  state.favorites=true;save();
+  if (!state.syncedWatchlist || syncedCodes!==null || !syncWatchlist()) renderList();
+});
+syncLink?.addEventListener("click",(event)=>{
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (syncWatchlist()) event.preventDefault();
+});
 for (const [id,label] of optionalColumns) {
   const check = tag("input",null,{type:"checkbox"});
   check.checked=!state.hidden.includes(id);
@@ -767,7 +805,9 @@ $("fund-search").addEventListener("submit",async (event)=>{
 });
 $("list-import").addEventListener("change",importFiles);
 $("detail-import").addEventListener("change",importFiles);
-$("refresh-fund-list").addEventListener("click",refreshList);
+$("refresh-fund-list").addEventListener("click",()=>{
+  if (!state.favorites || syncedCodes===null || !syncWatchlist()) refreshList();
+});
 $("back-to-funds").addEventListener("click",navigateLink);
 window.addEventListener("popstate",()=>void route());
 $("valuation-refresh").addEventListener("click",valuation.refresh);
@@ -790,4 +830,8 @@ if (loopback && !online) {
 }
 $("data-mode").textContent = online ? "输入六位基金代码直接查询。名称可搜索并添加至列表。" :
   local ? "本地模式可自动加载基金净值，也可导入数据包。" : "静态页面支持导入净值 JSON 或基金图表包。";
+if (syncResult===undefined && !entryUrl.searchParams.has("fund") &&
+    (returningFromWatchlist || (state.favorites && state.syncedWatchlist && !watchlistSyncPending())))
+  syncWatchlist(true);
 await route();
+if (syncResult===null) status("list-status","同步已失效，请重新点「同步自选」。",true);

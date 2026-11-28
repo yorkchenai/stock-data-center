@@ -125,6 +125,16 @@
 #valuation-panel .risk-grid {margin-bottom: 0;}
 .chart-description {min-height: 20px;}
 .chart-extremes {display: flex; flex-wrap: wrap; gap: 3px 16px; margin: 6px 0 0; font-variant-numeric: tabular-nums;}
+.fund-axis-legend, .fund-chart-readout {display: flex; flex-wrap: wrap; gap: 3px 16px; font-variant-numeric: tabular-nums;}
+.fund-axis-legend {justify-content: space-between; margin: 3px 0 8px;}
+.fund-chart-readout {min-height: 20px; margin-top: 6px;}
+#nav-axis-label, #nav-hover {color: #087e75;}
+.return-axis-label, #hover-values {color: #3f629f;}
+#nav-axis-label::before, .return-axis-label::before {content: ""; display: inline-block; width: 14px; margin-inline-end: 5px; vertical-align: .25em; border-top: 2px solid currentColor;}
+.return-axis-label::before {border-top-style: dashed;}
+#nav-extremes::before {content: "净值"; color: #087e75;}
+#returns-extremes::before {content: "累计收益率"; color: #3f629f;}
+#returns-unavailable:empty {display: none;}
 .risk-grid {display: grid; grid-template-columns: repeat(auto-fit, minmax(145px,1fr)); gap: 8px; margin-bottom: 13px;}
 .risk-metric {padding: 9px; background: #f8fafb;}
 .risk-metric > span, .risk-metric strong {display: block;}
@@ -141,6 +151,7 @@
   .list-panel {padding: 0;}
   #fund-table th:first-child, #fund-table td:first-child {width: 140px; min-width: 140px; max-width: 140px;}
   .fund-chart {height: 250px;}
+  #fund-visible-range {order: 1; flex: 1 0 100%; text-align: right;}
   .drawdown-chart {height: 150px;}
 }
 

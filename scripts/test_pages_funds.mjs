@@ -133,6 +133,7 @@ try {
         return label && Number.isFinite(point) && Math.abs(label.x-point)<1 &&
           label.left>=0 && label.right<=label.width && label.y>0 && label.y<label.height;
       };
+      window.fundChart = ()=>charts.get("returns-chart");
     });
     const page = await context.newPage();
     const checkExtreme = (id,date,value)=>page.waitForFunction(({id,date,value})=>window.extremeLabelIsDrawn(id,date,value),
@@ -189,23 +190,51 @@ try {
     await page.screenshot({path:path.join(output,`funds-list-${width}.png`),fullPage:true});
     await page.getByRole("link",{name:first.name}).click();
     await page.locator("#returns-chart canvas").first().waitFor();
-    await page.locator("#nav-chart canvas").first().waitFor();
     assert.equal(await page.locator("#fund-latest-change").textContent(),"+0.21%");
     const changeBox = await page.locator("#fund-latest-change").boundingBox();
     const navBox = await page.locator("#fund-nav").boundingBox();
     assert.ok(changeBox.x+changeBox.width<=navBox.x && Math.abs(changeBox.y-navBox.y)<1);
-    assert.ok((await page.locator("#returns-title").boundingBox()).y < (await page.locator("#nav-chart-title").boundingBox()).y);
+    assert.equal(await page.locator("#returns-title").textContent(),"基金净值与累计收益率");
+    const axes = page.locator(".fund-axis-legend");
+    const left = await axes.getByText("左轴 · 复权净值").boundingBox();
+    const right = await axes.getByText("右轴 · 累计收益率").boundingBox();
+    assert.ok(left.x+left.width<right.x);
+    const chart = page.locator("#returns-chart");
+    await chart.scrollIntoViewIfNeeded();
+    const latest = first.rows.at(-1).date;
+    const plot = await chart.boundingBox();
+    const {start,leftWidth,rightWidth,x} = await page.evaluate((end)=>{
+      const current=window.fundChart();
+      return {
+        start:current.timeScale().getVisibleRange().from,
+        leftWidth:current.priceScale("left").width(),
+        rightWidth:current.priceScale("right").width(),
+        x:current.timeScale().timeToCoordinate(end),
+      };
+    },latest);
+    assert.ok(leftWidth>=50 && rightWidth>=57);
+    assert.ok(Number.isFinite(x));
+    await page.mouse.move(plot.x+leftWidth+x,plot.y+plot.height*.5);
+    const navHover=await page.locator("#nav-hover").textContent();
+    const hovered=first.rows.slice(-3).find(({date})=>navHover.startsWith(date));
+    assert.ok(hovered,navHover);
+    assert.equal(navHover,`${hovered.date} · ${hovered.unit_nav.toFixed(4)}`);
+    const growth=hovered.return_index/first.rows.find(({date})=>date===start).return_index-1;
+    assert.equal(await page.locator("#hover-values").textContent(),
+      `${hovered.date} · 累计收益率 +${(100*growth).toFixed(2)}%`);
+    await page.mouse.move(0,0);
+    await chart.locator("..").screenshot({path:path.join(output,`fund-dual-axis-${width}.png`)});
     const extrema = ()=>page.locator(".chart-extremes span").allTextContents();
     const oneYearExtrema = await extrema();
     assert.equal(oneYearExtrema.length,6);
     assert.ok(oneYearExtrema.every((label,index)=>new RegExp(`${index%2 ? "谷" : "峰"}值 \\d{4}-\\d{2}-\\d{2} ·`).test(label)));
-    for (const [index,id] of ["returns-chart","nav-chart","drawdown-chart"].entries()) {
-      for (const label of oneYearExtrema.slice(index*2,index*2+2)) {
+    for (const [id,summary] of [["returns-chart","nav-extremes"],["drawdown-chart","drawdown-extremes"]]) {
+      for (const label of await page.locator(`#${summary} span`).allTextContents()) {
         const [,date,,value] = label.split(" ");
         await checkExtreme(id,date,value);
       }
     }
-    assert.equal(await page.locator("#nav-chart").evaluate((chart)=>
+    assert.equal(await page.locator("#returns-chart").evaluate((chart)=>
       [...chart.childNodes].some((node)=>node.nodeType===3&&node.textContent.trim())),false);
     assert.match(await page.locator("#returns-source").innerText(),/基金净值来源.*最新确认/);
     assert.ok(page.url().endsWith("/funds.html?fund=000001"));
@@ -266,6 +295,20 @@ try {
       await page.mouse.move(bound.x+bound.width/2,bound.y+100);
       assert.equal(await page.locator("#core-metrics").innerText(),stats);
       assert.deepEqual(await extrema(),threeYearExtrema);
+      const viewport = await page.evaluate(async ()=>{
+        const scale = window.fundChart().timeScale();
+        const full = scale.getVisibleLogicalRange();
+        scale.setVisibleLogicalRange({from:Math.floor((full.from+full.to)/2),to:Math.floor(full.to)-20});
+        await new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        return scale.getVisibleLogicalRange();
+      });
+      await page.locator("#nav-raw").click();
+      await page.waitForFunction(({from,to})=>{
+        const next=window.fundChart().timeScale().getVisibleLogicalRange();
+        return Math.abs(next.from-from)<0.01 && Math.abs(next.to-to)<0.01;
+      },viewport);
+      assert.equal(await page.locator("#nav-axis-label").textContent(),"左轴 · 原始单位净值");
+      await page.locator("#nav-adjusted").click();
     }
     assert.equal(await page.locator("#benchmark-disclosure").innerText(),"合成比较基准");
     assert.equal(await page.locator("#benchmark-source [data-date-kind=effective]").textContent(),first.inception);
@@ -307,10 +350,11 @@ try {
     await page.locator("#detail-import").setInputFiles({name:"segmented-nav.json",mimeType:"application/json",
       buffer:Buffer.from(JSON.stringify(segmented))});
     await dataPanel.getByText("已载入 000001。",{exact:true}).waitFor();
-    await checkExtreme("nav-chart","2026-06-30","2.5550");
+    await checkExtreme("returns-chart","2026-06-30","2.5550");
     await page.getByRole("button",{name:"全部历史",exact:true}).click();
-    await checkExtreme("nav-chart","2026-06-30","2.5550");
-    await checkExtreme("nav-chart","2024-02-02","0.5099");
+    await checkExtreme("returns-chart","2026-06-30","2.5550");
+    await checkExtreme("returns-chart","2024-02-02","0.5099");
+    assert.match(await page.locator("#returns-unavailable").textContent(),/暂无可计算的累计收益率/);
     const gap = {...segmented,rows:segmented.rows.map((row,index)=>index===levels.length-1
       ? {...row,return_index:null,return_issue:"unrecognized_event"} : row)};
     await page.locator("#detail-import").setInputFiles({name:"missing-latest-return.json",mimeType:"application/json",

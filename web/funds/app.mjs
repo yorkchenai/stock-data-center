@@ -1,9 +1,9 @@
 import { FUND_CATEGORIES, FUND_CODE, MAX_FILE_BYTES, fundFreshness, normalizeFund, searchCatalog, shanghaiToday } from "./data.mjs";
 import { FUND_RISK_REFERENCE, PERIODS, analyzePerformance, periodReturn, periodStart, selectWindow } from "./performance.mjs";
 import { RISK_RATINGS, riskRating, riskRatingRange } from "./risk-ratings.mjs";
-import { createFundCharts } from "./charts.mjs";
+import { createDrawdownChart } from "./charts.mjs?v=dual-axis-1";
 import { BUNDLE_BYTES, normalizeChartFile } from "./chart-data.mjs";
-import { createNavChart } from "./nav-chart.mjs";
+import { createNavReturnChart } from "./nav-chart.mjs?v=dual-axis-1";
 import { fetchFund, fetchFundDirectory, readPageData } from "./providers.mjs";
 import { watchValuation } from "./valuation.mjs";
 import { browserModelVersion, getPageSnapshot, snapshotNote, snapshotsEnabled } from "../snapshot-client.mjs";
@@ -61,10 +61,15 @@ const riskFormulas = {
   sortino:`（平均日收益 − 日参考收益率）÷ 下行偏差 × √${riskSessions}。${dailyReferenceFormula} 最低可接受收益率（MAR）为年化 ${annualReference}。下行偏差是各日低于参考收益率的差额的均方根，达到参考值的日期按零计入。`,
 };
 $("risk-reference-note").textContent = `夏普比率及索提诺比率采用固定年化参考收益率${annualReference}计算，年化基数为${riskSessions}个交易日。评价等级为系统自定义经验标准，不构成投资建议。`;
-const charts = createFundCharts();
-const navChart = createNavChart($("nav-chart"),$("nav-hover"),$("nav-extremes"));
+const drawdownChart = createDrawdownChart();
+const navChart = createNavReturnChart({
+  element:$("returns-chart"),navReadout:$("nav-hover"),returnReadout:$("hover-values"),
+  navExtremes:$("nav-extremes"),returnExtremes:$("returns-extremes"),visibleRange:$("fund-visible-range"),
+  returnStatus:$("returns-unavailable"),
+});
 let navMode = "adjusted";
 let navRange = [];
+let returnPoints = [];
 const loopback = ["127.0.0.1","localhost","[::1]"].includes(location.hostname);
 const online = document.documentElement.dataset.mode==="pages";
 let pageConfig;
@@ -647,12 +652,13 @@ function renderAnalysis(requestedStart, requestedEnd) {
       range = end>latest ? {error:"结束日期超出已载入历史。",rows:[]} : selectWindow(fund,start,end);
     } catch (error) {range={error:error.message,rows:[]};}
   }
-  navRange=[chartStart,chartEnd];
-  renderNav(fund,...navRange);
   const shared=sharedSnapshots.get(selectedCode);
   const precomputed=!requestedStart && !requestedEnd && shared?.data.risk?.windows[rangeKey];
   const analysis=precomputed || analyzePerformance(fund,range);
   const {start: statsStart, end: statsEnd} = precomputed || range;
+  navRange=[statsStart ?? chartStart,statsEnd ?? chartEnd];
+  returnPoints=analysis.points.fund;
+  renderNav(fund);
   const interval = statsStart ? `${statsStart} 至 ${statsEnd}` : "—";
   const unavailable = precomputed ? (statsStart ? null : precomputed.metrics.return.reason) : range.error;
   $("range-status").textContent = unavailable ?? `统计范围 ${interval} · 已载入净值 ${fund.rows[0].date} 至 ${latest}`;
@@ -681,23 +687,22 @@ function renderAnalysis(requestedStart, requestedEnd) {
   $("risk-assumptions").textContent = `风险指标使用分红再投资日收益，按 ${riskSessions} 个交易日年化。`;
   $("returns-source").hidden = !fund;
   $("returns-source").textContent = fund ? `基金净值来源 ${fund.source.name} · 最新确认 ${latest}` : "";
-  charts.display("fund",analysis.points.fund);
-  charts.display("drawdown",analysis.points.drawdown);
+  drawdownChart.display(analysis.points.drawdown);
 }
-function renderNav(fund,start,end) {
+function renderNav(fund,keepViewport=false) {
   const adjusted=navMode==="adjusted";
   $("nav-adjusted").setAttribute("aria-pressed",String(adjusted));
   $("nav-raw").setAttribute("aria-pressed",String(!adjusted));
+  $("nav-axis-label").textContent=adjusted ? "左轴 · 复权净值" : "左轴 · 原始单位净值";
   $("nav-gaps").hidden=true;
   $("nav-gap-list").replaceChildren();
   try {
-    const {gaps,anchors}=navChart.display(fund,navMode,start,end);
-    const provenance=fund ? ` · 最新确认 ${fund.rows.at(-1).date} · ${fund.source.name}` : "";
+    const {gaps,anchors}=navChart.display(fund,navMode,...navRange,returnPoints,keepViewport);
     const basis=adjusted
       ? (anchors.length ? `分段复权，每段以 ${anchors[0]}${anchors.length>1?` 等 ${anchors.length} 个锚点`:""}的单位净值为起点，按总回报指数比例换算。`
         : "所选区间暂无可核验的复权净值。")
       : "基金确认的原始单位净值。";
-    $("nav-basis").textContent=basis+(fund?" 净值按每份显示。":"")+provenance;
+    $("nav-basis").textContent=basis+(fund?" 净值按每份显示。":"");
     $("nav-gaps").hidden=!adjusted||!gaps.length;
     if (!$("nav-gaps").hidden) {
       $("nav-gaps").querySelector("summary").textContent=`${gaps.length} 个复权净值缺口`;
@@ -849,8 +854,8 @@ $("refresh-fund-list").addEventListener("click",()=>{
 $("back-to-funds").addEventListener("click",navigateLink);
 window.addEventListener("popstate",()=>void route());
 $("valuation-refresh").addEventListener("click",valuation.refresh);
-$("nav-adjusted").addEventListener("click",()=>{navMode="adjusted";renderNav(loaded.get(selectedCode),...navRange);});
-$("nav-raw").addEventListener("click",()=>{navMode="raw";renderNav(loaded.get(selectedCode),...navRange);});
+$("nav-adjusted").addEventListener("click",()=>{navMode="adjusted";renderNav(loaded.get(selectedCode),true);});
+$("nav-raw").addEventListener("click",()=>{navMode="raw";renderNav(loaded.get(selectedCode),true);});
 for (const [id,label] of detailPeriods) {
   const button = tag("button",label,{type:"button","data-period":id});
   button.addEventListener("click",()=>{rangeKey=id;syncButtons();if(id!=="custom") renderAnalysis();});

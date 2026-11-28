@@ -33,8 +33,7 @@ async function fund(code) {
   url.searchParams.set("release",process.env.GITHUB_RUN_ID || "smoke");
   const response = await page.goto(url.href);
   assert.equal(response.status(),200);
-  await page.locator("#nav-chart canvas").first().waitFor({timeout:40_000});
-  await page.locator("#returns-chart canvas").first().waitFor({timeout:15_000});
+  await page.locator("#returns-chart canvas").first().waitFor({timeout:40_000});
   await page.locator("#drawdown-chart canvas").first().waitFor({timeout:15_000});
   assert.match(await page.locator("#fund-nav").innerText(),/^\d+\.\d+$/);
   assert.equal(await page.locator("#core-metrics article").count(),5);
